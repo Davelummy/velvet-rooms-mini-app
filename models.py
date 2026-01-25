@@ -1,17 +1,19 @@
-from datetime import datetime
 from sqlalchemy import (
+    Boolean,
     Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
     Integer,
     BigInteger,
     String,
-    Float,
-    DateTime,
-    ForeignKey,
-    Boolean,
     Text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy.dialects.postgresql import JSONB, ARRAY
+
+from shared.time_utils import utcnow
 
 Base = declarative_base()
 
@@ -21,6 +23,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
     telegram_id = Column(BigInteger, unique=True, nullable=False)
+    public_id = Column(String(4), unique=True, index=True)
     username = Column(String)
     first_name = Column(String)
     last_name = Column(String)
@@ -28,7 +31,7 @@ class User(Base):
     role = Column(String, nullable=False)
     status = Column(String, default="inactive")
     wallet_balance = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     model_profile = relationship("ModelProfile", back_populates="user", uselist=False)
     client_profile = relationship("ClientProfile", back_populates="user", uselist=False)
@@ -41,12 +44,17 @@ class ModelProfile(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     display_name = Column(String)
     verification_status = Column(String, default="pending")
+    verification_submitted_at = Column(DateTime)
     approved_at = Column(DateTime)
     approved_by = Column(Integer)
     verification_photos = Column(ARRAY(Text))
     verification_video_file_id = Column(String)
+    verification_video_url = Column(String)
+    verification_video_path = Column(String)
+    is_online = Column(Boolean, default=False)
+    last_seen_at = Column(DateTime)
     total_earnings = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     user = relationship("User", back_populates="model_profile")
 
@@ -57,6 +65,9 @@ class ClientProfile(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     total_spent = Column(Float, default=0.0)
+    access_fee_paid = Column(Boolean, default=False)
+    access_fee_escrow_id = Column(Integer, ForeignKey("escrow_accounts.id"))
+    access_granted_at = Column(DateTime)
 
     user = relationship("User", back_populates="client_profile")
 
@@ -71,9 +82,16 @@ class Session(Base):
     session_type = Column(String)
     package_price = Column(Float)
     status = Column(String, default="pending")
+    client_confirmed = Column(Boolean, default=False)
+    model_confirmed = Column(Boolean, default=False)
+    duration_minutes = Column(Integer)
+    started_at = Column(DateTime)
+    ended_at = Column(DateTime)
     actual_start = Column(DateTime)
     scheduled_end = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+    escrow_id = Column(Integer, ForeignKey("escrow_accounts.id"))
+    created_at = Column(DateTime, default=utcnow)
 
 
 class DigitalContent(Base):
@@ -87,10 +105,10 @@ class DigitalContent(Base):
     price = Column(Float)
     telegram_file_id = Column(String)
     preview_file_id = Column(String)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=False)
     total_sales = Column(Integer, default=0)
     total_revenue = Column(Float, default=0.0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class ContentPurchase(Base):
@@ -101,7 +119,9 @@ class ContentPurchase(Base):
     client_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     transaction_id = Column(Integer)
     price_paid = Column(Float)
-    purchased_at = Column(DateTime, default=datetime.utcnow)
+    escrow_id = Column(Integer, ForeignKey("escrow_accounts.id"))
+    status = Column(String, default="pending")
+    purchased_at = Column(DateTime, default=utcnow)
 
 
 class Transaction(Base):
@@ -116,19 +136,34 @@ class Transaction(Base):
     status = Column(String)
     metadata_json = Column(JSONB)
     completed_at = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class EscrowAccount(Base):
     __tablename__ = "escrow_accounts"
 
     id = Column(Integer, primary_key=True)
-    session_id = Column(Integer, ForeignKey("sessions.id"), nullable=False)
-    amount = Column(Float)
+    escrow_ref = Column(String, unique=True, nullable=False)
+    escrow_type = Column(String, nullable=False)
+    related_id = Column(Integer)
+    payer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    receiver_id = Column(Integer, ForeignKey("users.id"))
+    amount = Column(Float, nullable=False)
+    platform_fee = Column(Float, nullable=False)
+    receiver_payout = Column(Float)
     status = Column(String, default="held")
+    transaction_id = Column(Integer, ForeignKey("transactions.id"))
+    held_at = Column(DateTime, default=utcnow)
+    released_at = Column(DateTime)
+    auto_release_at = Column(DateTime)
+    release_condition = Column(String)
+    release_condition_met = Column(Boolean, default=False)
     dispute_reason = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
+Index("idx_escrow_type", EscrowAccount.escrow_type)
+Index("idx_escrow_status", EscrowAccount.status)
+Index("idx_escrow_related", EscrowAccount.escrow_type, EscrowAccount.related_id)
+Index("idx_escrow_auto_release", EscrowAccount.auto_release_at, EscrowAccount.status)
 
 class AdminAction(Base):
     __tablename__ = "admin_actions"
@@ -140,4 +175,4 @@ class AdminAction(Base):
     target_type = Column(String)
     target_id = Column(Integer)
     details = Column(JSONB)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)

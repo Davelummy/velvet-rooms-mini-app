@@ -35,6 +35,9 @@ async def main():
                 statements.append("ALTER TABLE users ADD COLUMN email TEXT")
             if "wallet_balance" not in columns:
                 statements.append("ALTER TABLE users ADD COLUMN wallet_balance DOUBLE PRECISION DEFAULT 0")
+            if "public_id" not in columns:
+                statements.append("ALTER TABLE users ADD COLUMN public_id VARCHAR(4)")
+                statements.append("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
 
             if not statements:
                 print("No user column migrations needed.")

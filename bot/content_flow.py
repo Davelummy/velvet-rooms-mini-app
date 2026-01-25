@@ -3,7 +3,9 @@ from typing import Optional, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import ContentPurchase, DigitalContent, User
+from models import ContentPurchase, DigitalContent, ModelProfile, Transaction, User
+from shared.escrow import create_escrow
+from shared.transactions import create_transaction
 
 
 def parse_content_args(text: str) -> Optional[dict]:
@@ -63,7 +65,13 @@ async def create_content(
 
 async def list_active_content(db: AsyncSession) -> List[DigitalContent]:
     result = await db.execute(
-        select(DigitalContent).where(DigitalContent.is_active.is_(True)).order_by(DigitalContent.id)
+        select(DigitalContent)
+        .join(ModelProfile, ModelProfile.user_id == DigitalContent.model_id)
+        .where(
+            (DigitalContent.is_active.is_(True))
+            & (ModelProfile.verification_status == "approved")
+        )
+        .order_by(DigitalContent.id)
     )
     return list(result.scalars().all())
 
@@ -80,21 +88,59 @@ async def get_content_by_id(db: AsyncSession, content_id: int) -> Optional[Digit
     return result.scalar_one_or_none()
 
 
-async def create_purchase(
+async def create_purchase_request(
     db: AsyncSession,
     content: DigitalContent,
     client: User,
-) -> ContentPurchase:
+) -> tuple[ContentPurchase, Transaction]:
+    transaction = await create_transaction(
+        db,
+        user_id=client.id,
+        transaction_type="content",
+        amount=content.price,
+        metadata={
+            "escrow_type": "content",
+            "content_id": content.id,
+            "model_id": content.model_id,
+        },
+    )
+    await db.flush()
+
     purchase = ContentPurchase(
         content_id=content.id,
         client_id=client.id,
+        transaction_id=transaction.id,
         price_paid=content.price,
+        status="pending",
     )
     db.add(purchase)
+    await db.commit()
+    await db.refresh(purchase)
+    await db.refresh(transaction)
+    return purchase, transaction
 
-    content.total_sales += 1
-    content.total_revenue += content.price or 0
 
+async def confirm_content_purchase(
+    db: AsyncSession,
+    purchase: ContentPurchase,
+    transaction: Transaction,
+    payer_id: int,
+    receiver_id: int,
+    amount: float,
+) -> ContentPurchase:
+    escrow = await create_escrow(
+        db,
+        escrow_type="content",
+        related_id=purchase.content_id,
+        payer_id=payer_id,
+        receiver_id=receiver_id,
+        amount=amount,
+        transaction=transaction,
+        release_condition="content_delivered",
+        auto_release_hours=24,
+    )
+    purchase.escrow_id = escrow.id
+    purchase.status = "paid"
     await db.commit()
     await db.refresh(purchase)
     return purchase

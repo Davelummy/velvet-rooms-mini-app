@@ -2,6 +2,14 @@
 venv/
 __pycache__/
 *.pyc
+node_modules/
+miniapp/node_modules/
+miniapp/.next/
+.next/
+logs/
+*.log
 .env
 .env
 .env
+.env.local
+miniapp/.env.local

@@ -17,6 +17,6 @@ async def main():
     
     print("✅ Redis Test Value:", value)
     
-    await redis.close()
+    await redis.aclose()
 
 asyncio.run(main())
