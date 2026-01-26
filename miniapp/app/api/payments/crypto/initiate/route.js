@@ -33,10 +33,15 @@ export async function POST(request) {
   }
 
   let userId;
-  const existingUser = await query("SELECT id FROM users WHERE telegram_id = $1", [
-    tgUser.id,
-  ]);
+  const existingUser = await query(
+    "SELECT id, role FROM users WHERE telegram_id = $1",
+    [tgUser.id]
+  );
   if (existingUser.rowCount) {
+    const role = existingUser.rows[0].role;
+    if (role && role !== "client") {
+      return NextResponse.json({ error: "client_only" }, { status: 403 });
+    }
     userId = existingUser.rows[0].id;
   } else {
     userId = await ensureUser({

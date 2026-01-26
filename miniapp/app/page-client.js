@@ -8,6 +8,9 @@ export default function Home() {
   const contentId = searchParams.get("content");
   const modelId = searchParams.get("model");
   const [role, setRole] = useState(null);
+  const [roleLocked, setRoleLocked] = useState(false);
+  const [lockedRole, setLockedRole] = useState(null);
+  const [roleStatus, setRoleStatus] = useState("");
   const [clientStep, setClientStep] = useState(1);
   const [modelStep, setModelStep] = useState(1);
   const [initData, setInitData] = useState("");
@@ -67,10 +70,13 @@ export default function Home() {
   });
 
   useEffect(() => {
+    if (roleLocked) {
+      return;
+    }
     if (contentId || modelId) {
       setRole("client");
     }
-  }, [contentId, modelId]);
+  }, [contentId, modelId, roleLocked]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -224,6 +230,8 @@ export default function Home() {
         }
         setProfile(data);
         if (data.user.role === "model") {
+          setRoleLocked(true);
+          setLockedRole("model");
           setRole("model");
           if (data.model?.verification_status === "approved") {
             setModelApproved(true);
@@ -238,6 +246,8 @@ export default function Home() {
             setModelForm((prev) => ({ ...prev, stageName: data.model.display_name }));
           }
         } else if (data.user.role === "client") {
+          setRoleLocked(true);
+          setLockedRole("client");
           setRole("client");
           if (data.client?.access_fee_paid) {
             setClientStep(3);
@@ -283,6 +293,11 @@ export default function Home() {
   };
 
   const handleRole = (nextRole) => {
+    if (roleLocked && lockedRole && nextRole !== lockedRole) {
+      setRoleStatus(`This account is locked to the ${lockedRole} dashboard.`);
+      return;
+    }
+    setRoleStatus("");
     setRole(nextRole);
     const target = document.getElementById(`${nextRole}-flow`);
     if (target) {
@@ -578,28 +593,41 @@ export default function Home() {
           <span className="brand-dot" />
           Velvet Rooms
         </div>
-        <div className="top-actions">
-          <button className={`ghost ${role === "client" ? "active" : ""}`} onClick={() => handleRole("client")}>
-            Client
-          </button>
-          <button className={`ghost ${role === "model" ? "active" : ""}`} onClick={() => handleRole("model")}>
-            Model
-          </button>
-        </div>
+        {!roleLocked && (
+          <div className="top-actions">
+            <button className={`ghost ${role === "client" ? "active" : ""}`} onClick={() => handleRole("client")}>
+              Client
+            </button>
+            <button className={`ghost ${role === "model" ? "active" : ""}`} onClick={() => handleRole("model")}>
+              Model
+            </button>
+          </div>
+        )}
+        {roleLocked && lockedRole && (
+          <div className="top-actions">
+            <span className="pill">Account: {lockedRole === "model" ? "Model" : "Client"}</span>
+          </div>
+        )}
       </header>
 
-      {!role && contentId && (
+      {roleStatus && (
+        <section className="banner">
+          <strong>{roleStatus}</strong>
+        </section>
+      )}
+
+      {!role && !roleLocked && contentId && (
         <section className="banner">
           <strong>Content selected:</strong> #{contentId} — continue to purchase.
         </section>
       )}
-      {!role && modelId && (
+      {!role && !roleLocked && modelId && (
         <section className="banner">
           <strong>Model selected:</strong> {modelId} — continue to book a session.
         </section>
       )}
 
-      {!role && (
+      {!role && !roleLocked && (
       <section className="hero">
         <div className="hero-text">
           <p className="eyebrow">Private Creator Marketplace</p>
@@ -651,7 +679,7 @@ export default function Home() {
       </section>
       )}
 
-      {!role && (
+      {!role && !roleLocked && (
       <section className="role-grid">
         <article className={`role-card ${role === "client" ? "selected" : ""}`}>
           <h3>Client Flow</h3>
@@ -695,6 +723,19 @@ export default function Home() {
             </div>
           </header>
           <div className="flow-body">
+            {profile?.user && (
+              <div className="flow-card">
+                <h3>Welcome, {profile.user.public_id || "Client"}</h3>
+                <div className="line">
+                  <span>Access status</span>
+                  <strong>{clientAccessPaid ? "Unlocked" : "Pending approval"}</strong>
+                </div>
+                <div className="line">
+                  <span>Account type</span>
+                  <strong>Client</strong>
+                </div>
+              </div>
+            )}
             {clientStep === 1 && (
               <div className="flow-card">
                 <h3>Profile Details</h3>
@@ -968,6 +1009,19 @@ export default function Home() {
             </div>
           </header>
           <div className="flow-body">
+            {profile?.user && (
+              <div className="flow-card">
+                <h3>Welcome, {profile.model?.display_name || "Model"}</h3>
+                <div className="line">
+                  <span>Status</span>
+                  <strong>{profile.model?.verification_status || "Pending"}</strong>
+                </div>
+                <div className="line">
+                  <span>Account type</span>
+                  <strong>Model</strong>
+                </div>
+              </div>
+            )}
             {modelStep === 1 && (
               <div className="flow-card">
                 <h3>Profile Setup</h3>

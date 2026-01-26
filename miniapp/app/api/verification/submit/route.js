@@ -79,13 +79,23 @@ export async function POST(request) {
     return NextResponse.json({ error: "age_restricted", detail: "18+ only" }, { status: 400 });
   }
 
+  const existingUser = await query("SELECT role FROM users WHERE telegram_id = $1", [
+    tgUser.id,
+  ]);
+  if (existingUser.rowCount) {
+    const role = existingUser.rows[0].role;
+    if (role === "client") {
+      return NextResponse.json({ error: "role_locked" }, { status: 403 });
+    }
+  }
+
   const now = new Date();
   const userId = await ensureUser({
     telegramId: tgUser.id,
     username: tgUser.username || null,
     firstName: tgUser.first_name || null,
     lastName: tgUser.last_name || null,
-    role: "unassigned",
+    role: "model",
     status: "inactive",
     email,
   });

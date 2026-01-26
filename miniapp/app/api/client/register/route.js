@@ -47,6 +47,16 @@ export async function POST(request) {
     return NextResponse.json({ error: "age_restricted" }, { status: 400 });
   }
 
+  const existingUser = await query("SELECT role FROM users WHERE telegram_id = $1", [
+    tgUser.id,
+  ]);
+  if (existingUser.rowCount) {
+    const role = existingUser.rows[0].role;
+    if (role && role !== "client") {
+      return NextResponse.json({ error: "role_locked" }, { status: 403 });
+    }
+  }
+
   const userId = await ensureUser({
     telegramId: tgUser.id,
     username: tgUser.username || null,

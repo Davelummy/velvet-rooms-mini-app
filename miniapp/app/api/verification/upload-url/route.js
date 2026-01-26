@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "../../_lib/supabase";
+import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 
 export const runtime = "nodejs";
@@ -15,6 +16,16 @@ export async function POST(request) {
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
+  }
+
+  const existingUser = await query("SELECT role FROM users WHERE telegram_id = $1", [
+    tgUser.id,
+  ]);
+  if (existingUser.rowCount) {
+    const role = existingUser.rows[0].role;
+    if (role === "client") {
+      return NextResponse.json({ error: "role_locked" }, { status: 403 });
+    }
   }
   const filename = (body?.filename || "verification.mp4").toString();
   const ext = filename.includes(".") ? filename.split(".").pop() : "mp4";
