@@ -9,6 +9,23 @@ function isManualReleaseOnly() {
   return (process.env.MANUAL_RELEASE_ONLY || "false").toLowerCase() === "true";
 }
 
+async function ensureHeartbeatTable() {
+  await query(
+    `CREATE TABLE IF NOT EXISTS worker_heartbeats (
+       id INTEGER PRIMARY KEY,
+       last_run_at TIMESTAMPTZ NOT NULL
+     )`
+  );
+}
+
+async function recordHeartbeat() {
+  await query(
+    `INSERT INTO worker_heartbeats (id, last_run_at)
+     VALUES (1, NOW())
+     ON CONFLICT (id) DO UPDATE SET last_run_at = EXCLUDED.last_run_at`
+  );
+}
+
 async function sendMessage(chatId, text) {
   if (!BOT_TOKEN || !chatId) {
     return;
@@ -26,6 +43,9 @@ export async function POST(request) {
   if (!expected || secret !== expected) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+
+  await ensureHeartbeatTable();
+  await recordHeartbeat();
 
   const stats = { sessionsMarked: 0, escrowsReleased: 0 };
 
