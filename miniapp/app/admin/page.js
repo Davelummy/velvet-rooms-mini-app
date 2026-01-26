@@ -6,6 +6,8 @@ export default function Admin() {
   const [section, setSection] = useState("models");
   const [modelView, setModelView] = useState("pending");
   const [contentView, setContentView] = useState("pending");
+  const [paymentView, setPaymentView] = useState("pending");
+  const [escrowView, setEscrowView] = useState("pending");
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
   const [initData, setInitData] = useState("");
@@ -13,6 +15,17 @@ export default function Admin() {
   const [lastRefreshAt, setLastRefreshAt] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [preview, setPreview] = useState({ open: false, url: "", type: "video" });
+  const [metrics, setMetrics] = useState({
+    pending_models: 0,
+    approved_models: 0,
+    pending_content: 0,
+    approved_content: 0,
+    held_escrows: 0,
+    released_escrows: 0,
+    disputed_escrows: 0,
+    pending_payments: 0,
+    approved_payments: 0,
+  });
 
   const detailTitle = useMemo(() => {
     if (!selectedItem) {
@@ -72,6 +85,7 @@ export default function Admin() {
       { label: "Escrow ref", value: selectedItem.escrow_ref || "-" },
       { label: "Type", value: selectedItem.escrow_type || "-" },
       { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
+      { label: "Status", value: selectedItem.status || "-" },
       { label: "Payer", value: selectedItem.payer_public_id || "-" },
       { label: "Receiver", value: selectedItem.receiver_public_id || "-" },
     ];
@@ -134,6 +148,15 @@ export default function Admin() {
     if (section === "content" && contentView === "approved") {
       endpoint = "/api/admin/content?status=approved";
     }
+    if (section === "payments" && paymentView === "approved") {
+      endpoint = "/api/admin/payments?status=approved";
+    }
+    if (section === "escrows" && escrowView === "released") {
+      endpoint = "/api/admin/escrows?status=released";
+    }
+    if (section === "disputes") {
+      endpoint = "/api/admin/escrows?status=disputed";
+    }
     const res = await fetch(endpoint, {
       headers: { "x-telegram-init": initData },
     });
@@ -145,11 +168,28 @@ export default function Admin() {
     const payload = await res.json();
     setItems(payload.items || []);
     setLastRefreshAt(new Date().toISOString());
-  }, [initData, section, modelView, contentView]);
+  }, [initData, section, modelView, contentView, paymentView, escrowView]);
+
+  const loadMetrics = useCallback(async () => {
+    if (!initData) {
+      return;
+    }
+    const res = await fetch("/api/admin/metrics", {
+      headers: { "x-telegram-init": initData },
+    });
+    if (!res.ok) {
+      return;
+    }
+    const data = await res.json();
+    if (data?.ok) {
+      setMetrics((prev) => ({ ...prev, ...data }));
+    }
+  }, [initData]);
 
   useEffect(() => {
     loadQueue();
-  }, [loadQueue]);
+    loadMetrics();
+  }, [loadQueue, loadMetrics]);
 
   useEffect(() => {
     if (!liveQueue) {
@@ -157,14 +197,15 @@ export default function Admin() {
     }
     const interval = setInterval(() => {
       loadQueue();
+      loadMetrics();
     }, 15000);
     return () => clearInterval(interval);
-  }, [liveQueue, loadQueue]);
+  }, [liveQueue, loadQueue, loadMetrics]);
 
   useEffect(() => {
     setSelectedItem(null);
     setPreview({ open: false, url: "", type: "video" });
-  }, [section, modelView, contentView]);
+  }, [section, modelView, contentView, paymentView, escrowView]);
 
   const handleAction = async (action, payload) => {
     if (!initData) {
@@ -183,6 +224,7 @@ export default function Admin() {
     setError("");
     setSelectedItem(null);
     await loadQueue();
+    await loadMetrics();
   };
 
   const exportAuditLog = () => {
@@ -270,19 +312,27 @@ export default function Admin() {
         <div className="admin-metrics">
           <div className="metric">
             <span>Pending models</span>
-            <strong>—</strong>
+            <strong>{metrics.pending_models}</strong>
           </div>
           <div className="metric">
             <span>Pending content</span>
-            <strong>—</strong>
+            <strong>{metrics.pending_content}</strong>
           </div>
           <div className="metric">
             <span>Held escrows</span>
-            <strong>—</strong>
+            <strong>{metrics.held_escrows}</strong>
+          </div>
+          <div className="metric">
+            <span>Released escrows</span>
+            <strong>{metrics.released_escrows}</strong>
+          </div>
+          <div className="metric">
+            <span>Pending payments</span>
+            <strong>{metrics.pending_payments}</strong>
           </div>
           <div className="metric">
             <span>Disputes</span>
-            <strong>—</strong>
+            <strong>{metrics.disputed_escrows}</strong>
           </div>
         </div>
       </section>
@@ -394,6 +444,42 @@ export default function Admin() {
               </button>
             </div>
           )}
+          {section === "payments" && (
+            <div className="panel-actions">
+              <button
+                type="button"
+                className={`cta ${paymentView === "pending" ? "primary" : "ghost"}`}
+                onClick={() => setPaymentView("pending")}
+              >
+                Pending payments
+              </button>
+              <button
+                type="button"
+                className={`cta ${paymentView === "approved" ? "primary" : "ghost"}`}
+                onClick={() => setPaymentView("approved")}
+              >
+                Approved payments
+              </button>
+            </div>
+          )}
+          {section === "escrows" && (
+            <div className="panel-actions">
+              <button
+                type="button"
+                className={`cta ${escrowView === "pending" ? "primary" : "ghost"}`}
+                onClick={() => setEscrowView("pending")}
+              >
+                Pending escrows
+              </button>
+              <button
+                type="button"
+                className={`cta ${escrowView === "released" ? "primary" : "ghost"}`}
+                onClick={() => setEscrowView("released")}
+              >
+                Released escrows
+              </button>
+            </div>
+          )}
           <div className="panel-actions">
             <button
               type="button"
@@ -459,7 +545,7 @@ export default function Admin() {
                     {section === "payments" &&
                       `Crypto · ${selectedItem.amount} · ${selectedItem.metadata_json?.crypto_tx_hash || "hash pending"}`}
                     {(section === "escrows" || section === "disputes") &&
-                      `Held escrow · ${selectedItem.amount}`}
+                      `${selectedItem.status === "held" ? "Held" : "Released"} escrow · ${selectedItem.amount}`}
                   </p>
                 </div>
                 <div className="queue-actions">
@@ -564,28 +650,32 @@ export default function Admin() {
                   )}
                   {(section === "escrows" || section === "disputes") && (
                     <>
-                      <button
-                        type="button"
-                        className="cta primary"
-                        onClick={() =>
-                          handleAction("/api/admin/escrows/release", {
-                            escrow_ref: selectedItem.escrow_ref,
-                          })
-                        }
-                      >
-                        Release
-                      </button>
-                      <button
-                        type="button"
-                        className="cta primary alt"
-                        onClick={() =>
-                          handleAction("/api/admin/escrows/refund", {
-                            escrow_ref: selectedItem.escrow_ref,
-                          })
-                        }
-                      >
-                        Refund
-                      </button>
+                      {(section === "disputes" || escrowView === "pending") && (
+                        <>
+                          <button
+                            type="button"
+                            className="cta primary"
+                            onClick={() =>
+                              handleAction("/api/admin/escrows/release", {
+                                escrow_ref: selectedItem.escrow_ref,
+                              })
+                            }
+                          >
+                            Release
+                          </button>
+                          <button
+                            type="button"
+                            className="cta primary alt"
+                            onClick={() =>
+                              handleAction("/api/admin/escrows/refund", {
+                                escrow_ref: selectedItem.escrow_ref,
+                              })
+                            }
+                          >
+                            Refund
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                   {section === "payments" && (
@@ -595,28 +685,32 @@ export default function Admin() {
                           " " +
                           (selectedItem.metadata_json?.crypto_network || "")}
                       </div>
-                      <button
-                        type="button"
-                        className="cta primary"
-                        onClick={() =>
-                          handleAction("/api/admin/payments/approve", {
-                            transaction_ref: selectedItem.transaction_ref,
-                          })
-                        }
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="cta primary alt"
-                        onClick={() =>
-                          handleAction("/api/admin/payments/reject", {
-                            transaction_ref: selectedItem.transaction_ref,
-                          })
-                        }
-                      >
-                        Reject
-                      </button>
+                      {paymentView === "pending" && (
+                        <>
+                          <button
+                            type="button"
+                            className="cta primary"
+                            onClick={() =>
+                              handleAction("/api/admin/payments/approve", {
+                                transaction_ref: selectedItem.transaction_ref,
+                              })
+                            }
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="cta primary alt"
+                            onClick={() =>
+                              handleAction("/api/admin/payments/reject", {
+                                transaction_ref: selectedItem.transaction_ref,
+                              })
+                            }
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -652,7 +746,8 @@ export default function Admin() {
                     {section === "content" && "Content awaiting approval"}
                     {section === "payments" &&
                       `Crypto · ${item.amount} · ${item.metadata_json?.crypto_tx_hash || "hash pending"}`}
-                    {section === "escrows" && `Held escrow · ${item.amount}`}
+                    {section === "escrows" &&
+                      `${item.status === "held" ? "Held" : "Released"} escrow · ${item.amount}`}
                   </p>
                 </div>
                 <div className="queue-actions">
@@ -766,6 +861,36 @@ export default function Admin() {
                   )}
                   {section === "escrows" && (
                     <>
+                      {escrowView === "pending" && (
+                        <>
+                          <button
+                            type="button"
+                            className="cta primary"
+                            onClick={() =>
+                              handleAction("/api/admin/escrows/release", {
+                                escrow_ref: item.escrow_ref,
+                              })
+                            }
+                          >
+                            Release
+                          </button>
+                          <button
+                            type="button"
+                            className="cta primary alt"
+                            onClick={() =>
+                              handleAction("/api/admin/escrows/refund", {
+                                escrow_ref: item.escrow_ref,
+                              })
+                            }
+                          >
+                            Refund
+                          </button>
+                        </>
+                      )}
+                    </>
+                  )}
+                  {section === "disputes" && (
+                    <>
                       <button
                         type="button"
                         className="cta primary"
@@ -797,28 +922,32 @@ export default function Admin() {
                           " " +
                           (item.metadata_json?.crypto_network || "")}
                       </div>
-                      <button
-                        type="button"
-                        className="cta primary"
-                        onClick={() =>
-                          handleAction("/api/admin/payments/approve", {
-                            transaction_ref: item.transaction_ref,
-                          })
-                        }
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="cta primary alt"
-                        onClick={() =>
-                          handleAction("/api/admin/payments/reject", {
-                            transaction_ref: item.transaction_ref,
-                          })
-                        }
-                      >
-                        Reject
-                      </button>
+                      {paymentView === "pending" && (
+                        <>
+                          <button
+                            type="button"
+                            className="cta primary"
+                            onClick={() =>
+                              handleAction("/api/admin/payments/approve", {
+                                transaction_ref: item.transaction_ref,
+                              })
+                            }
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="cta primary alt"
+                            onClick={() =>
+                              handleAction("/api/admin/payments/reject", {
+                                transaction_ref: item.transaction_ref,
+                              })
+                            }
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
