@@ -7,17 +7,25 @@ export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
-function getBucket() {
+function getTeaserBucket() {
   return (
+    process.env.SUPABASE_TEASER_BUCKET ||
     process.env.SUPABASE_CONTENT_BUCKET ||
     process.env.SUPABASE_BUCKET ||
-    "velvetrooms-content"
+    "teaser content bucket"
   );
 }
 
 export async function POST(request) {
-  const formData = await request.formData();
-  const initData = formData.get("initData");
+  const contentType = request.headers.get("content-type") || "";
+  if (contentType.includes("multipart/form-data")) {
+    return NextResponse.json(
+      { error: "direct_upload_disabled", detail: "Use signed upload URLs for teasers." },
+      { status: 413 }
+    );
+  }
+  const body = await request.json();
+  const initData = body?.initData || "";
   if (!verifyInitData(initData, BOT_TOKEN)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -26,14 +34,14 @@ export async function POST(request) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
   }
 
-  const title = (formData.get("title") || "").toString().trim();
-  const description = (formData.get("description") || "").toString().trim();
-  const contentType = (formData.get("content_type") || "").toString().trim();
-  const file = formData.get("media");
-  const priceRaw = formData.get("price");
+  const title = (body?.title || "").toString().trim();
+  const description = (body?.description || "").toString().trim();
+  const contentTypeRaw = (body?.content_type || "").toString().trim();
+  const previewPath = (body?.preview_path || "").toString().trim();
+  const priceRaw = body?.price;
   const priceValue = priceRaw === null || priceRaw === "" ? null : Number(priceRaw);
 
-  if (!title || !contentType || !file) {
+  if (!title || !contentTypeRaw || !previewPath) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
 
@@ -43,7 +51,13 @@ export async function POST(request) {
   if (!userRes.rowCount) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
   }
+  if (userRes.rows[0].role !== "model") {
+    return NextResponse.json({ error: "model_only" }, { status: 403 });
+  }
   const userId = userRes.rows[0].id;
+  if (!previewPath.startsWith(`teasers/${userId}/`)) {
+    return NextResponse.json({ error: "invalid_preview_path" }, { status: 400 });
+  }
 
   const modelRes = await query(
     "SELECT verification_status FROM model_profiles WHERE user_id = $1",
@@ -53,23 +67,11 @@ export async function POST(request) {
     return NextResponse.json({ error: "model_not_approved" }, { status: 403 });
   }
 
-  const bucket = getBucket();
-  const ext = (file.name || "media").split(".").pop();
-  const safeType = contentType === "video" ? "video" : "image";
-  const filePath = `content/${userId}/${Date.now()}.${ext}`;
-  const supabase = getSupabase();
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  const uploadRes = await supabase.storage.from(bucket).upload(filePath, buffer, {
-    contentType: file.type || (safeType === "video" ? "video/mp4" : "image/jpeg"),
-    upsert: true,
-  });
-  if (uploadRes.error) {
-    return NextResponse.json(
-      { error: "upload_failed", detail: uploadRes.error.message },
-      { status: 500 }
-    );
+  if (!["video", "image"].includes(contentTypeRaw)) {
+    return NextResponse.json({ error: "invalid_content_type" }, { status: 400 });
   }
+  const safeType = contentTypeRaw;
+  const sanitizedPrice = priceValue && priceValue > 0 ? priceValue : null;
 
   const now = new Date();
   const insertRes = await query(
@@ -77,8 +79,32 @@ export async function POST(request) {
      (model_id, content_type, title, description, price, telegram_file_id, preview_file_id, is_active, created_at)
      VALUES ($1, $2, $3, $4, $5, NULL, $6, FALSE, $7)
      RETURNING id`,
-    [userId, safeType, title, description, priceValue, filePath, now]
+    [userId, safeType, title, description, sanitizedPrice, previewPath, now]
   );
+
+  const adminToken = process.env.ADMIN_BOT_TOKEN || "";
+  const adminIds = (process.env.ADMIN_TELEGRAM_IDS || "")
+    .split(",")
+    .map((val) => val.trim())
+    .filter(Boolean);
+  if (adminToken && adminIds.length > 0) {
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: "Open Admin Console", web_app: { url: `${process.env.WEBAPP_URL || ""}/admin` } }],
+      ],
+    };
+    for (const adminId of adminIds) {
+      await fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: adminId,
+          text: `New teaser submitted: ${title}. Review in admin console.`,
+          reply_markup: keyboard,
+        }),
+      });
+    }
+  }
 
   return NextResponse.json({ ok: true, id: insertRes.rows[0]?.id });
 }
@@ -97,11 +123,14 @@ export async function GET(request) {
     if (!tgUser || !tgUser.id) {
       return NextResponse.json({ error: "user_missing" }, { status: 400 });
     }
-    const userRes = await query("SELECT id FROM users WHERE telegram_id = $1", [
+    const userRes = await query("SELECT id, role FROM users WHERE telegram_id = $1", [
       tgUser.id,
     ]);
     if (!userRes.rowCount) {
       return NextResponse.json({ items: [] });
+    }
+    if (userRes.rows[0].role !== "model") {
+      return NextResponse.json({ error: "model_only" }, { status: 403 });
     }
     const userId = userRes.rows[0].id;
     res = await query(
@@ -145,7 +174,7 @@ export async function GET(request) {
     );
   }
 
-  const bucket = getBucket();
+  const bucket = getTeaserBucket();
   const supabase = getSupabase();
   const ttlSeconds = Number(process.env.TEASER_PREVIEW_TTL_SECONDS || 60);
   const items = [];

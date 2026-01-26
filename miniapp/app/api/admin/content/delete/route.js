@@ -30,6 +30,7 @@ export async function POST(request) {
 
   if (previewPath) {
     const bucket =
+      process.env.SUPABASE_TEASER_BUCKET ||
       process.env.SUPABASE_CONTENT_BUCKET ||
       process.env.SUPABASE_BUCKET ||
       "teaser content bucket";

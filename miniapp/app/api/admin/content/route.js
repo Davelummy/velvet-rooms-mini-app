@@ -30,9 +30,10 @@ export async function GET(request) {
   );
 
   const bucket =
+    process.env.SUPABASE_TEASER_BUCKET ||
     process.env.SUPABASE_CONTENT_BUCKET ||
     process.env.SUPABASE_BUCKET ||
-    "velvetrooms-content";
+    "teaser content bucket";
   const supabase = getSupabase();
   const items = [];
   for (const row of res.rows) {

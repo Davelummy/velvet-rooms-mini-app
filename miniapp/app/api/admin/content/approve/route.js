@@ -37,9 +37,10 @@ async function sendGalleryPost(content, modelTelegramId) {
   let media = content.telegram_file_id;
   if (!media && content.preview_file_id) {
     const bucket =
+      process.env.SUPABASE_TEASER_BUCKET ||
       process.env.SUPABASE_CONTENT_BUCKET ||
       process.env.SUPABASE_BUCKET ||
-      "velvetrooms-content";
+      "teaser content bucket";
     const supabase = getSupabase();
     const { data } = await supabase.storage
       .from(bucket)

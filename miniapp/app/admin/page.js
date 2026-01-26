@@ -743,11 +743,16 @@ export default function Admin() {
                   <p className="queue-meta">
                     {section === "models" &&
                       (modelView === "approved" ? "Verified model" : "Verification pending")}
-                    {section === "content" && "Content awaiting approval"}
+                    {section === "content" &&
+                      (contentView === "approved" ? "Approved content" : "Content awaiting approval")}
                     {section === "payments" &&
-                      `Crypto · ${item.amount} · ${item.metadata_json?.crypto_tx_hash || "hash pending"}`}
+                      `${paymentView === "approved" ? "Approved" : "Crypto"} · ${
+                        item.amount
+                      } · ${item.metadata_json?.crypto_tx_hash || "hash pending"}`}
                     {section === "escrows" &&
-                      `${item.status === "held" ? "Held" : "Released"} escrow · ${item.amount}`}
+                      `${escrowView === "released" ? "Released" : "Held"} escrow · ${
+                        item.amount
+                      }`}
                   </p>
                 </div>
                 <div className="queue-actions">

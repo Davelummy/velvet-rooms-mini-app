@@ -38,6 +38,7 @@ export default function Home() {
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryStatus, setGalleryStatus] = useState("");
   const [visibleTeasers, setVisibleTeasers] = useState({});
+  const [consumedTeasers, setConsumedTeasers] = useState({});
   const [showContentForm, setShowContentForm] = useState(false);
   const [contentStatus, setContentStatus] = useState("");
   const [modelItems, setModelItems] = useState([]);
@@ -68,6 +69,7 @@ export default function Home() {
     txHash: "",
     status: "",
   });
+  const teaserViewMs = 60000;
 
   useEffect(() => {
     if (roleLocked) {
@@ -289,6 +291,33 @@ export default function Home() {
       }
     } catch {
       setClientStatus("Unable to refresh access status.");
+    }
+  };
+
+  const refreshModelStatus = async () => {
+    if (!initData) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/me", {
+        headers: { "x-telegram-init": initData },
+      });
+      if (!res.ok) {
+        setModelStatus("Unable to refresh verification status.");
+        return;
+      }
+      const data = await res.json();
+      if (data.model?.verification_status === "approved") {
+        setModelApproved(true);
+        setModelStatus("Verified ✅ Your dashboard is unlocked.");
+        setModelStep(4);
+      } else if (data.model?.verification_status) {
+        setModelApproved(false);
+        setModelStatus("Verification in review. You'll be notified when approved.");
+        setModelStep(3);
+      }
+    } catch {
+      setModelStatus("Unable to refresh verification status.");
     }
   };
 
@@ -554,17 +583,49 @@ export default function Home() {
       setContentStatus("Add a title and teaser media.");
       return;
     }
-    const formData = new FormData();
-    formData.append("initData", initData);
-    formData.append("title", contentForm.title);
-    formData.append("description", contentForm.description);
-    if (contentForm.unlockPrice) {
-      formData.append("price", contentForm.unlockPrice);
-    }
-    formData.append("content_type", contentForm.contentType);
-    formData.append("media", contentForm.mediaFile);
     try {
-      const res = await fetch("/api/content", { method: "POST", body: formData });
+      setContentStatus("Preparing upload…");
+      const uploadInit = await fetch("/api/content/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          filename: contentForm.mediaFile.name,
+        }),
+      });
+      if (!uploadInit.ok) {
+        setContentStatus("Unable to start upload. Try again.");
+        return;
+      }
+      const uploadPayload = await uploadInit.json();
+      if (!uploadPayload?.signed_url || !uploadPayload?.path) {
+        setContentStatus("Upload link missing. Try again.");
+        return;
+      }
+      const uploadRes = await fetch(uploadPayload.signed_url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": contentForm.mediaFile.type || "application/octet-stream",
+          "x-upsert": "true",
+        },
+        body: contentForm.mediaFile,
+      });
+      if (!uploadRes.ok) {
+        setContentStatus(`Upload failed (HTTP ${uploadRes.status}).`);
+        return;
+      }
+      const res = await fetch("/api/content", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          title: contentForm.title,
+          description: contentForm.description,
+          price: contentForm.unlockPrice,
+          content_type: contentForm.contentType,
+          preview_path: uploadPayload.path,
+        }),
+      });
       if (!res.ok) {
         setContentStatus(`Content submission failed (HTTP ${res.status}).`);
         return;
@@ -822,6 +883,13 @@ export default function Home() {
                 <button type="button" className="cta ghost" onClick={refreshClientAccess}>
                   I already paid
                 </button>
+                <button
+                  type="button"
+                  className="cta ghost"
+                  onClick={() => setClientStep(1)}
+                >
+                  Back
+                </button>
                 {paymentState.status && paymentState.mode === "access" && (
                   <p className="helper">{paymentState.status}</p>
                 )}
@@ -831,7 +899,15 @@ export default function Home() {
               <div className="flow-card">
                 <h3>You are ready</h3>
                 <p>Browse verified creators, buy content, or book a session.</p>
-                <button type="button" className="cta primary">
+                <button
+                  type="button"
+                  className="cta primary"
+                  onClick={() =>
+                    document
+                      .getElementById("client-gallery")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                  }
+                >
                   Open Gallery
                 </button>
                 {galleryStatus && <p className="helper error">{galleryStatus}</p>}
@@ -848,7 +924,7 @@ export default function Home() {
                   <p className="helper">No approved teasers yet.</p>
                 )}
                 {!galleryStatus && galleryItems.length > 0 && (
-                  <div className="gallery-grid">
+                  <div className="gallery-grid" id="client-gallery">
                     {galleryItems.map((item) => (
                       <div key={`gallery-${item.id}`} className="gallery-card">
                         <div className="gallery-media">
@@ -873,16 +949,21 @@ export default function Home() {
                             type="button"
                             className="cta ghost"
                             onClick={() => {
+                              if (consumedTeasers[item.id]) {
+                                return;
+                              }
                               setVisibleTeasers((prev) => ({ ...prev, [item.id]: true }));
+                              setConsumedTeasers((prev) => ({ ...prev, [item.id]: true }));
                               setTimeout(() => {
                                 setVisibleTeasers((prev) => ({
                                   ...prev,
                                   [item.id]: false,
                                 }));
-                              }, 60000);
+                              }, teaserViewMs);
                             }}
+                            disabled={consumedTeasers[item.id]}
                           >
-                            View teaser
+                            {consumedTeasers[item.id] ? "Viewed" : "View teaser"}
                           </button>
                           <button
                             type="button"
@@ -1296,15 +1377,27 @@ export default function Home() {
                       />
                       <span className="file-name">{modelForm.videoName || "No file selected"}</span>
                     </label>
+                    <button
+                      type="button"
+                      className="cta ghost"
+                      onClick={() => setModelStep(1)}
+                    >
+                      Back
+                    </button>
                   </div>
                 )}
                 {modelStep === 3 && (
                   <div className="flow-card">
                     <h3>Awaiting Approval</h3>
                     <p>Your verification is in review. You will be notified once approved.</p>
-                    <button type="button" className="cta ghost" disabled>
-                      Dashboard unlocks after approval
-                    </button>
+                    <div className="dash-actions">
+                      <button type="button" className="cta ghost" onClick={refreshModelStatus}>
+                        Check status
+                      </button>
+                      <button type="button" className="cta ghost" disabled>
+                        Dashboard unlocks after approval
+                      </button>
+                    </div>
                   </div>
                 )}
               </>
