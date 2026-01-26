@@ -999,272 +999,168 @@ export default function Home() {
         <article className="flow-panel" id="model-flow">
           <header className="flow-head">
             <div>
-              <p className="eyebrow">Model Onboarding</p>
-              <h2>Get verified to sell content and sessions.</h2>
+              <p className="eyebrow">
+                {modelApproved ? "Model Dashboard" : "Model Onboarding"}
+              </p>
+              <h2>
+                {modelApproved
+                  ? `Welcome back, ${profile?.model?.display_name || modelForm.stageName || "Model"}.`
+                  : "Get verified to sell content and sessions."}
+              </h2>
             </div>
-            <div className="stepper">
-              <span className={modelStep >= 1 ? "step active" : "step"}>1</span>
-              <span className={modelStep >= 2 ? "step active" : "step"}>2</span>
-              <span className={modelStep >= 3 ? "step active" : "step"}>3</span>
-            </div>
+            {!modelApproved && (
+              <div className="stepper">
+                <span className={modelStep >= 1 ? "step active" : "step"}>1</span>
+                <span className={modelStep >= 2 ? "step active" : "step"}>2</span>
+                <span className={modelStep >= 3 ? "step active" : "step"}>3</span>
+              </div>
+            )}
           </header>
           <div className="flow-body">
-            {profile?.user && (
-              <div className="flow-card">
-                <h3>Welcome, {profile.model?.display_name || "Model"}</h3>
-                <div className="line">
-                  <span>Status</span>
-                  <strong>{profile.model?.verification_status || "Pending"}</strong>
+            {modelApproved ? (
+              <>
+                <div className="flow-card">
+                  <h3>Profile</h3>
+                  <div className="line">
+                    <span>Display name</span>
+                    <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
+                  </div>
+                  <div className="line">
+                    <span>Verification</span>
+                    <strong>Approved</strong>
+                  </div>
+                  <div className="line">
+                    <span>Account type</span>
+                    <strong>Model</strong>
+                  </div>
                 </div>
-                <div className="line">
-                  <span>Account type</span>
-                  <strong>Model</strong>
-                </div>
-              </div>
-            )}
-            {modelStep === 1 && (
-              <div className="flow-card">
-                <h3>Profile Setup</h3>
-                <label className="field">
-                  Stage name
-                  <input
-                    type="text"
-                    value={modelForm.stageName}
-                    onChange={(event) =>
-                      setModelForm((prev) => ({ ...prev, stageName: event.target.value }))
-                    }
-                    placeholder="Jesse Belle"
-                  />
-                </label>
-                <label className="field">
-                  Email
-                  <input
-                    type="email"
-                    value={modelForm.email}
-                    onChange={(event) =>
-                      setModelForm((prev) => ({ ...prev, email: event.target.value }))
-                    }
-                    placeholder="you@email.com"
-                  />
-                </label>
-                <div className="field-row">
-                  <label className="field">
-                    Birth month
-                    <input
-                      type="number"
-                      min="1"
-                      max="12"
-                      value={modelForm.birthMonth}
-                      onChange={(event) =>
-                        setModelForm((prev) => ({ ...prev, birthMonth: event.target.value }))
-                      }
-                      placeholder="MM"
-                    />
-                  </label>
-                  <label className="field">
-                    Birth year
-                    <input
-                      type="number"
-                      min="1900"
-                      max="2100"
-                      value={modelForm.birthYear}
-                      onChange={(event) =>
-                        setModelForm((prev) => ({ ...prev, birthYear: event.target.value }))
-                      }
-                      placeholder="YYYY"
-                    />
-                  </label>
-                </div>
-                <p className="helper">18+ only. We verify eligibility and keep this private.</p>
-                <label className="field">
-                  Short bio
-                  <textarea
-                    rows="3"
-                    value={modelForm.bio}
-                    onChange={(event) =>
-                      setModelForm((prev) => ({ ...prev, bio: event.target.value }))
-                    }
-                    placeholder="Describe your vibe, services, and boundaries."
-                  />
-                </label>
-              </div>
-            )}
-            {modelStep === 2 && (
-              <div className="flow-card">
-                <h3>Verification Media</h3>
-                <p>Upload a short verification video for admin review.</p>
-                <label className="field file">
-                  Verification video
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={(event) =>
-                      setModelForm((prev) => ({
-                        ...prev,
-                        videoName: event.target.files?.[0]?.name || "",
-                        videoFile: event.target.files?.[0] || null,
-                      }))
-                    }
-                  />
-                  <span className="file-name">{modelForm.videoName || "No file selected"}</span>
-                </label>
-              </div>
-            )}
-            {modelStep === 3 && (
-              <div className="flow-card">
-                <h3>Awaiting Approval</h3>
-                <p>Your verification is in review. You will be notified once approved.</p>
-                <button type="button" className="cta ghost" disabled>
-                  Dashboard unlocks after approval
-                </button>
-              </div>
-            )}
-            {modelStep >= 4 && (
-              <div className="flow-card">
-                <h3>Welcome, {modelForm.stageName || "Model"}</h3>
-                <p>Your verified dashboard is ready. Upload content and manage sessions.</p>
-                <div className="dash-actions">
-                  <button
-                    type="button"
-                    className="cta primary alt"
-                    onClick={() => setShowContentForm((prev) => !prev)}
-                  >
-                    {showContentForm ? "Hide content form" : "Add content"}
-                  </button>
-                </div>
-                <div className="dash-actions">
-                  <button
-                    type="button"
-                    className="cta ghost"
-                    onClick={() => setShowBookings((prev) => !prev)}
-                  >
-                    {showBookings ? "Hide bookings" : "View bookings"}
-                  </button>
-                </div>
-                {showContentForm && (
-                  <div className="content-form">
-                    <label className="field">
-                      Title
-                      <input
-                        type="text"
-                        value={contentForm.title}
-                        onChange={(event) =>
-                          setContentForm((prev) => ({ ...prev, title: event.target.value }))
-                        }
-                        placeholder="Teaser title"
-                      />
-                    </label>
-                    <label className="field">
-                      Description
-                      <textarea
-                        rows="3"
-                        value={contentForm.description}
-                        onChange={(event) =>
-                          setContentForm((prev) => ({ ...prev, description: event.target.value }))
-                        }
-                        placeholder="Short teaser description"
-                      />
-                    </label>
-                    <div className="field-row">
-                      <label className="field">
-                        Content type
-                        <select
-                          value={contentForm.contentType}
-                          onChange={(event) =>
-                            setContentForm((prev) => ({ ...prev, contentType: event.target.value }))
-                          }
-                        >
-                          <option value="image">Photo</option>
-                          <option value="video">Video</option>
-                        </select>
-                      </label>
-                      <label className="field">
-                        Unlock price (optional)
-                        <input
-                          type="number"
-                          min="0"
-                          value={contentForm.unlockPrice}
-                          onChange={(event) =>
-                            setContentForm((prev) => ({ ...prev, unlockPrice: event.target.value }))
-                          }
-                          placeholder="₦ 0"
-                        />
-                      </label>
-                    </div>
-                    <label className="field file">
-                      Teaser media
-                      <input
-                        type="file"
-                        accept="image/*,video/*"
-                        onChange={(event) =>
-                          setContentForm((prev) => ({
-                            ...prev,
-                            mediaName: event.target.files?.[0]?.name || "",
-                            mediaFile: event.target.files?.[0] || null,
-                          }))
-                        }
-                      />
-                      <span className="file-name">
-                        {contentForm.mediaName || "No file selected"}
-                      </span>
-                    </label>
-                    {contentStatus && <p className="helper error">{contentStatus}</p>}
-                    <button type="button" className="cta primary alt" onClick={submitContent}>
-                      Submit teaser
+                <div className="flow-card">
+                  <h3>Creator Gallery</h3>
+                  <p className="helper">
+                    Teasers appear in the public gallery after admin approval.
+                  </p>
+                  <div className="dash-actions">
+                    <button
+                      type="button"
+                      className="cta primary alt"
+                      onClick={() => setShowContentForm((prev) => !prev)}
+                    >
+                      {showContentForm ? "Hide content form" : "Add content"}
+                    </button>
+                    <button
+                      type="button"
+                      className="cta ghost"
+                      onClick={() => setShowBookings((prev) => !prev)}
+                    >
+                      {showBookings ? "Hide bookings" : "View bookings"}
                     </button>
                   </div>
-                )}
-                <div className="content-list">
-                  <h4>Your teasers</h4>
-                  {modelItemsStatus && <p className="helper error">{modelItemsStatus}</p>}
-                  {!modelItemsStatus && modelItems.length === 0 && (
-                    <p className="helper">No teasers yet.</p>
-                  )}
-                  {!modelItemsStatus && modelItems.length > 0 && (
-                    <div className="gallery-grid">
-                      {modelItems.map((item) => (
-                        <div key={`mine-${item.id}`} className="gallery-card">
-                          <div className="gallery-media">
-                            {item.preview_url ? (
-                              item.content_type === "video" ? (
-                                <video src={item.preview_url} muted playsInline />
-                              ) : (
-                                <img src={item.preview_url} alt={item.title} />
-                              )
-                            ) : (
-                              <div className="media-fallback">Preview pending</div>
-                            )}
-                          </div>
-                          <div className="gallery-body">
-                            <h4>{item.title}</h4>
-                            <p>{item.description || "Teaser content"}</p>
-                            <div className="gallery-meta">
-                              <span>{item.is_active ? "Approved" : "Pending approval"}</span>
-                              <strong>{item.content_type}</strong>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                  {showContentForm && (
+                    <div className="content-form">
+                      <label className="field">
+                        Title
+                        <input
+                          type="text"
+                          value={contentForm.title}
+                          onChange={(event) =>
+                            setContentForm((prev) => ({ ...prev, title: event.target.value }))
+                          }
+                          placeholder="Teaser title"
+                        />
+                      </label>
+                      <label className="field">
+                        Description
+                        <textarea
+                          rows="3"
+                          value={contentForm.description}
+                          onChange={(event) =>
+                            setContentForm((prev) => ({ ...prev, description: event.target.value }))
+                          }
+                          placeholder="Short teaser description"
+                        />
+                      </label>
+                      <div className="field-row">
+                        <label className="field">
+                          Content type
+                          <select
+                            value={contentForm.contentType}
+                            onChange={(event) =>
+                              setContentForm((prev) => ({
+                                ...prev,
+                                contentType: event.target.value,
+                              }))
+                            }
+                          >
+                            <option value="image">Photo</option>
+                            <option value="video">Video</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          Unlock price (optional)
+                          <input
+                            type="number"
+                            min="0"
+                            value={contentForm.unlockPrice}
+                            onChange={(event) =>
+                              setContentForm((prev) => ({
+                                ...prev,
+                                unlockPrice: event.target.value,
+                              }))
+                            }
+                            placeholder="₦ 0"
+                          />
+                        </label>
+                      </div>
+                      <label className="field file">
+                        Teaser media
+                        <input
+                          type="file"
+                          accept="image/*,video/*"
+                          onChange={(event) =>
+                            setContentForm((prev) => ({
+                              ...prev,
+                              mediaName: event.target.files?.[0]?.name || "",
+                              mediaFile: event.target.files?.[0] || null,
+                            }))
+                          }
+                        />
+                        <span className="file-name">
+                          {contentForm.mediaName || "No file selected"}
+                        </span>
+                      </label>
+                      {contentStatus && <p className="helper error">{contentStatus}</p>}
+                      <button type="button" className="cta primary alt" onClick={submitContent}>
+                        Submit teaser
+                      </button>
                     </div>
                   )}
-                </div>
-                {showBookings && (
                   <div className="content-list">
-                    <h4>My bookings</h4>
-                    {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}
-                    {!myBookingsStatus && myBookings.length === 0 && (
-                      <p className="helper">No bookings yet.</p>
+                    <h4>Your teasers</h4>
+                    {modelItemsStatus && <p className="helper error">{modelItemsStatus}</p>}
+                    {!modelItemsStatus && modelItems.length === 0 && (
+                      <p className="helper">No teasers yet.</p>
                     )}
-                    {!myBookingsStatus && myBookings.length > 0 && (
+                    {!modelItemsStatus && modelItems.length > 0 && (
                       <div className="gallery-grid">
-                        {myBookings.map((item) => (
-                          <div key={`booking-${item.id}`} className="gallery-card">
+                        {modelItems.map((item) => (
+                          <div key={`mine-${item.id}`} className="gallery-card">
+                            <div className="gallery-media">
+                              {item.preview_url ? (
+                                item.content_type === "video" ? (
+                                  <video src={item.preview_url} muted playsInline />
+                                ) : (
+                                  <img src={item.preview_url} alt={item.title} />
+                                )
+                              ) : (
+                                <div className="media-fallback">Preview pending</div>
+                              )}
+                            </div>
                             <div className="gallery-body">
-                              <h4>{item.session_type || "Session"}</h4>
-                              <p>{item.status || "pending"}</p>
+                              <h4>{item.title}</h4>
+                              <p>{item.description || "Teaser content"}</p>
                               <div className="gallery-meta">
-                                <span>{item.client_label || "Client"}</span>
-                                <strong>{item.duration_minutes || "-"} mins</strong>
+                                <span>{item.is_active ? "Approved" : "Pending approval"}</span>
+                                <strong>{item.content_type}</strong>
                               </div>
                             </div>
                           </div>
@@ -1272,8 +1168,146 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+                  {showBookings && (
+                    <div className="content-list">
+                      <h4>My bookings</h4>
+                      {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}
+                      {!myBookingsStatus && myBookings.length === 0 && (
+                        <p className="helper">No bookings yet.</p>
+                      )}
+                      {!myBookingsStatus && myBookings.length > 0 && (
+                        <div className="gallery-grid">
+                          {myBookings.map((item) => (
+                            <div key={`booking-${item.id}`} className="gallery-card">
+                              <div className="gallery-body">
+                                <h4>{item.session_type || "Session"}</h4>
+                                <p>{item.status || "pending"}</p>
+                                <div className="gallery-meta">
+                                  <span>{item.client_label || "Client"}</span>
+                                  <strong>{item.duration_minutes || "-"} mins</strong>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                {profile?.user && (
+                  <div className="flow-card">
+                    <h3>Welcome, {profile.model?.display_name || "Model"}</h3>
+                    <div className="line">
+                      <span>Status</span>
+                      <strong>{profile.model?.verification_status || "Pending"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Account type</span>
+                      <strong>Model</strong>
+                    </div>
+                  </div>
                 )}
-              </div>
+                {modelStep === 1 && (
+                  <div className="flow-card">
+                    <h3>Profile Setup</h3>
+                    <label className="field">
+                      Stage name
+                      <input
+                        type="text"
+                        value={modelForm.stageName}
+                        onChange={(event) =>
+                          setModelForm((prev) => ({ ...prev, stageName: event.target.value }))
+                        }
+                        placeholder="Jesse Belle"
+                      />
+                    </label>
+                    <label className="field">
+                      Email
+                      <input
+                        type="email"
+                        value={modelForm.email}
+                        onChange={(event) =>
+                          setModelForm((prev) => ({ ...prev, email: event.target.value }))
+                        }
+                        placeholder="you@email.com"
+                      />
+                    </label>
+                    <div className="field-row">
+                      <label className="field">
+                        Birth month
+                        <input
+                          type="number"
+                          min="1"
+                          max="12"
+                          value={modelForm.birthMonth}
+                          onChange={(event) =>
+                            setModelForm((prev) => ({ ...prev, birthMonth: event.target.value }))
+                          }
+                          placeholder="MM"
+                        />
+                      </label>
+                      <label className="field">
+                        Birth year
+                        <input
+                          type="number"
+                          min="1900"
+                          max="2100"
+                          value={modelForm.birthYear}
+                          onChange={(event) =>
+                            setModelForm((prev) => ({ ...prev, birthYear: event.target.value }))
+                          }
+                          placeholder="YYYY"
+                        />
+                      </label>
+                    </div>
+                    <p className="helper">18+ only. We verify eligibility and keep this private.</p>
+                    <label className="field">
+                      Short bio
+                      <textarea
+                        rows="3"
+                        value={modelForm.bio}
+                        onChange={(event) =>
+                          setModelForm((prev) => ({ ...prev, bio: event.target.value }))
+                        }
+                        placeholder="Describe your vibe, services, and boundaries."
+                      />
+                    </label>
+                  </div>
+                )}
+                {modelStep === 2 && (
+                  <div className="flow-card">
+                    <h3>Verification Media</h3>
+                    <p>Upload a short verification video for admin review.</p>
+                    <label className="field file">
+                      Verification video
+                      <input
+                        type="file"
+                        accept="video/*"
+                        onChange={(event) =>
+                          setModelForm((prev) => ({
+                            ...prev,
+                            videoName: event.target.files?.[0]?.name || "",
+                            videoFile: event.target.files?.[0] || null,
+                          }))
+                        }
+                      />
+                      <span className="file-name">{modelForm.videoName || "No file selected"}</span>
+                    </label>
+                  </div>
+                )}
+                {modelStep === 3 && (
+                  <div className="flow-card">
+                    <h3>Awaiting Approval</h3>
+                    <p>Your verification is in review. You will be notified once approved.</p>
+                    <button type="button" className="cta ghost" disabled>
+                      Dashboard unlocks after approval
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
           {modelStatus && (
