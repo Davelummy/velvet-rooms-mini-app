@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export default function Admin() {
   const [section, setSection] = useState("models");
@@ -9,6 +9,73 @@ export default function Admin() {
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
   const [initData, setInitData] = useState("");
+  const [liveQueue, setLiveQueue] = useState(false);
+  const [lastRefreshAt, setLastRefreshAt] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [preview, setPreview] = useState({ open: false, url: "", type: "video" });
+
+  const detailTitle = useMemo(() => {
+    if (!selectedItem) {
+      return "";
+    }
+    if (section === "models") {
+      return selectedItem.display_name || "Model verification";
+    }
+    if (section === "content") {
+      return selectedItem.title || "Content item";
+    }
+    if (section === "payments") {
+      return selectedItem.transaction_ref || "Crypto payment";
+    }
+    if (section === "escrows" || section === "disputes") {
+      return selectedItem.escrow_ref || "Escrow";
+    }
+    return "Queue item";
+  }, [section, selectedItem]);
+
+  const detailFields = useMemo(() => {
+    if (!selectedItem) {
+      return [];
+    }
+    if (section === "models") {
+      return [
+        { label: "Display name", value: selectedItem.display_name || "-" },
+        { label: "Public ID", value: selectedItem.public_id || "-" },
+        { label: "Status", value: selectedItem.verification_status || "-" },
+        { label: "Submitted", value: selectedItem.verification_submitted_at || "-" },
+        { label: "Approved at", value: selectedItem.approved_at || "-" },
+        { label: "Online", value: selectedItem.is_online ? "Online" : "Offline" },
+      ];
+    }
+    if (section === "content") {
+      return [
+        { label: "Title", value: selectedItem.title || "-" },
+        { label: "Creator", value: selectedItem.display_name || selectedItem.public_id || "-" },
+        { label: "Type", value: selectedItem.content_type || "-" },
+        { label: "Unlock price", value: selectedItem.price ? `₦${selectedItem.price}` : "Teaser" },
+        { label: "Status", value: selectedItem.is_active ? "Approved" : "Pending" },
+        { label: "Created", value: selectedItem.created_at || "-" },
+      ];
+    }
+    if (section === "payments") {
+      return [
+        { label: "Ref", value: selectedItem.transaction_ref || "-" },
+        { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
+        { label: "Status", value: selectedItem.status || "-" },
+        { label: "Public ID", value: selectedItem.public_id || "-" },
+        { label: "Network", value: selectedItem.metadata_json?.crypto_network || "-" },
+        { label: "Currency", value: selectedItem.metadata_json?.crypto_currency || "-" },
+        { label: "Hash", value: selectedItem.metadata_json?.crypto_tx_hash || "-" },
+      ];
+    }
+    return [
+      { label: "Escrow ref", value: selectedItem.escrow_ref || "-" },
+      { label: "Type", value: selectedItem.escrow_type || "-" },
+      { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
+      { label: "Payer", value: selectedItem.payer_public_id || "-" },
+      { label: "Receiver", value: selectedItem.receiver_public_id || "-" },
+    ];
+  }, [section, selectedItem]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -50,37 +117,54 @@ export default function Admin() {
     };
   }, []);
 
+  const loadQueue = useCallback(async () => {
+    if (!initData) {
+      setError("Open the admin console inside Telegram.");
+      return;
+    }
+    setError("");
+    let endpoint = "/api/admin/models";
+    if (section === "content") endpoint = "/api/admin/content";
+    if (section === "escrows") endpoint = "/api/admin/escrows";
+    if (section === "payments") endpoint = "/api/admin/payments";
+    if (section === "disputes") endpoint = "/api/admin/escrows";
+    if (section === "models" && modelView === "approved") {
+      endpoint = "/api/admin/models?status=approved";
+    }
+    if (section === "content" && contentView === "approved") {
+      endpoint = "/api/admin/content?status=approved";
+    }
+    const res = await fetch(endpoint, {
+      headers: { "x-telegram-init": initData },
+    });
+    if (!res.ok) {
+      setError(`Unable to load queue (HTTP ${res.status}).`);
+      setItems([]);
+      return;
+    }
+    const payload = await res.json();
+    setItems(payload.items || []);
+    setLastRefreshAt(new Date().toISOString());
+  }, [initData, section, modelView, contentView]);
+
   useEffect(() => {
-    const load = async () => {
-      if (!initData) {
-        setError("Open the admin console inside Telegram.");
-        return;
-      }
-      setError("");
-      let endpoint = "/api/admin/models";
-      if (section === "content") endpoint = "/api/admin/content";
-      if (section === "escrows") endpoint = "/api/admin/escrows";
-      if (section === "payments") endpoint = "/api/admin/payments";
-      if (section === "disputes") endpoint = "/api/admin/escrows";
-      if (section === "models" && modelView === "approved") {
-        endpoint = "/api/admin/models?status=approved";
-      }
-      if (section === "content" && contentView === "approved") {
-        endpoint = "/api/admin/content?status=approved";
-      }
-      const res = await fetch(endpoint, {
-        headers: { "x-telegram-init": initData },
-      });
-      if (!res.ok) {
-        setError(`Unable to load queue (HTTP ${res.status}).`);
-        setItems([]);
-        return;
-      }
-      const payload = await res.json();
-      setItems(payload.items || []);
-    };
-    load();
-  }, [section, initData, modelView, contentView]);
+    loadQueue();
+  }, [loadQueue]);
+
+  useEffect(() => {
+    if (!liveQueue) {
+      return;
+    }
+    const interval = setInterval(() => {
+      loadQueue();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [liveQueue, loadQueue]);
+
+  useEffect(() => {
+    setSelectedItem(null);
+    setPreview({ open: false, url: "", type: "video" });
+  }, [section, modelView, contentView]);
 
   const handleAction = async (action, payload) => {
     if (!initData) {
@@ -97,18 +181,35 @@ export default function Admin() {
       return;
     }
     setError("");
-    const refreshed = await fetch(
-      section === "content"
-        ? "/api/admin/content"
-        : section === "escrows"
-        ? "/api/admin/escrows"
-        : section === "payments"
-        ? "/api/admin/payments"
-        : "/api/admin/models",
-      { headers: { "x-telegram-init": initData } }
-    );
-    const data = await refreshed.json();
-    setItems(data.items || []);
+    setSelectedItem(null);
+    await loadQueue();
+  };
+
+  const exportAuditLog = () => {
+    const payload = {
+      section,
+      view: section === "models" ? modelView : section === "content" ? contentView : "all",
+      generated_at: new Date().toISOString(),
+      items,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `velvet-rooms-${section}-audit.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const openPreview = (url, type = "video") => {
+    if (!url) {
+      return;
+    }
+    setPreview({ open: true, url, type });
   };
 
   return (
@@ -294,25 +395,244 @@ export default function Admin() {
             </div>
           )}
           <div className="panel-actions">
-            <button type="button" className="cta primary">
-              Open live queue
+            <button
+              type="button"
+              className={`cta ${liveQueue ? "primary" : "ghost"}`}
+              onClick={() => setLiveQueue((prev) => !prev)}
+            >
+              {liveQueue ? "Live queue on" : "Open live queue"}
             </button>
-            <button type="button" className="cta ghost">
+            <button type="button" className="cta ghost" onClick={exportAuditLog}>
               Export audit log
             </button>
           </div>
+          {lastRefreshAt && (
+            <p className="helper">Last refresh: {new Date(lastRefreshAt).toLocaleString()}</p>
+          )}
           <div className="admin-pill">Manual approvals only • 18+ content</div>
         </aside>
 
         <div className="admin-list">
+          {preview.open && (
+            <div className="admin-preview">
+              <div className="admin-preview-card">
+                <div className="admin-actions-bar">
+                  <strong>Preview</strong>
+                  <button
+                    type="button"
+                    className="cta ghost"
+                    onClick={() => setPreview({ open: false, url: "", type: "video" })}
+                  >
+                    Close
+                  </button>
+                </div>
+                {preview.type === "video" ? (
+                  <video src={preview.url} controls />
+                ) : (
+                  <img src={preview.url} alt="Preview" />
+                )}
+              </div>
+            </div>
+          )}
           {error && <div className="empty">{error}</div>}
           {!error && (
             <div className="empty subtle">Live queue updates when new submissions arrive.</div>
           )}
-          {!error && items.length === 0 && (
+          {!error && !selectedItem && items.length === 0 && (
             <div className="empty">Queue is empty.</div>
           )}
+          {!error && selectedItem && (
+            <article className="admin-detail">
+              <div className="admin-detail-header">
+                <div>
+                  <p className="queue-id">
+                    {selectedItem.public_id ||
+                      selectedItem.escrow_ref ||
+                      selectedItem.transaction_ref ||
+                      selectedItem.id}
+                  </p>
+                  <h3>{detailTitle}</h3>
+                  <p className="queue-meta">
+                    {section === "models" &&
+                      (modelView === "approved" ? "Verified model" : "Verification pending")}
+                    {section === "content" && "Content awaiting approval"}
+                    {section === "payments" &&
+                      `Crypto · ${selectedItem.amount} · ${selectedItem.metadata_json?.crypto_tx_hash || "hash pending"}`}
+                    {(section === "escrows" || section === "disputes") &&
+                      `Held escrow · ${selectedItem.amount}`}
+                  </p>
+                </div>
+                <div className="queue-actions">
+                  <button
+                    type="button"
+                    className="cta ghost"
+                    onClick={() => setSelectedItem(null)}
+                  >
+                    Back to queue
+                  </button>
+                  {section === "models" && modelView === "pending" && (
+                    <>
+                      <button
+                        type="button"
+                        className="cta primary"
+                        onClick={() =>
+                          handleAction("/api/admin/models/approve", {
+                            user_id: selectedItem.user_id,
+                          })
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="cta primary alt"
+                        onClick={() =>
+                          handleAction("/api/admin/models/reject", {
+                            user_id: selectedItem.user_id,
+                          })
+                        }
+                      >
+                        Reject
+                      </button>
+                      {selectedItem.verification_video_url && (
+                        <button
+                          type="button"
+                          className="cta ghost"
+                          onClick={() =>
+                            openPreview(selectedItem.verification_video_url, "video")
+                          }
+                        >
+                          Preview video
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {section === "content" && (
+                    <>
+                      {selectedItem.preview_url && (
+                        <button
+                          type="button"
+                          className="cta ghost"
+                          onClick={() =>
+                            openPreview(
+                              selectedItem.preview_url,
+                              selectedItem.content_type === "video" ? "video" : "image"
+                            )
+                          }
+                        >
+                          Preview
+                        </button>
+                      )}
+                      {contentView === "pending" && (
+                        <>
+                          <button
+                            type="button"
+                            className="cta primary"
+                            onClick={() =>
+                              handleAction("/api/admin/content/approve", {
+                                content_id: selectedItem.id,
+                              })
+                            }
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="cta primary alt"
+                            onClick={() =>
+                              handleAction("/api/admin/content/reject", {
+                                content_id: selectedItem.id,
+                              })
+                            }
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        className="cta ghost"
+                        onClick={() =>
+                          handleAction("/api/admin/content/delete", {
+                            content_id: selectedItem.id,
+                          })
+                        }
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                  {(section === "escrows" || section === "disputes") && (
+                    <>
+                      <button
+                        type="button"
+                        className="cta primary"
+                        onClick={() =>
+                          handleAction("/api/admin/escrows/release", {
+                            escrow_ref: selectedItem.escrow_ref,
+                          })
+                        }
+                      >
+                        Release
+                      </button>
+                      <button
+                        type="button"
+                        className="cta primary alt"
+                        onClick={() =>
+                          handleAction("/api/admin/escrows/refund", {
+                            escrow_ref: selectedItem.escrow_ref,
+                          })
+                        }
+                      >
+                        Refund
+                      </button>
+                    </>
+                  )}
+                  {section === "payments" && (
+                    <>
+                      <div className="status-pill live">
+                        {(selectedItem.metadata_json?.crypto_currency || "CRYPTO") +
+                          " " +
+                          (selectedItem.metadata_json?.crypto_network || "")}
+                      </div>
+                      <button
+                        type="button"
+                        className="cta primary"
+                        onClick={() =>
+                          handleAction("/api/admin/payments/approve", {
+                            transaction_ref: selectedItem.transaction_ref,
+                          })
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="cta primary alt"
+                        onClick={() =>
+                          handleAction("/api/admin/payments/reject", {
+                            transaction_ref: selectedItem.transaction_ref,
+                          })
+                        }
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="admin-detail-grid">
+                {detailFields.map((field) => (
+                  <div key={field.label} className="admin-detail-card">
+                    <span>{field.label}</span>
+                    <strong>{field.value}</strong>
+                  </div>
+                ))}
+              </div>
+            </article>
+          )}
           {!error &&
+            !selectedItem &&
             items.map((item) => (
               <article
                 key={item.user_id || item.id || item.escrow_ref || item.transaction_ref}
@@ -336,6 +656,13 @@ export default function Admin() {
                   </p>
                 </div>
                 <div className="queue-actions">
+                  <button
+                    type="button"
+                    className="cta ghost"
+                    onClick={() => setSelectedItem(item)}
+                  >
+                    View details
+                  </button>
                   {section === "models" && modelView === "pending" && (
                     <>
                       <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
@@ -364,14 +691,13 @@ export default function Admin() {
                         Reject
                       </button>
                       {item.verification_video_url && (
-                        <a
+                        <button
+                          type="button"
                           className="cta ghost"
-                          href={item.verification_video_url}
-                          target="_blank"
-                          rel="noreferrer"
+                          onClick={() => openPreview(item.verification_video_url, "video")}
                         >
-                          View video
-                        </a>
+                          Preview video
+                        </button>
                       )}
                     </>
                   )}
@@ -386,14 +712,18 @@ export default function Admin() {
                   {section === "content" && (
                     <>
                       {item.preview_url && (
-                        <a
+                        <button
+                          type="button"
                           className="cta ghost"
-                          href={item.preview_url}
-                          target="_blank"
-                          rel="noreferrer"
+                          onClick={() =>
+                            openPreview(
+                              item.preview_url,
+                              item.content_type === "video" ? "video" : "image"
+                            )
+                          }
                         >
-                          View preview
-                        </a>
+                          Preview
+                        </button>
                       )}
                       {contentView === "pending" && (
                         <>
