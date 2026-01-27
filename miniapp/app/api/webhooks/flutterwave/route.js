@@ -19,29 +19,36 @@ export async function POST(request) {
   }
 
   const txRes = await query(
-    `SELECT id, amount, status FROM transactions WHERE transaction_ref = $1`,
+    `SELECT id, amount, status, metadata_json FROM transactions WHERE transaction_ref = $1`,
     [txRef]
   );
   if (!txRes.rowCount) {
     return NextResponse.json({ ok: true });
   }
   const transaction = txRes.rows[0];
+  let metadata = transaction.metadata_json || {};
+  if (typeof metadata === "string") {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      metadata = {};
+    }
+  }
 
   if (event !== "charge.completed") {
     return NextResponse.json({ ok: true });
   }
 
   if (data?.status !== "successful") {
+    const failedMeta = {
+      ...metadata,
+      flutterwave_status: data?.status || "failed",
+      flutterwave_tx_id: data?.id || null,
+      flutterwave_ref: data?.flw_ref || null,
+    };
     await query(
       `UPDATE transactions SET status = 'failed', metadata_json = $1 WHERE id = $2`,
-      [
-        JSON.stringify({
-          flutterwave_status: data?.status || "failed",
-          flutterwave_tx_id: data?.id || null,
-          flutterwave_ref: data?.flw_ref || null,
-        }),
-        transaction.id,
-      ]
+      [JSON.stringify(failedMeta), transaction.id]
     );
     return NextResponse.json({ ok: true });
   }
@@ -50,19 +57,18 @@ export async function POST(request) {
     return NextResponse.json({ error: "amount_mismatch" }, { status: 400 });
   }
 
+  const successMeta = {
+    ...metadata,
+    flutterwave_tx_id: data?.id || null,
+    flutterwave_ref: data?.flw_ref || null,
+    flutterwave_status: data?.status || null,
+    flutterwave_currency: data?.currency || null,
+  };
   await query(
     `UPDATE transactions
      SET status = 'submitted', metadata_json = $1
      WHERE id = $2`,
-    [
-      JSON.stringify({
-        flutterwave_tx_id: data?.id || null,
-        flutterwave_ref: data?.flw_ref || null,
-        flutterwave_status: data?.status || null,
-        flutterwave_currency: data?.currency || null,
-      }),
-      transaction.id,
-    ]
+    [JSON.stringify(successMeta), transaction.id]
   );
 
   return NextResponse.json({ ok: true });
