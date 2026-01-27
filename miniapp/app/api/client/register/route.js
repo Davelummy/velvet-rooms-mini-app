@@ -39,6 +39,9 @@ export async function POST(request) {
   const birthMonth = (body?.birth_month || "").toString().trim();
   const birthYear = (body?.birth_year || "").toString().trim();
 
+  if (!displayName) {
+    return NextResponse.json({ error: "missing_display_name" }, { status: 400 });
+  }
   if (!email) {
     return NextResponse.json({ error: "missing_email" }, { status: 400 });
   }
@@ -57,9 +60,18 @@ export async function POST(request) {
     }
   }
 
+  const normalizedUsername = displayName.replace(/^@/, "");
+  const usernameCheck = await query(
+    "SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND telegram_id <> $2",
+    [normalizedUsername, tgUser.id]
+  );
+  if (usernameCheck.rowCount) {
+    return NextResponse.json({ error: "username_taken" }, { status: 409 });
+  }
+
   const userId = await ensureUser({
     telegramId: tgUser.id,
-    username: tgUser.username || null,
+    username: normalizedUsername,
     firstName: tgUser.first_name || displayName || null,
     lastName: tgUser.last_name || null,
     role: "client",
