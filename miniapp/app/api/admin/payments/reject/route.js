@@ -27,7 +27,7 @@ export async function POST(request) {
   });
 
   const txRes = await query(
-    `SELECT id FROM transactions WHERE transaction_ref = $1`,
+    `SELECT id, metadata_json FROM transactions WHERE transaction_ref = $1`,
     [transactionRef]
   );
   if (!txRes.rowCount) {
@@ -44,6 +44,20 @@ export async function POST(request) {
      WHERE transaction_id = $1`,
     [txRes.rows[0].id]
   );
+
+  let metadata = txRes.rows[0].metadata_json || {};
+  if (typeof metadata === "string") {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      metadata = {};
+    }
+  }
+  if (metadata.escrow_type === "session" && metadata.session_id) {
+    await query("UPDATE sessions SET status = 'rejected' WHERE id = $1", [
+      metadata.session_id,
+    ]);
+  }
 
   await query(
     `INSERT INTO admin_actions (admin_id, action_type, target_type, target_id, details, created_at)

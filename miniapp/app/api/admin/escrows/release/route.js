@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
+import { getSupabase } from "../../../_lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -10,11 +11,25 @@ async function sendContent(buyerTelegramId, content) {
   if (!token) {
     return false;
   }
+  let media = content.telegram_file_id;
+  if (media && media.startsWith("content/")) {
+    const supabase = getSupabase();
+    const bucket =
+      process.env.SUPABASE_CONTENT_BUCKET ||
+      process.env.SUPABASE_FULL_CONTENT_BUCKET ||
+      process.env.SUPABASE_BUCKET ||
+      "velvetrooms-content";
+    const { data } = await supabase.storage.from(bucket).createSignedUrl(media, 60 * 60);
+    media = data?.signedUrl || null;
+  }
+  if (!media) {
+    return false;
+  }
   const method = content.content_type === "video" ? "sendVideo" : "sendPhoto";
   const payload = {
     chat_id: buyerTelegramId,
     caption: `${content.title}\n${content.description || ""}`.trim(),
-    [content.content_type === "video" ? "video" : "photo"]: content.telegram_file_id,
+    [content.content_type === "video" ? "video" : "photo"]: media,
   };
   const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
@@ -99,6 +114,13 @@ export async function POST(request) {
     );
   }
 
+  if (escrow.escrow_type === "session" && escrow.related_id) {
+    await query(
+      `UPDATE sessions SET status = 'completed', completed_at = NOW() WHERE id = $1`,
+      [escrow.related_id]
+    );
+  }
+
   await query(
     `UPDATE escrow_accounts
      SET status = 'released', released_at = NOW(), release_condition_met = TRUE
@@ -126,8 +148,21 @@ export async function POST(request) {
     const message =
       escrow.escrow_type === "access_fee"
         ? "Access granted ✅ Your gallery is now unlocked."
+        : escrow.escrow_type === "session"
+        ? `Session completed ✅ Escrow ${escrowRef} released.`
         : `Escrow ${escrowRef} has been released.`;
     await sendMessage(payerRes.rows[0].telegram_id, message);
+  }
+  if (escrow.receiver_id) {
+    const receiverRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+      escrow.receiver_id,
+    ]);
+    if (receiverRes.rowCount) {
+      await sendMessage(
+        receiverRes.rows[0].telegram_id,
+        `Escrow ${escrowRef} has been released.`
+      );
+    }
   }
 
   return NextResponse.json({ ok: true });

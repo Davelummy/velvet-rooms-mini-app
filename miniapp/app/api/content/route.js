@@ -38,6 +38,7 @@ export async function POST(request) {
   const description = (body?.description || "").toString().trim();
   const contentTypeRaw = (body?.content_type || "").toString().trim();
   const previewPath = (body?.preview_path || "").toString().trim();
+  const fullPath = (body?.full_path || "").toString().trim();
   const priceRaw = body?.price;
   const priceValue = priceRaw === null || priceRaw === "" ? null : Number(priceRaw);
 
@@ -72,6 +73,12 @@ export async function POST(request) {
   }
   const safeType = contentTypeRaw;
   const sanitizedPrice = priceValue && priceValue > 0 ? priceValue : null;
+  if (sanitizedPrice && !fullPath) {
+    return NextResponse.json({ error: "full_content_required" }, { status: 400 });
+  }
+  if (fullPath && !fullPath.startsWith(`content/${userId}/`)) {
+    return NextResponse.json({ error: "invalid_full_path" }, { status: 400 });
+  }
 
   const now = new Date();
   const insertRes = await query(
@@ -79,7 +86,7 @@ export async function POST(request) {
      (model_id, content_type, title, description, price, telegram_file_id, preview_file_id, is_active, created_at)
      VALUES ($1, $2, $3, $4, $5, NULL, $6, FALSE, $7)
      RETURNING id`,
-    [userId, safeType, title, description, sanitizedPrice, previewPath, now]
+    [userId, safeType, title, description, sanitizedPrice, fullPath || null, previewPath, now]
   );
 
   const adminToken = process.env.ADMIN_BOT_TOKEN || "";
@@ -165,7 +172,7 @@ export async function GET(request) {
     }
     res = await query(
       `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
-              dc.preview_file_id, u.public_id, mp.display_name
+              dc.preview_file_id, dc.model_id, u.public_id, mp.display_name
        FROM digital_content dc
        JOIN users u ON u.id = dc.model_id
        LEFT JOIN model_profiles mp ON mp.user_id = dc.model_id

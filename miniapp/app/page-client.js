@@ -39,6 +39,11 @@ export default function Home() {
   const [galleryStatus, setGalleryStatus] = useState("");
   const [visibleTeasers, setVisibleTeasers] = useState({});
   const [consumedTeasers, setConsumedTeasers] = useState({});
+  const [previewOverlay, setPreviewOverlay] = useState({
+    open: false,
+    item: null,
+    remaining: 0,
+  });
   const [showContentForm, setShowContentForm] = useState(false);
   const [contentStatus, setContentStatus] = useState("");
   const [modelItems, setModelItems] = useState([]);
@@ -53,12 +58,15 @@ export default function Home() {
     contentType: "image",
     mediaFile: null,
     mediaName: "",
+    fullFile: null,
+    fullName: "",
   });
   const [contentRefreshKey, setContentRefreshKey] = useState(0);
   const [paymentState, setPaymentState] = useState({
     open: false,
     mode: null,
     contentId: null,
+    session: null,
     amount: null,
     transactionRef: "",
     networks: [],
@@ -69,7 +77,24 @@ export default function Home() {
     txHash: "",
     status: "",
   });
+  const [bookingSheet, setBookingSheet] = useState({
+    open: false,
+    modelId: null,
+    modelName: "",
+    sessionType: "video",
+    duration: 10,
+    price: 9000,
+    status: "",
+  });
   const teaserViewMs = 60000;
+  const sessionPricing = {
+    chat: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
+    voice: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
+    video: { 5: 5000, 10: 9000, 20: 16000, 30: 22000 },
+  };
+
+  const getSessionPrice = (type, duration) =>
+    sessionPricing[type]?.[duration] ?? null;
 
   useEffect(() => {
     if (roleLocked) {
@@ -134,6 +159,24 @@ export default function Home() {
     const interval = setInterval(ping, 30000);
     return () => clearInterval(interval);
   }, [initData, role]);
+
+  useEffect(() => {
+    if (!previewOverlay.open) {
+      return;
+    }
+    const totalSeconds = Math.ceil(teaserViewMs / 1000);
+    setPreviewOverlay((prev) => ({ ...prev, remaining: totalSeconds }));
+    const interval = setInterval(() => {
+      setPreviewOverlay((prev) => {
+        const next = prev.remaining - 1;
+        if (next <= 0) {
+          return { open: false, item: null, remaining: 0 };
+        }
+        return { ...prev, remaining: next };
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [previewOverlay.open, teaserViewMs]);
 
   useEffect(() => {
     if (!initData || role !== "client") {
@@ -334,7 +377,47 @@ export default function Home() {
     }
   };
 
-  const startCryptoPayment = async ({ mode, contentId = null }) => {
+  const openBooking = (item) => {
+    const defaultType = "video";
+    const defaultDuration = 10;
+    const price = getSessionPrice(defaultType, defaultDuration);
+    setBookingSheet({
+      open: true,
+      modelId: item.model_id,
+      modelName: item.display_name || item.public_id || "Model",
+      sessionType: defaultType,
+      duration: defaultDuration,
+      price: price || 0,
+      status: "",
+    });
+  };
+
+  const openPreview = (item) => {
+    if (consumedTeasers[item.id]) {
+      return;
+    }
+    if (!item.preview_url) {
+      setGalleryStatus("Preview unavailable. Try again later.");
+      return;
+    }
+    setGalleryStatus("");
+    setConsumedTeasers((prev) => ({ ...prev, [item.id]: true }));
+    setPreviewOverlay({ open: true, item, remaining: Math.ceil(teaserViewMs / 1000) });
+  };
+
+  const closePreview = () => {
+    setPreviewOverlay({ open: false, item: null, remaining: 0 });
+  };
+
+  useEffect(() => {
+    if (!bookingSheet.open) {
+      return;
+    }
+    const price = getSessionPrice(bookingSheet.sessionType, bookingSheet.duration);
+    setBookingSheet((prev) => ({ ...prev, price: price || 0 }));
+  }, [bookingSheet.open, bookingSheet.sessionType, bookingSheet.duration]);
+
+  const startCryptoPayment = async ({ mode, contentId = null, session = null }) => {
     if (!initData) {
       setPaymentState((prev) => ({
         ...prev,
@@ -345,9 +428,15 @@ export default function Home() {
     }
     const payload = {
       initData,
-      escrow_type: mode === "access" ? "access_fee" : "content",
+      escrow_type:
+        mode === "access" ? "access_fee" : mode === "session" ? "session" : "content",
       content_id: contentId,
     };
+    if (mode === "session" && session) {
+      payload.model_id = session.modelId;
+      payload.session_type = session.sessionType;
+      payload.duration_minutes = session.duration;
+    }
     try {
       const res = await fetch("/api/payments/crypto/initiate", {
         method: "POST",
@@ -372,6 +461,7 @@ export default function Home() {
         open: true,
         mode,
         contentId,
+        session,
         amount: data.amount,
         transactionRef: data.transaction_ref,
         networks,
@@ -583,6 +673,12 @@ export default function Home() {
       setContentStatus("Add a title and teaser media.");
       return;
     }
+    const unlockPriceNumber =
+      contentForm.unlockPrice === "" ? 0 : Number(contentForm.unlockPrice);
+    if (unlockPriceNumber > 0 && !contentForm.fullFile) {
+      setContentStatus("Upload the full content for paid unlocks.");
+      return;
+    }
     try {
       setContentStatus("Preparing upload…");
       const uploadInit = await fetch("/api/content/upload-url", {
@@ -591,6 +687,7 @@ export default function Home() {
         body: JSON.stringify({
           initData,
           filename: contentForm.mediaFile.name,
+          kind: "teaser",
         }),
       });
       if (!uploadInit.ok) {
@@ -614,6 +711,40 @@ export default function Home() {
         setContentStatus(`Upload failed (HTTP ${uploadRes.status}).`);
         return;
       }
+      let fullPath = "";
+      if (unlockPriceNumber > 0 && contentForm.fullFile) {
+        const fullInit = await fetch("/api/content/upload-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            initData,
+            filename: contentForm.fullFile.name,
+            kind: "full",
+          }),
+        });
+        if (!fullInit.ok) {
+          setContentStatus("Unable to start full upload. Try again.");
+          return;
+        }
+        const fullPayload = await fullInit.json();
+        if (!fullPayload?.signed_url || !fullPayload?.path) {
+          setContentStatus("Full upload link missing. Try again.");
+          return;
+        }
+        const fullRes = await fetch(fullPayload.signed_url, {
+          method: "PUT",
+          headers: {
+            "Content-Type": contentForm.fullFile.type || "application/octet-stream",
+            "x-upsert": "true",
+          },
+          body: contentForm.fullFile,
+        });
+        if (!fullRes.ok) {
+          setContentStatus(`Full upload failed (HTTP ${fullRes.status}).`);
+          return;
+        }
+        fullPath = fullPayload.path;
+      }
       const res = await fetch("/api/content", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -621,9 +752,10 @@ export default function Home() {
           initData,
           title: contentForm.title,
           description: contentForm.description,
-          price: contentForm.unlockPrice,
+          price: unlockPriceNumber > 0 ? unlockPriceNumber : "",
           content_type: contentForm.contentType,
           preview_path: uploadPayload.path,
+          full_path: fullPath || undefined,
         }),
       });
       if (!res.ok) {
@@ -644,6 +776,8 @@ export default function Home() {
       contentType: "image",
       mediaFile: null,
       mediaName: "",
+      fullFile: null,
+      fullName: "",
     });
   };
 
@@ -777,11 +911,13 @@ export default function Home() {
               <p className="eyebrow">Client Onboarding</p>
               <h2>Unlock the content gallery.</h2>
             </div>
-            <div className="stepper">
-              <span className={clientStep >= 1 ? "step active" : "step"}>1</span>
-              <span className={clientStep >= 2 ? "step active" : "step"}>2</span>
-              <span className={clientStep >= 3 ? "step active" : "step"}>3</span>
-            </div>
+            {!clientAccessPaid && (
+              <div className="stepper">
+                <span className={clientStep >= 1 ? "step active" : "step"}>1</span>
+                <span className={clientStep >= 2 ? "step active" : "step"}>2</span>
+                <span className={clientStep >= 3 ? "step active" : "step"}>3</span>
+              </div>
+            )}
           </header>
           <div className="flow-body">
             {profile?.user && (
@@ -925,51 +1061,38 @@ export default function Home() {
                 )}
                 {!galleryStatus && galleryItems.length > 0 && (
                   <div className="gallery-grid" id="client-gallery">
-                    {galleryItems.map((item) => (
-                      <div key={`gallery-${item.id}`} className="gallery-card">
-                        <div className="gallery-media">
-                          {visibleTeasers[item.id] && item.preview_url ? (
-                            item.content_type === "video" ? (
-                              <video src={item.preview_url} muted playsInline />
-                            ) : (
-                              <img src={item.preview_url} alt={item.title} />
-                            )
-                          ) : (
-                            <div className="media-fallback">Tap to view</div>
-                          )}
-                        </div>
-                        <div className="gallery-body">
-                          <h4>{item.title}</h4>
-                          <p>{item.description || "Teaser content"}</p>
-                          <div className="gallery-meta">
-                            <span>{item.display_name || item.public_id}</span>
-                            <strong>{item.price ? `Unlock ₦${item.price}` : "Teaser"}</strong>
-                          </div>
-                          <button
-                            type="button"
-                            className="cta ghost"
-                            onClick={() => {
-                              if (consumedTeasers[item.id]) {
-                                return;
-                              }
-                              setVisibleTeasers((prev) => ({ ...prev, [item.id]: true }));
-                              setConsumedTeasers((prev) => ({ ...prev, [item.id]: true }));
-                              setTimeout(() => {
-                                setVisibleTeasers((prev) => ({
-                                  ...prev,
-                                  [item.id]: false,
-                                }));
-                              }, teaserViewMs);
-                            }}
-                            disabled={consumedTeasers[item.id]}
-                          >
-                            {consumedTeasers[item.id] ? "Viewed" : "View teaser"}
-                          </button>
-                          <button
-                            type="button"
-                            className="cta ghost"
-                            onClick={() =>
-                              startCryptoPayment({ mode: "content", contentId: item.id })
+                        {galleryItems.map((item) => (
+                          <div key={`gallery-${item.id}`} className="gallery-card">
+                            <div className="gallery-media">
+                              <div className="media-fallback">Tap to view</div>
+                            </div>
+                            <div className="gallery-body">
+                              <h4>{item.title}</h4>
+                              <p>{item.description || "Teaser content"}</p>
+                              <div className="gallery-meta">
+                                <span>{item.display_name || item.public_id}</span>
+                                <strong>{item.price ? `Unlock ₦${item.price}` : "Teaser"}</strong>
+                              </div>
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() => openPreview(item)}
+                                disabled={consumedTeasers[item.id]}
+                              >
+                                {consumedTeasers[item.id] ? "Viewed" : "View teaser"}
+                              </button>
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() => openBooking(item)}
+                              >
+                                Book session
+                              </button>
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() =>
+                                  startCryptoPayment({ mode: "content", contentId: item.id })
                             }
                             disabled={!item.price || Number(item.price) <= 0}
                           >
@@ -1070,6 +1193,114 @@ export default function Home() {
             {paymentState.status && <p className="helper">{paymentState.status}</p>}
             <button type="button" className="cta primary" onClick={submitCryptoPayment}>
               Submit payment
+            </button>
+          </div>
+        </section>
+      )}
+
+      {previewOverlay.open && previewOverlay.item && (
+        <section className="preview-overlay" onClick={closePreview}>
+          <div className="preview-card" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <p className="eyebrow">View once</p>
+                <h3>{previewOverlay.item.title}</h3>
+              </div>
+              <button type="button" className="cta ghost" onClick={closePreview}>
+                Close
+              </button>
+            </header>
+            <p className="helper">
+              Closing in {previewOverlay.remaining}s
+            </p>
+            <div className="preview-media">
+              {previewOverlay.item.content_type === "video" ? (
+                <video
+                  src={previewOverlay.item.preview_url}
+                  autoPlay
+                  playsInline
+                  controls
+                />
+              ) : (
+                <img src={previewOverlay.item.preview_url} alt={previewOverlay.item.title} />
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {bookingSheet.open && (
+        <section className="payment-sheet">
+          <div className="payment-card">
+            <header>
+              <h3>Book a session</h3>
+              <button
+                type="button"
+                className="cta ghost"
+                onClick={() => setBookingSheet((prev) => ({ ...prev, open: false }))}
+              >
+                Close
+              </button>
+            </header>
+            <p className="helper">
+              Booking with {bookingSheet.modelName}. Select a session package to continue.
+            </p>
+            <div className="field-row">
+              <label className="field">
+                Session type
+                <select
+                  value={bookingSheet.sessionType}
+                  onChange={(event) =>
+                    setBookingSheet((prev) => ({
+                      ...prev,
+                      sessionType: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="chat">Private chat</option>
+                  <option value="voice">Voice call</option>
+                  <option value="video">Video call</option>
+                </select>
+              </label>
+              <label className="field">
+                Duration
+                <select
+                  value={bookingSheet.duration}
+                  onChange={(event) =>
+                    setBookingSheet((prev) => ({
+                      ...prev,
+                      duration: Number(event.target.value),
+                    }))
+                  }
+                >
+                  <option value={5}>5 min</option>
+                  <option value={10}>10 min</option>
+                  <option value={20}>20 min</option>
+                  <option value={30}>30 min</option>
+                </select>
+              </label>
+            </div>
+            <div className="wallet-box">
+              <span>Session fee</span>
+              <strong>₦{bookingSheet.price || "-"}</strong>
+            </div>
+            {bookingSheet.status && <p className="helper">{bookingSheet.status}</p>}
+            <button
+              type="button"
+              className="cta primary"
+              onClick={() => {
+                startCryptoPayment({
+                  mode: "session",
+                  session: {
+                    modelId: bookingSheet.modelId,
+                    sessionType: bookingSheet.sessionType,
+                    duration: bookingSheet.duration,
+                  },
+                });
+                setBookingSheet((prev) => ({ ...prev, open: false, status: "" }));
+              }}
+            >
+              Proceed to payment
             </button>
           </div>
         </section>
@@ -1192,6 +1423,25 @@ export default function Home() {
                           />
                         </label>
                       </div>
+                      {Number(contentForm.unlockPrice || 0) > 0 && (
+                        <label className="field file">
+                          Full content (required for paid unlocks)
+                          <input
+                            type="file"
+                            accept="image/*,video/*"
+                            onChange={(event) =>
+                              setContentForm((prev) => ({
+                                ...prev,
+                                fullName: event.target.files?.[0]?.name || "",
+                                fullFile: event.target.files?.[0] || null,
+                              }))
+                            }
+                          />
+                          <span className="file-name">
+                            {contentForm.fullName || "No file selected"}
+                          </span>
+                        </label>
+                      )}
                       <label className="field file">
                         Teaser media
                         <input

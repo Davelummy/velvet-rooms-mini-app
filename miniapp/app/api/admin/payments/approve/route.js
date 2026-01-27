@@ -104,6 +104,21 @@ export async function POST(request) {
     }
   }
 
+  if (escrowType === "session") {
+    relatedId = metadata.session_id || null;
+    receiverId = metadata.model_id || null;
+    releaseCondition = "both_confirmed";
+    if (!relatedId || !receiverId) {
+      return NextResponse.json({ error: "session_metadata_missing" }, { status: 400 });
+    }
+    await query(
+      `UPDATE sessions
+       SET status = 'pending', package_price = $1, duration_minutes = $2
+       WHERE id = $3`,
+      [transaction.amount, metadata.duration_minutes || null, relatedId]
+    );
+  }
+
   const amount = Number(transaction.amount || 0);
   const { platformFee, receiverPayout } = calculateFees(amount, escrowType);
   const escrowRef = generateEscrowRef(escrowType.slice(0, 3));
@@ -138,12 +153,20 @@ export async function POST(request) {
   }
 
   if (escrowType === "content") {
-    await query(
+    const purchaseRes = await query(
       `UPDATE content_purchases
        SET escrow_id = $1, status = 'paid'
-       WHERE transaction_id = $2`,
+       WHERE transaction_id = $2
+       RETURNING id`,
       [escrowId, transaction.id]
     );
+    if (!purchaseRes.rowCount) {
+      await query(
+        `INSERT INTO content_purchases (content_id, client_id, transaction_id, price_paid, escrow_id, status, purchased_at)
+         VALUES ($1, $2, $3, $4, $5, 'paid', NOW())`,
+        [relatedId, transaction.user_id, transaction.id, amount, escrowId]
+      );
+    }
   }
 
   await query(

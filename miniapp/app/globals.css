@@ -162,6 +162,48 @@ h1 {
   margin-top: 16px;
 }
 
+.preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 5, 12, 0.86);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 80;
+  padding: 24px;
+}
+
+.preview-card {
+  width: min(520px, 100%);
+  background: rgba(20, 12, 18, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.4);
+}
+
+.preview-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preview-media {
+  margin-top: 16px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.preview-media img,
+.preview-media video {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: cover;
+  display: block;
+}
+
 .status {
   display: inline-flex;
   align-items: center;

@@ -7,7 +7,15 @@ export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
-function getTeaserBucket() {
+function getBucket(kind = "teaser") {
+  if (kind === "full") {
+    return (
+      process.env.SUPABASE_CONTENT_BUCKET ||
+      process.env.SUPABASE_FULL_CONTENT_BUCKET ||
+      process.env.SUPABASE_BUCKET ||
+      "velvetrooms-content"
+    );
+  }
   return (
     process.env.SUPABASE_TEASER_BUCKET ||
     process.env.SUPABASE_CONTENT_BUCKET ||
@@ -46,9 +54,11 @@ export async function POST(request) {
   }
 
   const filename = (body?.filename || "teaser.mp4").toString();
+  const kind = (body?.kind || "teaser").toString().toLowerCase();
   const ext = filename.includes(".") ? filename.split(".").pop() : "mp4";
-  const bucket = getTeaserBucket();
-  const filePath = `teasers/${userRes.rows[0].id}/${Date.now()}.${ext}`;
+  const bucket = getBucket(kind);
+  const prefix = kind === "full" ? "content" : "teasers";
+  const filePath = `${prefix}/${userRes.rows[0].id}/${Date.now()}.${ext}`;
 
   const supabase = getSupabase();
   const { data, error } = await supabase.storage

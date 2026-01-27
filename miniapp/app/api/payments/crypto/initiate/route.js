@@ -28,7 +28,7 @@ export async function POST(request) {
 
   const escrowType = body?.escrow_type || "";
   const contentId = Number(body?.content_id || 0);
-  if (!["access_fee", "content"].includes(escrowType)) {
+  if (!["access_fee", "content", "session"].includes(escrowType)) {
     return NextResponse.json({ error: "invalid_escrow_type" }, { status: 400 });
   }
 
@@ -74,7 +74,7 @@ export async function POST(request) {
       return NextResponse.json({ error: "missing_content" }, { status: 400 });
     }
     const contentRes = await query(
-      `SELECT dc.id, dc.price, dc.model_id, dc.is_active
+      `SELECT dc.id, dc.price, dc.model_id, dc.is_active, dc.telegram_file_id
        FROM digital_content dc
        WHERE dc.id = $1`,
       [contentId]
@@ -89,9 +89,53 @@ export async function POST(request) {
     if (!content.price || Number(content.price) <= 0) {
       return NextResponse.json({ error: "content_not_priced" }, { status: 400 });
     }
+    if (!content.telegram_file_id) {
+      return NextResponse.json({ error: "content_missing_full_media" }, { status: 400 });
+    }
     amount = Number(content.price);
     metadata.content_id = contentId;
     metadata.model_id = content.model_id;
+  }
+
+  if (escrowType === "session") {
+    const modelId = Number(body?.model_id || 0);
+    const sessionType = (body?.session_type || "").toString().trim().toLowerCase();
+    const durationMinutes = Number(body?.duration_minutes || 0);
+    if (!modelId || !sessionType || !durationMinutes) {
+      return NextResponse.json({ error: "missing_session_fields" }, { status: 400 });
+    }
+    const modelRes = await query(
+      `SELECT u.id, mp.verification_status
+       FROM users u
+       JOIN model_profiles mp ON mp.user_id = u.id
+       WHERE u.id = $1`,
+      [modelId]
+    );
+    if (!modelRes.rowCount || modelRes.rows[0].verification_status !== "approved") {
+      return NextResponse.json({ error: "model_not_approved" }, { status: 400 });
+    }
+    const priceTable = {
+      chat: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
+      voice: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
+      video: { 5: 5000, 10: 9000, 20: 16000, 30: 22000 },
+    };
+    const tier = priceTable[sessionType];
+    const sessionAmount = tier?.[durationMinutes];
+    if (!sessionAmount) {
+      return NextResponse.json({ error: "invalid_session_package" }, { status: 400 });
+    }
+    amount = sessionAmount;
+    metadata.model_id = modelId;
+    metadata.session_type = sessionType;
+    metadata.duration_minutes = durationMinutes;
+    const sessionRef = generateTransactionRef().replace("CRYPTO", "SES");
+    const sessionRes = await query(
+      `INSERT INTO sessions (session_ref, client_id, model_id, session_type, package_price, status, duration_minutes, created_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending_payment', $6, NOW())
+       RETURNING id`,
+      [sessionRef, userId, modelId, sessionType, amount, durationMinutes]
+    );
+    metadata.session_id = sessionRes.rows[0]?.id;
   }
 
   const transactionRef = generateTransactionRef();
