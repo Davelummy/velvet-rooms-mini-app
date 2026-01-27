@@ -76,7 +76,7 @@ export default function Admin() {
         { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
         { label: "Status", value: selectedItem.status || "-" },
         { label: "Provider", value: selectedItem.payment_provider || "-" },
-        { label: "Public ID", value: selectedItem.public_id || "-" },
+        { label: "Username", value: selectedItem.username || selectedItem.public_id || "-" },
         {
           label: "Reference",
           value:
@@ -99,8 +99,14 @@ export default function Admin() {
       { label: "Type", value: selectedItem.escrow_type || "-" },
       { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
       { label: "Status", value: selectedItem.status || "-" },
-      { label: "Payer", value: selectedItem.payer_public_id || "-" },
-      { label: "Receiver", value: selectedItem.receiver_public_id || "-" },
+      {
+        label: "Payer",
+        value: selectedItem.payer_username || selectedItem.payer_public_id || "-",
+      },
+      {
+        label: "Receiver",
+        value: selectedItem.receiver_username || selectedItem.receiver_public_id || "-",
+      },
     ];
   }, [section, selectedItem]);
 
@@ -545,7 +551,8 @@ export default function Admin() {
               <div className="admin-detail-header">
                 <div>
                   <p className="queue-id">
-                    {selectedItem.public_id ||
+                    {(section === "payments" && (selectedItem.username || selectedItem.public_id)) ||
+                      selectedItem.public_id ||
                       selectedItem.escrow_ref ||
                       selectedItem.transaction_ref ||
                       selectedItem.id}
@@ -749,7 +756,8 @@ export default function Admin() {
               >
                 <div>
                   <p className="queue-id">
-                    {item.public_id ||
+                    {(section === "payments" && (item.username || item.public_id)) ||
+                      item.public_id ||
                       item.escrow_ref ||
                       item.transaction_ref ||
                       item.id}

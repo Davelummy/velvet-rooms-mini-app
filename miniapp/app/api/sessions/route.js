@@ -29,7 +29,7 @@ export async function GET(request) {
   if (scope === "mine") {
     const res = await query(
       `SELECT s.id, s.session_type, s.status, s.duration_minutes,
-              u.public_id AS client_label
+              COALESCE(u.username, u.public_id) AS client_label
        FROM sessions s
        JOIN users u ON u.id = s.client_id
        WHERE s.model_id = $1

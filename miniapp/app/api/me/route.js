@@ -17,7 +17,7 @@ export async function GET(request) {
   }
 
   const userRes = await query(
-    `SELECT id, telegram_id, public_id, role, status
+    `SELECT id, telegram_id, public_id, username, role, status
      FROM users WHERE telegram_id = $1`,
     [tgUser.id]
   );
@@ -52,6 +52,7 @@ export async function GET(request) {
       id: user.id,
       telegram_id: user.telegram_id,
       public_id: user.public_id,
+      username: user.username,
       role: user.role,
       status: user.status,
     },

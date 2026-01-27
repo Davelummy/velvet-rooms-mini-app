@@ -23,7 +23,9 @@ export async function GET(request) {
   const res = await query(
     `SELECT e.escrow_ref, e.escrow_type, e.amount, e.status,
             u.public_id AS payer_public_id,
-            r.public_id AS receiver_public_id
+            u.username AS payer_username,
+            r.public_id AS receiver_public_id,
+            r.username AS receiver_username
      FROM escrow_accounts e
      LEFT JOIN users u ON u.id = e.payer_id
      LEFT JOIN users r ON r.id = e.receiver_id

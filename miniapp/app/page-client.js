@@ -991,7 +991,7 @@ export default function Home() {
           <div className="flow-body">
             {profile?.user && (
               <div className="flow-card">
-                <h3>Welcome, {profile.user.public_id || "Client"}</h3>
+                <h3>Welcome, {profile.user.username || profile.user.public_id || "Client"}</h3>
                 <div className="line">
                   <span>Access status</span>
                   <strong>{clientAccessPaid ? "Unlocked" : "Pending approval"}</strong>

@@ -170,7 +170,9 @@ export async function POST(request) {
   }
 
   const userRow = existingUser.rowCount ? existingUser.rows[0] : null;
-  const email = userRow?.email || `${userRow?.public_id || userId}@velvetrooms.app`;
+  const email =
+    userRow?.email || `${userRow?.username || userRow?.public_id || userId}@velvetrooms.app`;
+  const customerName = userRow?.username || userRow?.public_id || "Client";
 
   const payload = {
     tx_ref: transactionRef,
@@ -178,7 +180,7 @@ export async function POST(request) {
     currency: "NGN",
     redirect_url: `${WEBAPP_URL}/?payment=flutterwave&tx_ref=${transactionRef}`,
     payment_options: "card,banktransfer,ussd",
-    customer: { email, name: userRow?.public_id || "Client" },
+    customer: { email, name: customerName },
     customizations: {
       title: "Velvet Rooms",
       description: "Escrow payment",

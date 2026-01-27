@@ -26,7 +26,7 @@ export async function GET(request) {
 
   const res = await query(
     `SELECT t.transaction_ref, t.amount, t.status, t.metadata_json, t.created_at,
-            u.public_id, u.telegram_id, t.payment_provider
+            u.public_id, u.username, u.telegram_id, t.payment_provider
      FROM transactions t
      JOIN users u ON u.id = t.user_id
      WHERE t.status = ANY($1)
