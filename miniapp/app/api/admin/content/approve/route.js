@@ -21,7 +21,7 @@ async function sendGalleryPost(content, modelTelegramId) {
     inline_keyboard: [
       [
         { text: "Buy content", url: `${webapp}/?content=${content.id}` },
-        { text: "Book session", url: `${webapp}/?model=${modelTelegramId || 0}` },
+        { text: "Book session", url: `${webapp}/?model_id=${content.model_id}` },
       ],
     ],
   };

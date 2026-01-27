@@ -30,10 +30,10 @@ export async function GET(request) {
     query("SELECT COUNT(*)::int AS count FROM escrow_accounts WHERE status = 'released'"),
     query("SELECT COUNT(*)::int AS count FROM escrow_accounts WHERE status = 'disputed'"),
     query(
-      "SELECT COUNT(*)::int AS count FROM transactions WHERE payment_provider = 'crypto' AND status IN ('pending','submitted')"
+      "SELECT COUNT(*)::int AS count FROM transactions WHERE status IN ('pending','submitted')"
     ),
     query(
-      "SELECT COUNT(*)::int AS count FROM transactions WHERE payment_provider = 'crypto' AND status = 'completed'"
+      "SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'completed'"
     ),
   ]);
 

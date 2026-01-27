@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 export default function Home() {
   const searchParams = useSearchParams();
   const contentId = searchParams.get("content");
-  const modelId = searchParams.get("model");
+  const modelId = searchParams.get("model_id") || searchParams.get("model");
   const [role, setRole] = useState(null);
   const [roleLocked, setRoleLocked] = useState(false);
   const [lockedRole, setLockedRole] = useState(null);
@@ -208,6 +208,18 @@ export default function Home() {
   }, [initData, role]);
 
   useEffect(() => {
+    if (!modelId || role !== "client" || galleryItems.length === 0) {
+      return;
+    }
+    const match = galleryItems.find(
+      (item) => String(item.model_id) === String(modelId)
+    );
+    if (match) {
+      openBooking(match);
+    }
+  }, [modelId, role, galleryItems]);
+
+  useEffect(() => {
     if (!initData || role !== "model" || !modelApproved) {
       return;
     }
@@ -312,6 +324,20 @@ export default function Home() {
     loadProfile();
   }, [initData]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const payment = params.get("payment");
+    if (!payment) {
+      return;
+    }
+    if (payment === "flutterwave") {
+      setClientStatus("Payment received ✅ Await admin approval.");
+    }
+  }, []);
+
   const refreshClientAccess = async () => {
     if (!initData) {
       return;
@@ -407,6 +433,49 @@ export default function Home() {
 
   const closePreview = () => {
     setPreviewOverlay({ open: false, item: null, remaining: 0 });
+  };
+
+  const startFlutterwavePayment = async ({ mode, contentId = null, session = null }) => {
+    if (!initData) {
+      setClientStatus("Open this mini app inside Telegram to proceed.");
+      return;
+    }
+    try {
+      const res = await fetch("/api/payments/flutterwave/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          escrow_type: mode === "access" ? "access_fee" : mode,
+          content_id: contentId,
+          model_id: session?.modelId,
+          session_type: session?.sessionType,
+          duration_minutes: session?.duration,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setClientStatus(
+          data?.error
+            ? `Flutterwave init failed: ${data.error}`
+            : `Flutterwave init failed (HTTP ${res.status}).`
+        );
+        return;
+      }
+      const data = await res.json();
+      const link = data.payment_link;
+      if (!link) {
+        setClientStatus("Flutterwave link missing.");
+        return;
+      }
+      if (window.Telegram?.WebApp?.openLink) {
+        window.Telegram.WebApp.openLink(link);
+      } else {
+        window.location.href = link;
+      }
+    } catch {
+      setClientStatus("Flutterwave init failed. Try again.");
+    }
   };
 
   useEffect(() => {
@@ -1016,6 +1085,13 @@ export default function Home() {
                 >
                   Show payment options
                 </button>
+                <button
+                  type="button"
+                  className="cta primary alt"
+                  onClick={() => startFlutterwavePayment({ mode: "access" })}
+                >
+                  Pay with Flutterwave
+                </button>
                 <button type="button" className="cta ghost" onClick={refreshClientAccess}>
                   I already paid
                 </button>
@@ -1093,11 +1169,21 @@ export default function Home() {
                                 className="cta ghost"
                                 onClick={() =>
                                   startCryptoPayment({ mode: "content", contentId: item.id })
-                            }
-                            disabled={!item.price || Number(item.price) <= 0}
-                          >
-                            Unlock full content
-                          </button>
+                                }
+                                disabled={!item.price || Number(item.price) <= 0}
+                              >
+                                Unlock full content
+                              </button>
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() =>
+                                  startFlutterwavePayment({ mode: "content", contentId: item.id })
+                                }
+                                disabled={!item.price || Number(item.price) <= 0}
+                              >
+                                Pay with Flutterwave
+                              </button>
                         </div>
                       </div>
                     ))}
@@ -1301,6 +1387,23 @@ export default function Home() {
               }}
             >
               Proceed to payment
+            </button>
+            <button
+              type="button"
+              className="cta primary alt"
+              onClick={() => {
+                startFlutterwavePayment({
+                  mode: "session",
+                  session: {
+                    modelId: bookingSheet.modelId,
+                    sessionType: bookingSheet.sessionType,
+                    duration: bookingSheet.duration,
+                  },
+                });
+                setBookingSheet((prev) => ({ ...prev, open: false, status: "" }));
+              }}
+            >
+              Pay with Flutterwave
             </button>
           </div>
         </section>

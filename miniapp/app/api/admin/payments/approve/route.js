@@ -171,7 +171,7 @@ export async function POST(request) {
 
   await query(
     `UPDATE transactions
-     SET status = 'completed', completed_at = NOW(), payment_provider = 'crypto'
+     SET status = 'completed', completed_at = NOW()
      WHERE id = $1`,
     [transaction.id]
   );

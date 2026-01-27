@@ -75,10 +75,23 @@ export default function Admin() {
         { label: "Ref", value: selectedItem.transaction_ref || "-" },
         { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
         { label: "Status", value: selectedItem.status || "-" },
+        { label: "Provider", value: selectedItem.payment_provider || "-" },
         { label: "Public ID", value: selectedItem.public_id || "-" },
-        { label: "Network", value: selectedItem.metadata_json?.crypto_network || "-" },
-        { label: "Currency", value: selectedItem.metadata_json?.crypto_currency || "-" },
-        { label: "Hash", value: selectedItem.metadata_json?.crypto_tx_hash || "-" },
+        {
+          label: "Reference",
+          value:
+            selectedItem.metadata_json?.crypto_tx_hash ||
+            selectedItem.metadata_json?.flutterwave_ref ||
+            selectedItem.metadata_json?.flutterwave_tx_id ||
+            "-",
+        },
+        {
+          label: "Network",
+          value:
+            selectedItem.metadata_json?.crypto_network ||
+            selectedItem.metadata_json?.flutterwave_currency ||
+            "-",
+        },
       ];
     }
     return [
@@ -403,7 +416,7 @@ export default function Admin() {
               : section === "content"
               ? "Approve teasers before they appear in the gallery."
               : section === "payments"
-              ? "Approve crypto payments before escrows are created."
+              ? "Approve payments before escrows are created."
               : section === "escrows"
               ? "Release or refund escrow funds manually."
               : "Resolve disputes with a full audit trail."}
@@ -543,7 +556,11 @@ export default function Admin() {
                       (modelView === "approved" ? "Verified model" : "Verification pending")}
                     {section === "content" && "Content awaiting approval"}
                     {section === "payments" &&
-                      `Crypto · ${selectedItem.amount} · ${selectedItem.metadata_json?.crypto_tx_hash || "hash pending"}`}
+                      `Payment · ${selectedItem.amount} · ${
+                        selectedItem.metadata_json?.crypto_tx_hash ||
+                        selectedItem.metadata_json?.flutterwave_ref ||
+                        "ref pending"
+                      }`}
                     {(section === "escrows" || section === "disputes") &&
                       `${selectedItem.status === "held" ? "Held" : "Released"} escrow · ${selectedItem.amount}`}
                   </p>
@@ -681,9 +698,7 @@ export default function Admin() {
                   {section === "payments" && (
                     <>
                       <div className="status-pill live">
-                        {(selectedItem.metadata_json?.crypto_currency || "CRYPTO") +
-                          " " +
-                          (selectedItem.metadata_json?.crypto_network || "")}
+                        {(selectedItem.payment_provider || "PAYMENT").toUpperCase()}
                       </div>
                       {paymentView === "pending" && (
                         <>
@@ -746,9 +761,13 @@ export default function Admin() {
                     {section === "content" &&
                       (contentView === "approved" ? "Approved content" : "Content awaiting approval")}
                     {section === "payments" &&
-                      `${paymentView === "approved" ? "Approved" : "Crypto"} · ${
+                      `${paymentView === "approved" ? "Approved" : "Payment"} · ${
                         item.amount
-                      } · ${item.metadata_json?.crypto_tx_hash || "hash pending"}`}
+                      } · ${
+                        item.metadata_json?.crypto_tx_hash ||
+                        item.metadata_json?.flutterwave_ref ||
+                        "ref pending"
+                      }`}
                     {section === "escrows" &&
                       `${escrowView === "released" ? "Released" : "Held"} escrow · ${
                         item.amount
@@ -923,9 +942,7 @@ export default function Admin() {
                   {section === "payments" && (
                     <>
                       <div className="status-pill live">
-                        {(item.metadata_json?.crypto_currency || "CRYPTO") +
-                          " " +
-                          (item.metadata_json?.crypto_network || "")}
+                        {(item.payment_provider || "PAYMENT").toUpperCase()}
                       </div>
                       {paymentView === "pending" && (
                         <>

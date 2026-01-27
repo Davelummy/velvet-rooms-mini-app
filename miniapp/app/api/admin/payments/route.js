@@ -13,6 +13,7 @@ export async function GET(request) {
 
   const url = new URL(request.url);
   const status = (url.searchParams.get("status") || "pending").toLowerCase();
+  const provider = (url.searchParams.get("provider") || "all").toLowerCase();
   const statusList =
     status === "approved"
       ? ["completed"]
@@ -20,15 +21,18 @@ export async function GET(request) {
       ? ["rejected"]
       : ["pending", "submitted"];
 
+  const providerClause =
+    provider === "all" ? "" : "AND t.payment_provider = $2";
+
   const res = await query(
     `SELECT t.transaction_ref, t.amount, t.status, t.metadata_json, t.created_at,
-            u.public_id, u.telegram_id
+            u.public_id, u.telegram_id, t.payment_provider
      FROM transactions t
      JOIN users u ON u.id = t.user_id
-     WHERE t.payment_provider = 'crypto'
-       AND t.status = ANY($1)
+     WHERE t.status = ANY($1)
+       ${providerClause}
      ORDER BY t.created_at DESC`,
-    [statusList]
+    provider === "all" ? [statusList] : [statusList, provider]
   );
 
   const items = res.rows.map((row) => {
