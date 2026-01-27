@@ -8,7 +8,13 @@ export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 const FLW_SECRET = process.env.FLUTTERWAVE_SECRET_KEY || "";
-const WEBAPP_URL = (process.env.WEBAPP_URL || "").replace(/\/$/, "");
+const WEBAPP_URL_RAW = (process.env.WEBAPP_URL || "").trim();
+const WEBAPP_URL = (WEBAPP_URL_RAW.startsWith("http://") || WEBAPP_URL_RAW.startsWith("https://")
+  ? WEBAPP_URL_RAW
+  : WEBAPP_URL_RAW
+  ? `https://${WEBAPP_URL_RAW}`
+  : ""
+).replace(/\/$/, "");
 const ACCESS_FEE_AMOUNT = 5000;
 
 function generateTransactionRef() {
@@ -38,6 +44,9 @@ export async function POST(request) {
 
   if (!FLW_SECRET) {
     return NextResponse.json({ error: "flutterwave_not_configured" }, { status: 503 });
+  }
+  if (!WEBAPP_URL) {
+    return NextResponse.json({ error: "webapp_url_missing" }, { status: 500 });
   }
 
   const escrowType = body?.escrow_type || "";
