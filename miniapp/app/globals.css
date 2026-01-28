@@ -589,6 +589,25 @@ h1 {
 
 .admin-metrics {
   display: grid;
+  gap: 16px;
+}
+
+.metric-group {
+  display: grid;
+  gap: 12px;
+}
+
+.metric-group h4 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
 }
 

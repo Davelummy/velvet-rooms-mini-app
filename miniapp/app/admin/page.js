@@ -18,14 +18,36 @@ export default function Admin() {
   const [metrics, setMetrics] = useState({
     pending_models: 0,
     approved_models: 0,
+    total_models: 0,
+    online_models: 0,
     pending_content: 0,
     approved_content: 0,
+    total_content: 0,
     held_escrows: 0,
     released_escrows: 0,
     disputed_escrows: 0,
+    total_escrows: 0,
     pending_payments: 0,
     approved_payments: 0,
+    total_payments: 0,
+    failed_payments: 0,
+    total_users: 0,
+    total_clients: 0,
+    approved_clients: 0,
+    pending_clients: 0,
+    pending_sessions: 0,
+    active_sessions: 0,
+    completed_sessions: 0,
+    total_sessions: 0,
+    total_purchases: 0,
+    purchases_24h: 0,
+    bookings_24h: 0,
+    payments_volume_7d: 0,
+    escrow_released_7d: 0,
   });
+
+  const formatNumber = (value) => Number(value || 0).toLocaleString();
+  const formatCurrency = (value) => `₦${formatNumber(value)}`;
 
   const detailTitle = useMemo(() => {
     if (!selectedItem) {
@@ -300,7 +322,7 @@ export default function Admin() {
             className={`ghost ${section === "payments" ? "active" : ""}`}
             onClick={() => setSection("payments")}
           >
-            Crypto Payments
+            Payments
           </button>
           <button
             type="button"
@@ -329,29 +351,107 @@ export default function Admin() {
           </p>
         </div>
         <div className="admin-metrics">
-          <div className="metric">
-            <span>Pending models</span>
-            <strong>{metrics.pending_models}</strong>
+          <div className="metric-group">
+            <h4>Operations</h4>
+            <div className="metric-grid">
+              <div className="metric">
+                <span>Pending models</span>
+                <strong>{formatNumber(metrics.pending_models)}</strong>
+              </div>
+              <div className="metric">
+                <span>Approved models</span>
+                <strong>{formatNumber(metrics.approved_models)}</strong>
+              </div>
+              <div className="metric">
+                <span>Online models</span>
+                <strong>{formatNumber(metrics.online_models)}</strong>
+              </div>
+              <div className="metric">
+                <span>Pending content</span>
+                <strong>{formatNumber(metrics.pending_content)}</strong>
+              </div>
+              <div className="metric">
+                <span>Approved content</span>
+                <strong>{formatNumber(metrics.approved_content)}</strong>
+              </div>
+              <div className="metric">
+                <span>Pending payments</span>
+                <strong>{formatNumber(metrics.pending_payments)}</strong>
+              </div>
+              <div className="metric">
+                <span>Approved payments</span>
+                <strong>{formatNumber(metrics.approved_payments)}</strong>
+              </div>
+              <div className="metric">
+                <span>Held escrows</span>
+                <strong>{formatNumber(metrics.held_escrows)}</strong>
+              </div>
+              <div className="metric">
+                <span>Released escrows</span>
+                <strong>{formatNumber(metrics.released_escrows)}</strong>
+              </div>
+              <div className="metric">
+                <span>Disputes</span>
+                <strong>{formatNumber(metrics.disputed_escrows)}</strong>
+              </div>
+              <div className="metric">
+                <span>Approved clients</span>
+                <strong>{formatNumber(metrics.approved_clients)}</strong>
+              </div>
+              <div className="metric">
+                <span>Pending clients</span>
+                <strong>{formatNumber(metrics.pending_clients)}</strong>
+              </div>
+            </div>
           </div>
-          <div className="metric">
-            <span>Pending content</span>
-            <strong>{metrics.pending_content}</strong>
-          </div>
-          <div className="metric">
-            <span>Held escrows</span>
-            <strong>{metrics.held_escrows}</strong>
-          </div>
-          <div className="metric">
-            <span>Released escrows</span>
-            <strong>{metrics.released_escrows}</strong>
-          </div>
-          <div className="metric">
-            <span>Pending payments</span>
-            <strong>{metrics.pending_payments}</strong>
-          </div>
-          <div className="metric">
-            <span>Disputes</span>
-            <strong>{metrics.disputed_escrows}</strong>
+          <div className="metric-group">
+            <h4>Engagement</h4>
+            <div className="metric-grid">
+              <div className="metric">
+                <span>Total users</span>
+                <strong>{formatNumber(metrics.total_users)}</strong>
+              </div>
+              <div className="metric">
+                <span>Total clients</span>
+                <strong>{formatNumber(metrics.total_clients)}</strong>
+              </div>
+              <div className="metric">
+                <span>Total models</span>
+                <strong>{formatNumber(metrics.total_models)}</strong>
+              </div>
+              <div className="metric">
+                <span>Total sessions</span>
+                <strong>{formatNumber(metrics.total_sessions)}</strong>
+              </div>
+              <div className="metric">
+                <span>Active sessions</span>
+                <strong>{formatNumber(metrics.active_sessions)}</strong>
+              </div>
+              <div className="metric">
+                <span>Completed sessions</span>
+                <strong>{formatNumber(metrics.completed_sessions)}</strong>
+              </div>
+              <div className="metric">
+                <span>Total purchases</span>
+                <strong>{formatNumber(metrics.total_purchases)}</strong>
+              </div>
+              <div className="metric">
+                <span>Purchases (24h)</span>
+                <strong>{formatNumber(metrics.purchases_24h)}</strong>
+              </div>
+              <div className="metric">
+                <span>Bookings (24h)</span>
+                <strong>{formatNumber(metrics.bookings_24h)}</strong>
+              </div>
+              <div className="metric">
+                <span>Payments 7d</span>
+                <strong>{formatCurrency(metrics.payments_volume_7d)}</strong>
+              </div>
+              <div className="metric">
+                <span>Escrow released 7d</span>
+                <strong>{formatCurrency(metrics.escrow_released_7d)}</strong>
+              </div>
+            </div>
           </div>
         </div>
       </section>
