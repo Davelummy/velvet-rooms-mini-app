@@ -109,6 +109,19 @@ export default function Home() {
     if (typeof window === "undefined") {
       return;
     }
+    const storedRole = window.localStorage.getItem("vr_role");
+    const locked = window.localStorage.getItem("vr_role_locked");
+    if (storedRole && locked === "1") {
+      setRoleLocked(true);
+      setLockedRole(storedRole);
+      setRole(storedRole);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
     let attempts = 0;
     let timeoutId;
     const resolveInitData = () => {
@@ -290,6 +303,10 @@ export default function Home() {
           setRoleLocked(true);
           setLockedRole("model");
           setRole("model");
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("vr_role", "model");
+            window.localStorage.setItem("vr_role_locked", "1");
+          }
           if (data.model?.verification_status === "approved") {
             setModelApproved(true);
             setModelStatus("Verified ✅ Your dashboard is unlocked.");
@@ -306,6 +323,10 @@ export default function Home() {
           setRoleLocked(true);
           setLockedRole("client");
           setRole("client");
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("vr_role", "client");
+            window.localStorage.setItem("vr_role_locked", "1");
+          }
           if (data.client?.access_fee_paid) {
             setClientStep(3);
           } else {
@@ -588,6 +609,10 @@ export default function Home() {
   };
 
   const handleClientNext = async () => {
+    if (clientStep === 1 && !clientForm.displayName) {
+      setClientStatus("Add a display name to continue.");
+      return;
+    }
     if (clientStep === 1 && !clientForm.email) {
       setClientStatus("Add your email to continue.");
       return;
@@ -616,8 +641,28 @@ export default function Home() {
           }),
         });
         if (!res.ok) {
-          setClientStatus("Registration failed. Please check your details.");
+          let errorMsg = "Registration failed. Please check your details.";
+          try {
+            const payload = await res.json();
+            if (payload?.error === "username_taken") {
+              errorMsg = "That username is taken. Choose another.";
+            } else if (payload?.error === "missing_display_name") {
+              errorMsg = "Add a display name to continue.";
+            } else if (payload?.error) {
+              errorMsg = `Registration failed: ${payload.error}`;
+            }
+          } catch {
+            // ignore parse errors
+          }
+          setClientStatus(errorMsg);
           return;
+        }
+        setRoleLocked(true);
+        setLockedRole("client");
+        setRole("client");
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("vr_role", "client");
+          window.localStorage.setItem("vr_role_locked", "1");
         }
       } catch {
         setClientStatus("Registration failed. Please try again.");
