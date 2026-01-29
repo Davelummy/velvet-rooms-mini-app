@@ -42,6 +42,7 @@ export default function Home() {
   const [clientPurchasesStatus, setClientPurchasesStatus] = useState("");
   const [clientSessions, setClientSessions] = useState([]);
   const [clientSessionsStatus, setClientSessionsStatus] = useState("");
+  const [clientDeleteStatus, setClientDeleteStatus] = useState("");
   const [visibleTeasers, setVisibleTeasers] = useState({});
   const [consumedTeasers, setConsumedTeasers] = useState({});
   const [previewOverlay, setPreviewOverlay] = useState({
@@ -486,6 +487,44 @@ export default function Home() {
       }
     } catch {
       setModelStatus("Unable to refresh verification status.");
+    }
+  };
+
+  const deleteClientAccount = async () => {
+    if (!initData) {
+      setClientDeleteStatus("Open this mini app inside Telegram to continue.");
+      return;
+    }
+    const confirmed = window.confirm(
+      "Delete your account? This removes your profile, purchases, and access. This cannot be undone."
+    );
+    if (!confirmed) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      });
+      if (!res.ok) {
+        setClientDeleteStatus(`Delete failed (HTTP ${res.status}).`);
+        return;
+      }
+      setClientDeleteStatus("Account deleted.");
+      setClientAccessPaid(false);
+      setProfile(null);
+      setRole(null);
+      setRoleLocked(false);
+      setLockedRole(null);
+      setClientStep(1);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("vr_role");
+        window.localStorage.removeItem("vr_role_locked");
+        window.localStorage.removeItem("vr_init_data");
+      }
+    } catch {
+      setClientDeleteStatus("Delete failed. Try again.");
     }
   };
 
@@ -1385,6 +1424,10 @@ export default function Home() {
                       <span>Access status</span>
                       <strong>{clientAccessPaid ? "Unlocked" : "Pending"}</strong>
                     </div>
+                    <button type="button" className="cta primary alt" onClick={deleteClientAccount}>
+                      Delete account
+                    </button>
+                    {clientDeleteStatus && <p className="helper error">{clientDeleteStatus}</p>}
                   </div>
                 )}
 
