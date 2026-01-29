@@ -44,6 +44,12 @@ export async function GET(request) {
     ]);
     user.role = "model";
     user.status = "active";
+  } else if (!model && user.role === "model") {
+    await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [
+      user.id,
+    ]);
+    user.role = "client";
+    user.status = "active";
   }
 
   return NextResponse.json({

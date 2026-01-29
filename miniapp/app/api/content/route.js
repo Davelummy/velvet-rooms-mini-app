@@ -174,7 +174,20 @@ export async function GET(request) {
     if (!userRes.rowCount) {
       return NextResponse.json({ error: "user_missing" }, { status: 400 });
     }
-    if (userRes.rows[0].role !== "client") {
+    let role = userRes.rows[0].role;
+    if (role !== "client") {
+      const modelRes = await query(
+        "SELECT id FROM model_profiles WHERE user_id = $1",
+        [userRes.rows[0].id]
+      );
+      if (!modelRes.rowCount) {
+        await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [
+          userRes.rows[0].id,
+        ]);
+        role = "client";
+      }
+    }
+    if (role !== "client") {
       return NextResponse.json({ error: "client_only" }, { status: 403 });
     }
     const profileRes = await query(

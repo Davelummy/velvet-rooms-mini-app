@@ -38,7 +38,19 @@ export async function POST(request) {
     [tgUser.id]
   );
   if (existingUser.rowCount) {
-    const role = existingUser.rows[0].role;
+    let role = existingUser.rows[0].role;
+    if (role && role !== "client") {
+      const modelRes = await query(
+        "SELECT id FROM model_profiles WHERE user_id = $1",
+        [existingUser.rows[0].id]
+      );
+      if (!modelRes.rowCount) {
+        await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [
+          existingUser.rows[0].id,
+        ]);
+        role = "client";
+      }
+    }
     if (role && role !== "client") {
       return NextResponse.json({ error: "client_only" }, { status: 403 });
     }
