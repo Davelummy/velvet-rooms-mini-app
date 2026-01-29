@@ -16,6 +16,7 @@ export default function Home() {
   const [initData, setInitData] = useState("");
   const [clientTab, setClientTab] = useState("gallery");
   const [modelTab, setModelTab] = useState("profile");
+  const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
   const [modelContentFilter, setModelContentFilter] = useState("all");
   const [clientForm, setClientForm] = useState({
     displayName: "",
@@ -224,14 +225,28 @@ export default function Home() {
       try {
         const res = await fetch("/api/content", {
           headers: { "x-telegram-init": initData },
+          cache: "no-store",
         });
         if (!res.ok) {
           if (res.status === 403) {
-            setGalleryStatus(
-              clientAccessPaid
-                ? "Syncing access approval. Tap refresh if this persists."
-                : "Access fee required to view the gallery."
-            );
+            let errorMessage = clientAccessPaid
+              ? "Access approval still syncing. Tap refresh to retry."
+              : "Access fee required to view the gallery.";
+            try {
+              const payload = await res.json();
+              if (payload?.error === "client_only") {
+                errorMessage =
+                  "This account is locked to the model dashboard. Switch to model mode.";
+              } else if (payload?.error === "access_fee_required") {
+                errorMessage = "Access fee required to view the gallery.";
+              }
+            } catch {
+              // ignore parse errors
+            }
+            setGalleryStatus(errorMessage);
+            if (clientAccessPaid) {
+              await refreshClientAccess(true);
+            }
           } else {
             setGalleryStatus(`Gallery unavailable (HTTP ${res.status}).`);
           }
@@ -247,7 +262,7 @@ export default function Home() {
       }
     };
     loadGallery();
-  }, [initData, role, clientAccessPaid]);
+  }, [initData, role, clientAccessPaid, galleryRefreshKey]);
 
   useEffect(() => {
     if (!modelId || role !== "client" || galleryItems.length === 0) {
@@ -475,30 +490,50 @@ export default function Home() {
     }
   }, []);
 
-  const refreshClientAccess = async () => {
+  const refreshClientAccess = async (silent = false) => {
     if (!initData) {
-      return;
+      if (!silent) {
+        setClientStatus("Open this mini app inside Telegram to continue.");
+      }
+      return false;
     }
     try {
       const res = await fetch("/api/me", {
         headers: { "x-telegram-init": initData },
       });
       if (!res.ok) {
-        setClientStatus("Unable to refresh access status.");
-        return;
+        if (!silent) {
+          setClientStatus("Unable to refresh access status.");
+        }
+        return false;
       }
       const data = await res.json();
       if (data.client?.access_fee_paid) {
         setClientAccessPaid(true);
-        setClientStatus("");
+        if (!silent) {
+          setClientStatus("");
+        }
         setClientStep(3);
         setClientTab("gallery");
+        return true;
       } else {
-        setClientStatus("Access fee still pending admin approval.");
+        if (!silent) {
+          setClientStatus("Access fee still pending admin approval.");
+        }
+        setClientAccessPaid(false);
+        setClientStep(2);
+        return false;
       }
     } catch {
-      setClientStatus("Unable to refresh access status.");
+      if (!silent) {
+        setClientStatus("Unable to refresh access status.");
+      }
+      return false;
     }
+  };
+  const refreshGalleryAccess = async () => {
+    await refreshClientAccess(false);
+    setGalleryRefreshKey((prev) => prev + 1);
   };
 
   const refreshModelStatus = async () => {
@@ -1373,6 +1408,15 @@ export default function Home() {
                     <h3>Content Gallery</h3>
                     <p>Browse verified creators, buy content, or book a session.</p>
                     {galleryStatus && <p className="helper error">{galleryStatus}</p>}
+                    {galleryStatus && (
+                      <button
+                        type="button"
+                        className="cta ghost"
+                        onClick={refreshGalleryAccess}
+                      >
+                        Refresh access
+                      </button>
+                    )}
                     {!galleryStatus && galleryItems.length === 0 && (
                       <p className="helper">No approved teasers yet.</p>
                     )}
