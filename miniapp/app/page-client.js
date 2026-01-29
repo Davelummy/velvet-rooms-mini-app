@@ -424,6 +424,18 @@ export default function Home() {
     }
   };
 
+  const goToRolePicker = () => {
+    if (roleLocked) {
+      setRoleStatus("This account is locked to the current role.");
+      return;
+    }
+    setRoleStatus("");
+    setRole(null);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   const openBooking = (item) => {
     const defaultType = "video";
     const defaultDuration = 10;
@@ -1032,6 +1044,11 @@ export default function Home() {
                 <span className={clientStep >= 3 ? "step active" : "step"}>3</span>
               </div>
             )}
+            {!roleLocked && (
+              <button type="button" className="cta ghost" onClick={goToRolePicker}>
+                Back
+              </button>
+            )}
           </header>
           <div className="flow-body">
             {profile?.user && (
@@ -1474,6 +1491,11 @@ export default function Home() {
                 <span className={modelStep >= 2 ? "step active" : "step"}>2</span>
                 <span className={modelStep >= 3 ? "step active" : "step"}>3</span>
               </div>
+            )}
+            {!roleLocked && (
+              <button type="button" className="cta ghost" onClick={goToRolePicker}>
+                Back
+              </button>
             )}
           </header>
           <div className="flow-body">
