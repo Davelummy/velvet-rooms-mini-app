@@ -563,6 +563,24 @@ export default function Home() {
     }
   };
 
+  const uploadToSignedUrl = async (signedUrl, file) => {
+    const formData = new FormData();
+    formData.append("cacheControl", "3600");
+    formData.append("", file);
+    try {
+      const res = await fetch(signedUrl, {
+        method: "PUT",
+        headers: {
+          "x-upsert": "true",
+        },
+        body: formData,
+      });
+      return res;
+    } catch (err) {
+      return null;
+    }
+  };
+
   const deleteClientAccount = async () => {
     if (!initData) {
       setClientDeleteStatus("Open this mini app inside Telegram to continue.");
@@ -933,16 +951,10 @@ export default function Home() {
         setModelStatus("Upload link missing. Try again.");
         return;
       }
-      const uploadRes = await fetch(uploadPayload.signed_url, {
-        method: "PUT",
-        headers: {
-          "Content-Type": modelForm.videoFile.type || "video/mp4",
-          "x-upsert": "true",
-        },
-        body: modelForm.videoFile,
-      });
-      if (!uploadRes.ok) {
-        setModelStatus(`Upload failed (HTTP ${uploadRes.status}).`);
+      const uploadRes = await uploadToSignedUrl(uploadPayload.signed_url, modelForm.videoFile);
+      if (!uploadRes || !uploadRes.ok) {
+        const status = uploadRes?.status || "network";
+        setModelStatus(`Upload failed (${status}).`);
         return;
       }
       const res = await fetch("/api/verification/submit", {
@@ -1015,16 +1027,10 @@ export default function Home() {
         setContentStatus("Upload link missing. Try again.");
         return;
       }
-      const uploadRes = await fetch(uploadPayload.signed_url, {
-        method: "PUT",
-        headers: {
-          "Content-Type": contentForm.mediaFile.type || "application/octet-stream",
-          "x-upsert": "true",
-        },
-        body: contentForm.mediaFile,
-      });
-      if (!uploadRes.ok) {
-        setContentStatus(`Upload failed (HTTP ${uploadRes.status}).`);
+      const uploadRes = await uploadToSignedUrl(uploadPayload.signed_url, contentForm.mediaFile);
+      if (!uploadRes || !uploadRes.ok) {
+        const status = uploadRes?.status || "network";
+        setContentStatus(`Upload failed (${status}).`);
         return;
       }
       let fullPath = "";
@@ -1047,16 +1053,10 @@ export default function Home() {
           setContentStatus("Full upload link missing. Try again.");
           return;
         }
-        const fullRes = await fetch(fullPayload.signed_url, {
-          method: "PUT",
-          headers: {
-            "Content-Type": contentForm.fullFile.type || "application/octet-stream",
-            "x-upsert": "true",
-          },
-          body: contentForm.fullFile,
-        });
-        if (!fullRes.ok) {
-          setContentStatus(`Full upload failed (HTTP ${fullRes.status}).`);
+        const fullRes = await uploadToSignedUrl(fullPayload.signed_url, contentForm.fullFile);
+        if (!fullRes || !fullRes.ok) {
+          const status = fullRes?.status || "network";
+          setContentStatus(`Full upload failed (${status}).`);
           return;
         }
         fullPath = fullPayload.path;
