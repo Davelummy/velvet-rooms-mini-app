@@ -336,7 +336,7 @@ export default function Home() {
           }
           if (data.client?.access_fee_paid) {
             setClientStep(3);
-          } else {
+          } else if (data.client) {
             setClientStep(2);
           }
         }
@@ -351,6 +351,12 @@ export default function Home() {
     };
     loadProfile();
   }, [initData]);
+
+  useEffect(() => {
+    if (clientAccessPaid) {
+      setClientStep(3);
+    }
+  }, [clientAccessPaid]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1071,7 +1077,7 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {clientStep === 1 && (
+            {clientStep === 1 && !clientAccessPaid && (
               <div className="flow-card">
                 <h3>Profile Details</h3>
                 <label className="field">
@@ -1138,7 +1144,7 @@ export default function Home() {
                 <p className="helper">18+ only. Your birth date stays private.</p>
               </div>
             )}
-            {clientStep === 2 && (
+            {clientStep === 2 && !clientAccessPaid && (
               <div className="flow-card">
                 <h3>Access Fee (Escrow)</h3>
                 <p>
