@@ -432,6 +432,14 @@ export default function Home() {
         }
         const data = await res.json();
         if (!data?.user) {
+          setProfile(null);
+          setRoleLocked(false);
+          setLockedRole(null);
+          setRole(null);
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem("vr_role");
+            window.localStorage.removeItem("vr_role_locked");
+          }
           return;
         }
         setProfile(data);

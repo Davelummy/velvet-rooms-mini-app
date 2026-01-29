@@ -11,6 +11,16 @@ export async function GET(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 });
   }
 
+  const adminIds = (process.env.ADMIN_TELEGRAM_IDS || "")
+    .split(",")
+    .map((val) => Number(val.trim()))
+    .filter((val) => Number.isFinite(val));
+  const adminFilterClause = adminIds.length ? "WHERE telegram_id <> ALL($1::bigint[])" : "";
+  const adminFilterParams = adminIds.length ? [adminIds] : [];
+  const adminClientClause = adminIds.length
+    ? "WHERE role = 'client' AND telegram_id <> ALL($1::bigint[])"
+    : "WHERE role = 'client'";
+
   const [
     pendingModels,
     approvedModels,
@@ -60,8 +70,14 @@ export async function GET(request) {
     ),
     query("SELECT COUNT(*)::int AS count FROM transactions"),
     query("SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'failed'"),
-    query("SELECT COUNT(*)::int AS count FROM users"),
-    query("SELECT COUNT(*)::int AS count FROM users WHERE role = 'client'"),
+    query(
+      `SELECT COUNT(*)::int AS count FROM users ${adminFilterClause}`,
+      adminFilterParams
+    ),
+    query(
+      `SELECT COUNT(*)::int AS count FROM users ${adminClientClause}`,
+      adminFilterParams
+    ),
     query("SELECT COUNT(*)::int AS count FROM client_profiles WHERE access_fee_paid = TRUE"),
     query("SELECT COUNT(*)::int AS count FROM client_profiles WHERE access_fee_paid = FALSE"),
     query("SELECT COUNT(*)::int AS count FROM sessions WHERE status IN ('pending','pending_payment')"),
