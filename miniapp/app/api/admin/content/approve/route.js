@@ -35,6 +35,9 @@ async function sendGalleryPost(content, modelTelegramId) {
   };
   const method = content.content_type === "video" ? "sendVideo" : "sendPhoto";
   let media = content.telegram_file_id;
+  if (media && (media.startsWith("content/") || media.startsWith("teasers/"))) {
+    media = null;
+  }
   if (!media && content.preview_file_id) {
     const bucket =
       process.env.SUPABASE_TEASER_BUCKET ||

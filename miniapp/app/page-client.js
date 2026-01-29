@@ -237,6 +237,13 @@ export default function Home() {
               if (payload?.error === "client_only") {
                 errorMessage =
                   "This account is locked to the model dashboard. Switch to model mode.";
+                setRoleLocked(true);
+                setLockedRole("model");
+                setRole("model");
+                if (typeof window !== "undefined") {
+                  window.localStorage.setItem("vr_role", "model");
+                  window.localStorage.setItem("vr_role_locked", "1");
+                }
               } else if (payload?.error === "access_fee_required") {
                 errorMessage = "Access fee required to view the gallery.";
               }
