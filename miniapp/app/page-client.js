@@ -15,6 +15,8 @@ export default function Home() {
   const [modelStep, setModelStep] = useState(1);
   const [initData, setInitData] = useState("");
   const [clientTab, setClientTab] = useState("gallery");
+  const [modelTab, setModelTab] = useState("profile");
+  const [modelContentFilter, setModelContentFilter] = useState("all");
   const [clientForm, setClientForm] = useState({
     displayName: "",
     email: "",
@@ -56,7 +58,8 @@ export default function Home() {
   const [modelItemsStatus, setModelItemsStatus] = useState("");
   const [myBookings, setMyBookings] = useState([]);
   const [myBookingsStatus, setMyBookingsStatus] = useState("");
-  const [showBookings, setShowBookings] = useState(false);
+  const [modelEarnings, setModelEarnings] = useState(null);
+  const [modelEarningsStatus, setModelEarningsStatus] = useState("");
   const [contentForm, setContentForm] = useState({
     title: "",
     description: "",
@@ -101,6 +104,15 @@ export default function Home() {
 
   const getSessionPrice = (type, duration) =>
     sessionPricing[type]?.[duration] ?? null;
+  const filteredModelItems = modelItems.filter((item) => {
+    if (modelContentFilter === "approved") {
+      return item.is_active;
+    }
+    if (modelContentFilter === "pending") {
+      return !item.is_active;
+    }
+    return true;
+  });
 
   useEffect(() => {
     if (roleLocked) {
@@ -325,7 +337,32 @@ export default function Home() {
   }, [initData, role, modelApproved, contentRefreshKey]);
 
   useEffect(() => {
-    if (!initData || role !== "model" || !modelApproved || !showBookings) {
+    if (!initData || role !== "model" || !modelApproved || modelTab !== "earnings") {
+      return;
+    }
+    const loadEarnings = async () => {
+      try {
+        const res = await fetch("/api/earnings", {
+          headers: { "x-telegram-init": initData },
+        });
+        if (!res.ok) {
+          setModelEarningsStatus(`Unable to load earnings (HTTP ${res.status}).`);
+          setModelEarnings(null);
+          return;
+        }
+        const data = await res.json();
+        setModelEarnings(data);
+        setModelEarningsStatus("");
+      } catch {
+        setModelEarningsStatus("Unable to load earnings.");
+        setModelEarnings(null);
+      }
+    };
+    loadEarnings();
+  }, [initData, role, modelApproved, modelTab]);
+
+  useEffect(() => {
+    if (!initData || role !== "model" || !modelApproved || modelTab !== "sessions") {
       return;
     }
     const loadBookings = async () => {
@@ -347,7 +384,7 @@ export default function Home() {
       }
     };
     loadBookings();
-  }, [initData, role, modelApproved, showBookings]);
+  }, [initData, role, modelApproved, modelTab]);
 
   useEffect(() => {
     if (!initData) {
@@ -378,6 +415,7 @@ export default function Home() {
             setModelApproved(true);
             setModelStatus("Verified ✅ Your dashboard is unlocked.");
             setModelStep(4);
+            setModelTab("profile");
           } else if (data.model?.verification_status) {
             setModelApproved(false);
             setModelStatus("Verification in review. You'll be notified when approved.");
@@ -1741,191 +1779,232 @@ export default function Home() {
           <div className="flow-body">
             {modelApproved ? (
               <>
-                <div className="flow-card">
-                  <h3>Profile</h3>
-                  <div className="line">
-                    <span>Display name</span>
-                    <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
-                  </div>
-                  <div className="line">
-                    <span>Verification</span>
-                    <strong>Approved</strong>
-                  </div>
-                  <div className="line">
-                    <span>Account type</span>
-                    <strong>Model</strong>
-                  </div>
+                <div className="dash-actions">
+                  <button
+                    type="button"
+                    className={`cta ${modelTab === "profile" ? "primary" : "ghost"}`}
+                    onClick={() => setModelTab("profile")}
+                  >
+                    Profile
+                  </button>
+                  <button
+                    type="button"
+                    className={`cta ${modelTab === "content" ? "primary" : "ghost"}`}
+                    onClick={() => setModelTab("content")}
+                  >
+                    Content
+                  </button>
+                  <button
+                    type="button"
+                    className={`cta ${modelTab === "sessions" ? "primary" : "ghost"}`}
+                    onClick={() => setModelTab("sessions")}
+                  >
+                    Sessions
+                  </button>
+                  <button
+                    type="button"
+                    className={`cta ${modelTab === "earnings" ? "primary" : "ghost"}`}
+                    onClick={() => setModelTab("earnings")}
+                  >
+                    Earnings
+                  </button>
                 </div>
-                <div className="flow-card">
-                  <h3>Creator Gallery</h3>
-                  <p className="helper">
-                    Teasers appear in the public gallery after admin approval.
-                  </p>
-                  <div className="dash-actions">
-                    <button
-                      type="button"
-                      className="cta primary alt"
-                      onClick={() => setShowContentForm((prev) => !prev)}
-                    >
-                      {showContentForm ? "Hide content form" : "Add content"}
-                    </button>
-                    <button
-                      type="button"
-                      className="cta ghost"
-                      onClick={() => setShowBookings((prev) => !prev)}
-                    >
-                      {showBookings ? "Hide bookings" : "View bookings"}
-                    </button>
+
+                {modelTab === "profile" && (
+                  <div className="flow-card">
+                    <h3>Profile</h3>
+                    <div className="line">
+                      <span>Display name</span>
+                      <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Email</span>
+                      <strong>{profile?.user?.email || "-"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Verification</span>
+                      <strong>Approved</strong>
+                    </div>
+                    <div className="line">
+                      <span>Account type</span>
+                      <strong>Model</strong>
+                    </div>
+                    <div className="line">
+                      <span>Total teasers</span>
+                      <strong>{modelItems.length}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Approved teasers</span>
+                      <strong>{modelItems.filter((item) => item.is_active).length}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Pending teasers</span>
+                      <strong>{modelItems.filter((item) => !item.is_active).length}</strong>
+                    </div>
                   </div>
-                  {showContentForm && (
-                    <div className="content-form">
-                      <label className="field">
-                        Title
-                        <input
-                          type="text"
-                          value={contentForm.title}
-                          onChange={(event) =>
-                            setContentForm((prev) => ({ ...prev, title: event.target.value }))
-                          }
-                          placeholder="Teaser title"
-                        />
-                      </label>
-                      <label className="field">
-                        Description
-                        <textarea
-                          rows="3"
-                          value={contentForm.description}
-                          onChange={(event) =>
-                            setContentForm((prev) => ({ ...prev, description: event.target.value }))
-                          }
-                          placeholder="Short teaser description"
-                        />
-                      </label>
-                      <div className="field-row">
+                )}
+
+                {modelTab === "content" && (
+                  <div className="flow-card">
+                    <h3>Creator Gallery</h3>
+                    <p className="helper">
+                      Teasers appear in the public gallery after admin approval.
+                    </p>
+                    <div className="dash-actions">
+                      <button
+                        type="button"
+                        className="cta primary alt"
+                        onClick={() => setShowContentForm((prev) => !prev)}
+                      >
+                        {showContentForm ? "Hide content form" : "Add content"}
+                      </button>
+                      <button
+                        type="button"
+                        className={`cta ${modelContentFilter === "all" ? "primary" : "ghost"}`}
+                        onClick={() => setModelContentFilter("all")}
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        className={`cta ${modelContentFilter === "approved" ? "primary" : "ghost"}`}
+                        onClick={() => setModelContentFilter("approved")}
+                      >
+                        Approved
+                      </button>
+                      <button
+                        type="button"
+                        className={`cta ${modelContentFilter === "pending" ? "primary" : "ghost"}`}
+                        onClick={() => setModelContentFilter("pending")}
+                      >
+                        Pending
+                      </button>
+                    </div>
+                    {showContentForm && (
+                      <div className="content-form">
                         <label className="field">
-                          Content type
-                          <select
-                            value={contentForm.contentType}
-                            onChange={(event) =>
-                              setContentForm((prev) => ({
-                                ...prev,
-                                contentType: event.target.value,
-                              }))
-                            }
-                          >
-                            <option value="image">Photo</option>
-                            <option value="video">Video</option>
-                          </select>
-                        </label>
-                        <label className="field">
-                          Unlock price (optional)
+                          Title
                           <input
-                            type="number"
-                            min="0"
-                            value={contentForm.unlockPrice}
+                            type="text"
+                            value={contentForm.title}
                             onChange={(event) =>
-                              setContentForm((prev) => ({
-                                ...prev,
-                                unlockPrice: event.target.value,
-                              }))
+                              setContentForm((prev) => ({ ...prev, title: event.target.value }))
                             }
-                            placeholder="₦ 0"
+                            placeholder="Teaser title"
                           />
                         </label>
-                      </div>
-                      {Number(contentForm.unlockPrice || 0) > 0 && (
+                        <label className="field">
+                          Description
+                          <textarea
+                            rows="3"
+                            value={contentForm.description}
+                            onChange={(event) =>
+                              setContentForm((prev) => ({ ...prev, description: event.target.value }))
+                            }
+                            placeholder="Short teaser description"
+                          />
+                        </label>
+                        <div className="field-row">
+                          <label className="field">
+                            Content type
+                            <select
+                              value={contentForm.contentType}
+                              onChange={(event) =>
+                                setContentForm((prev) => ({
+                                  ...prev,
+                                  contentType: event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="image">Photo</option>
+                              <option value="video">Video</option>
+                            </select>
+                          </label>
+                          <label className="field">
+                            Unlock price (optional)
+                            <input
+                              type="number"
+                              min="0"
+                              value={contentForm.unlockPrice}
+                              onChange={(event) =>
+                                setContentForm((prev) => ({
+                                  ...prev,
+                                  unlockPrice: event.target.value,
+                                }))
+                              }
+                              placeholder="₦ 0"
+                            />
+                          </label>
+                        </div>
+                        {Number(contentForm.unlockPrice || 0) > 0 && (
+                          <label className="field file">
+                            Full content (required for paid unlocks)
+                            <input
+                              type="file"
+                              accept="image/*,video/*"
+                              onChange={(event) =>
+                                setContentForm((prev) => ({
+                                  ...prev,
+                                  fullName: event.target.files?.[0]?.name || "",
+                                  fullFile: event.target.files?.[0] || null,
+                                }))
+                              }
+                            />
+                            <span className="file-name">
+                              {contentForm.fullName || "No file selected"}
+                            </span>
+                          </label>
+                        )}
                         <label className="field file">
-                          Full content (required for paid unlocks)
+                          Teaser media
                           <input
                             type="file"
                             accept="image/*,video/*"
                             onChange={(event) =>
                               setContentForm((prev) => ({
                                 ...prev,
-                                fullName: event.target.files?.[0]?.name || "",
-                                fullFile: event.target.files?.[0] || null,
+                                mediaName: event.target.files?.[0]?.name || "",
+                                mediaFile: event.target.files?.[0] || null,
                               }))
                             }
                           />
                           <span className="file-name">
-                            {contentForm.fullName || "No file selected"}
+                            {contentForm.mediaName || "No file selected"}
                           </span>
                         </label>
-                      )}
-                      <label className="field file">
-                        Teaser media
-                        <input
-                          type="file"
-                          accept="image/*,video/*"
-                          onChange={(event) =>
-                            setContentForm((prev) => ({
-                              ...prev,
-                              mediaName: event.target.files?.[0]?.name || "",
-                              mediaFile: event.target.files?.[0] || null,
-                            }))
-                          }
-                        />
-                        <span className="file-name">
-                          {contentForm.mediaName || "No file selected"}
-                        </span>
-                      </label>
-                      {contentStatus && <p className="helper error">{contentStatus}</p>}
-                      <button type="button" className="cta primary alt" onClick={submitContent}>
-                        Submit teaser
-                      </button>
-                    </div>
-                  )}
-                  <div className="content-list">
-                    <h4>Your teasers</h4>
-                    {modelItemsStatus && <p className="helper error">{modelItemsStatus}</p>}
-                    {!modelItemsStatus && modelItems.length === 0 && (
-                      <p className="helper">No teasers yet.</p>
-                    )}
-                    {!modelItemsStatus && modelItems.length > 0 && (
-                      <div className="gallery-grid">
-                        {modelItems.map((item) => (
-                          <div key={`mine-${item.id}`} className="gallery-card">
-                            <div className="gallery-media">
-                              {item.preview_url ? (
-                                item.content_type === "video" ? (
-                                  <video src={item.preview_url} muted playsInline />
-                                ) : (
-                                  <img src={item.preview_url} alt={item.title} />
-                                )
-                              ) : (
-                                <div className="media-fallback">Preview pending</div>
-                              )}
-                            </div>
-                            <div className="gallery-body">
-                              <h4>{item.title}</h4>
-                              <p>{item.description || "Teaser content"}</p>
-                              <div className="gallery-meta">
-                                <span>{item.is_active ? "Approved" : "Pending approval"}</span>
-                                <strong>{item.content_type}</strong>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                        {contentStatus && <p className="helper error">{contentStatus}</p>}
+                        <button type="button" className="cta primary alt" onClick={submitContent}>
+                          Submit teaser
+                        </button>
                       </div>
                     )}
-                  </div>
-                  {showBookings && (
                     <div className="content-list">
-                      <h4>My bookings</h4>
-                      {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}
-                      {!myBookingsStatus && myBookings.length === 0 && (
-                        <p className="helper">No bookings yet.</p>
+                      <h4>Your teasers</h4>
+                      {modelItemsStatus && <p className="helper error">{modelItemsStatus}</p>}
+                      {!modelItemsStatus && filteredModelItems.length === 0 && (
+                        <p className="helper">No teasers yet.</p>
                       )}
-                      {!myBookingsStatus && myBookings.length > 0 && (
+                      {!modelItemsStatus && filteredModelItems.length > 0 && (
                         <div className="gallery-grid">
-                          {myBookings.map((item) => (
-                            <div key={`booking-${item.id}`} className="gallery-card">
+                          {filteredModelItems.map((item) => (
+                            <div key={`mine-${item.id}`} className="gallery-card">
+                              <div className="gallery-media">
+                                {item.preview_url ? (
+                                  item.content_type === "video" ? (
+                                    <video src={item.preview_url} muted playsInline />
+                                  ) : (
+                                    <img src={item.preview_url} alt={item.title} />
+                                  )
+                                ) : (
+                                  <div className="media-fallback">Preview pending</div>
+                                )}
+                              </div>
                               <div className="gallery-body">
-                                <h4>{item.session_type || "Session"}</h4>
-                                <p>{item.status || "pending"}</p>
+                                <h4>{item.title}</h4>
+                                <p>{item.description || "Teaser content"}</p>
                                 <div className="gallery-meta">
-                                  <span>{item.client_label || "Client"}</span>
-                                  <strong>{item.duration_minutes || "-"} mins</strong>
+                                  <span>{item.is_active ? "Approved" : "Pending approval"}</span>
+                                  <strong>{item.content_type}</strong>
                                 </div>
                               </div>
                             </div>
@@ -1933,8 +2012,92 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
+
+                {modelTab === "sessions" && (
+                  <div className="flow-card">
+                    <h3>My Bookings</h3>
+                    {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}
+                    {!myBookingsStatus && myBookings.length === 0 && (
+                      <p className="helper">No bookings yet.</p>
+                    )}
+                    {!myBookingsStatus && myBookings.length > 0 && (
+                      <div className="gallery-grid">
+                        {myBookings.map((item) => (
+                          <div key={`booking-${item.id}`} className="gallery-card">
+                            <div className="gallery-body">
+                              <h4>{item.session_type || "Session"}</h4>
+                              <p>{item.status || "pending"}</p>
+                              <div className="gallery-meta">
+                                <span>{item.client_label || "Client"}</span>
+                                <strong>{item.duration_minutes || "-"} mins</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {modelTab === "earnings" && (
+                  <div className="flow-card">
+                    <h3>Earnings</h3>
+                    {modelEarningsStatus && (
+                      <p className="helper error">{modelEarningsStatus}</p>
+                    )}
+                    {!modelEarningsStatus && !modelEarnings && (
+                      <p className="helper">No earnings data yet.</p>
+                    )}
+                    {modelEarnings && (
+                      <>
+                        <div className="line">
+                          <span>Total released</span>
+                          <strong>
+                            ₦{Number(modelEarnings.payouts?.total_released || 0).toLocaleString()}
+                          </strong>
+                        </div>
+                        <div className="line">
+                          <span>Pending payout</span>
+                          <strong>
+                            ₦{Number(modelEarnings.payouts?.pending_payout || 0).toLocaleString()}
+                          </strong>
+                        </div>
+                        <div className="line">
+                          <span>Released (7 days)</span>
+                          <strong>
+                            ₦{Number(modelEarnings.payouts?.released_7d || 0).toLocaleString()}
+                          </strong>
+                        </div>
+                        <div className="line">
+                          <span>Total sessions</span>
+                          <strong>{modelEarnings.sessions?.total || 0}</strong>
+                        </div>
+                        <div className="line">
+                          <span>Completed sessions</span>
+                          <strong>{modelEarnings.sessions?.completed || 0}</strong>
+                        </div>
+                        <div className="line">
+                          <span>Active sessions</span>
+                          <strong>{modelEarnings.sessions?.active || 0}</strong>
+                        </div>
+                        <div className="line">
+                          <span>Total content</span>
+                          <strong>{modelEarnings.content?.total || 0}</strong>
+                        </div>
+                        <div className="line">
+                          <span>Approved content</span>
+                          <strong>{modelEarnings.content?.approved || 0}</strong>
+                        </div>
+                        <div className="line">
+                          <span>Pending content</span>
+                          <strong>{modelEarnings.content?.pending || 0}</strong>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <>
