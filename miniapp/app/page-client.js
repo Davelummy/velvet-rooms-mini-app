@@ -185,6 +185,18 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!initData) {
+      return;
+    }
+    if (clientStatus?.includes("Open this mini app inside Telegram")) {
+      setClientStatus("");
+    }
+    if (modelStatus?.includes("Open this mini app inside Telegram")) {
+      setModelStatus("");
+    }
+  }, [initData, clientStatus, modelStatus]);
+
+  useEffect(() => {
     if (!initData || role !== "model") {
       return undefined;
     }
