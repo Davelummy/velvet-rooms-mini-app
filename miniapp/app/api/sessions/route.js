@@ -39,5 +39,19 @@ export async function GET(request) {
     return NextResponse.json({ items: res.rows });
   }
 
+  if (scope === "client") {
+    const res = await query(
+      `SELECT s.id, s.session_type, s.status, s.duration_minutes,
+              COALESCE(mp.display_name, u.public_id) AS model_label
+       FROM sessions s
+       JOIN users u ON u.id = s.model_id
+       LEFT JOIN model_profiles mp ON mp.user_id = u.id
+       WHERE s.client_id = $1
+       ORDER BY s.created_at DESC`,
+      [userId]
+    );
+    return NextResponse.json({ items: res.rows });
+  }
+
   return NextResponse.json({ items: [] });
 }

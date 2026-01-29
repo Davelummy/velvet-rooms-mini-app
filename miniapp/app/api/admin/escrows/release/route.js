@@ -107,11 +107,24 @@ export async function POST(request) {
   }
 
   if (escrow.escrow_type === "access_fee") {
-    await query(
-      `UPDATE client_profiles SET access_fee_paid = TRUE, access_granted_at = NOW()
-       WHERE access_fee_escrow_id = $1`,
-      [escrow.id]
+    const profileRes = await query(
+      "SELECT id FROM client_profiles WHERE user_id = $1",
+      [escrow.payer_id]
     );
+    if (!profileRes.rowCount) {
+      await query(
+        `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
+         VALUES ($1, TRUE, NOW(), $2)`,
+        [escrow.payer_id, escrow.id]
+      );
+    } else {
+      await query(
+        `UPDATE client_profiles
+         SET access_fee_paid = TRUE, access_granted_at = NOW(), access_fee_escrow_id = $1
+         WHERE user_id = $2`,
+        [escrow.id, escrow.payer_id]
+      );
+    }
   }
 
   if (escrow.escrow_type === "session" && escrow.related_id) {

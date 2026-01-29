@@ -14,6 +14,7 @@ export default function Home() {
   const [clientStep, setClientStep] = useState(1);
   const [modelStep, setModelStep] = useState(1);
   const [initData, setInitData] = useState("");
+  const [clientTab, setClientTab] = useState("gallery");
   const [clientForm, setClientForm] = useState({
     displayName: "",
     email: "",
@@ -37,6 +38,10 @@ export default function Home() {
   const [clientAccessPaid, setClientAccessPaid] = useState(false);
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryStatus, setGalleryStatus] = useState("");
+  const [clientPurchases, setClientPurchases] = useState([]);
+  const [clientPurchasesStatus, setClientPurchasesStatus] = useState("");
+  const [clientSessions, setClientSessions] = useState([]);
+  const [clientSessionsStatus, setClientSessionsStatus] = useState("");
   const [visibleTeasers, setVisibleTeasers] = useState({});
   const [consumedTeasers, setConsumedTeasers] = useState({});
   const [previewOverlay, setPreviewOverlay] = useState({
@@ -209,7 +214,11 @@ export default function Home() {
         });
         if (!res.ok) {
           if (res.status === 403) {
-            setGalleryStatus("Access fee required to view the gallery.");
+            setGalleryStatus(
+              clientAccessPaid
+                ? "Syncing access approval. Tap refresh if this persists."
+                : "Access fee required to view the gallery."
+            );
           } else {
             setGalleryStatus(`Gallery unavailable (HTTP ${res.status}).`);
           }
@@ -225,7 +234,7 @@ export default function Home() {
       }
     };
     loadGallery();
-  }, [initData, role]);
+  }, [initData, role, clientAccessPaid]);
 
   useEffect(() => {
     if (!modelId || role !== "client" || galleryItems.length === 0) {
@@ -238,6 +247,56 @@ export default function Home() {
       openBooking(match);
     }
   }, [modelId, role, galleryItems]);
+
+  useEffect(() => {
+    if (!initData || role !== "client" || clientTab !== "purchases") {
+      return;
+    }
+    const loadPurchases = async () => {
+      try {
+        const res = await fetch("/api/purchases", {
+          headers: { "x-telegram-init": initData },
+        });
+        if (!res.ok) {
+          setClientPurchasesStatus(`Unable to load purchases (HTTP ${res.status}).`);
+          setClientPurchases([]);
+          return;
+        }
+        const data = await res.json();
+        setClientPurchases(data.items || []);
+        setClientPurchasesStatus("");
+      } catch {
+        setClientPurchasesStatus("Unable to load purchases.");
+        setClientPurchases([]);
+      }
+    };
+    loadPurchases();
+  }, [initData, role, clientTab]);
+
+  useEffect(() => {
+    if (!initData || role !== "client" || clientTab !== "sessions") {
+      return;
+    }
+    const loadSessions = async () => {
+      try {
+        const res = await fetch("/api/sessions?scope=client", {
+          headers: { "x-telegram-init": initData },
+        });
+        if (!res.ok) {
+          setClientSessionsStatus(`Unable to load sessions (HTTP ${res.status}).`);
+          setClientSessions([]);
+          return;
+        }
+        const data = await res.json();
+        setClientSessions(data.items || []);
+        setClientSessionsStatus("");
+      } catch {
+        setClientSessionsStatus("Unable to load sessions.");
+        setClientSessions([]);
+      }
+    };
+    loadSessions();
+  }, [initData, role, clientTab]);
 
   useEffect(() => {
     if (!initData || role !== "model" || !modelApproved) {
@@ -336,6 +395,7 @@ export default function Home() {
           }
           if (data.client?.access_fee_paid) {
             setClientStep(3);
+            setClientTab("gallery");
           } else if (data.client) {
             setClientStep(2);
           }
@@ -355,6 +415,7 @@ export default function Home() {
   useEffect(() => {
     if (clientAccessPaid) {
       setClientStep(3);
+      setClientTab("gallery");
     }
   }, [clientAccessPaid]);
 
@@ -369,6 +430,9 @@ export default function Home() {
     }
     if (payment === "flutterwave") {
       setClientStatus("Payment received ✅ Await admin approval.");
+      setTimeout(() => {
+        refreshClientAccess();
+      }, 1500);
     }
   }, []);
 
@@ -389,6 +453,7 @@ export default function Home() {
         setClientAccessPaid(true);
         setClientStatus("");
         setClientStep(3);
+        setClientTab("gallery");
       } else {
         setClientStatus("Access fee still pending admin approval.");
       }
@@ -1077,198 +1142,317 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {clientStep === 1 && !clientAccessPaid && (
-              <div className="flow-card">
-                <h3>Profile Details</h3>
-                <label className="field">
-                  Display name
-                  <input
-                    type="text"
-                    value={clientForm.displayName}
-                    onChange={(event) =>
-                      setClientForm((prev) => ({ ...prev, displayName: event.target.value }))
-                    }
-                    placeholder="VelvetClient"
-                  />
-                </label>
-                <label className="field">
-                  Email
-                  <input
-                    type="email"
-                    value={clientForm.email}
-                    onChange={(event) =>
-                      setClientForm((prev) => ({ ...prev, email: event.target.value }))
-                    }
-                    placeholder="you@email.com"
-                  />
-                </label>
-                <label className="field">
-                  Location
-                  <input
-                    type="text"
-                    value={clientForm.location}
-                    onChange={(event) =>
-                      setClientForm((prev) => ({ ...prev, location: event.target.value }))
-                    }
-                    placeholder="Lagos, NG"
-                  />
-                </label>
-                <div className="field-row">
-                  <label className="field">
-                    Birth month
-                    <input
-                      type="number"
-                      min="1"
-                      max="12"
-                      value={clientForm.birthMonth}
-                      onChange={(event) =>
-                        setClientForm((prev) => ({ ...prev, birthMonth: event.target.value }))
-                      }
-                      placeholder="MM"
-                    />
-                  </label>
-                  <label className="field">
-                    Birth year
-                    <input
-                      type="number"
-                      min="1900"
-                      max="2100"
-                      value={clientForm.birthYear}
-                      onChange={(event) =>
-                        setClientForm((prev) => ({ ...prev, birthYear: event.target.value }))
-                      }
-                      placeholder="YYYY"
-                    />
-                  </label>
-                </div>
-                <p className="helper">18+ only. Your birth date stays private.</p>
-              </div>
-            )}
-            {clientStep === 2 && !clientAccessPaid && (
-              <div className="flow-card">
-                <h3>Access Fee (Escrow)</h3>
-                <p>
-                  Pay once to unlock verified creator content. Funds stay in escrow until admin approval.
-                </p>
-                <div className="price-tag">
-                  ₦5,000 <span>Escrow Held</span>
-                </div>
-                <button
-                  type="button"
-                  className="cta primary"
-                  onClick={() => startCryptoPayment({ mode: "access" })}
-                >
-                  Show payment options
-                </button>
-                <button
-                  type="button"
-                  className="cta primary alt"
-                  onClick={() => startFlutterwavePayment({ mode: "access" })}
-                >
-                  Pay with Flutterwave
-                </button>
-                <button type="button" className="cta ghost" onClick={refreshClientAccess}>
-                  I already paid
-                </button>
-                <button
-                  type="button"
-                  className="cta ghost"
-                  onClick={() => setClientStep(1)}
-                >
-                  Back
-                </button>
-                {paymentState.status && paymentState.mode === "access" && (
-                  <p className="helper">{paymentState.status}</p>
+            {!clientAccessPaid && (
+              <>
+                {clientStep === 1 && (
+                  <div className="flow-card">
+                    <h3>Profile Details</h3>
+                    <label className="field">
+                      Display name
+                      <input
+                        type="text"
+                        value={clientForm.displayName}
+                        onChange={(event) =>
+                          setClientForm((prev) => ({ ...prev, displayName: event.target.value }))
+                        }
+                        placeholder="VelvetClient"
+                      />
+                    </label>
+                    <label className="field">
+                      Email
+                      <input
+                        type="email"
+                        value={clientForm.email}
+                        onChange={(event) =>
+                          setClientForm((prev) => ({ ...prev, email: event.target.value }))
+                        }
+                        placeholder="you@email.com"
+                      />
+                    </label>
+                    <label className="field">
+                      Location
+                      <input
+                        type="text"
+                        value={clientForm.location}
+                        onChange={(event) =>
+                          setClientForm((prev) => ({ ...prev, location: event.target.value }))
+                        }
+                        placeholder="Lagos, NG"
+                      />
+                    </label>
+                    <div className="field-row">
+                      <label className="field">
+                        Birth month
+                        <input
+                          type="number"
+                          min="1"
+                          max="12"
+                          value={clientForm.birthMonth}
+                          onChange={(event) =>
+                            setClientForm((prev) => ({ ...prev, birthMonth: event.target.value }))
+                          }
+                          placeholder="MM"
+                        />
+                      </label>
+                      <label className="field">
+                        Birth year
+                        <input
+                          type="number"
+                          min="1900"
+                          max="2100"
+                          value={clientForm.birthYear}
+                          onChange={(event) =>
+                            setClientForm((prev) => ({ ...prev, birthYear: event.target.value }))
+                          }
+                          placeholder="YYYY"
+                        />
+                      </label>
+                    </div>
+                    <p className="helper">18+ only. Your birth date stays private.</p>
+                  </div>
                 )}
-              </div>
+                {clientStep === 2 && (
+                  <div className="flow-card">
+                    <h3>Access Fee (Escrow)</h3>
+                    <p>
+                      Pay once to unlock verified creator content. Funds stay in escrow until admin approval.
+                    </p>
+                    <div className="price-tag">
+                      ₦5,000 <span>Escrow Held</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="cta primary"
+                      onClick={() => startCryptoPayment({ mode: "access" })}
+                    >
+                      Show payment options
+                    </button>
+                    <button
+                      type="button"
+                      className="cta primary alt"
+                      onClick={() => startFlutterwavePayment({ mode: "access" })}
+                    >
+                      Pay with Flutterwave
+                    </button>
+                    <button type="button" className="cta ghost" onClick={refreshClientAccess}>
+                      I already paid
+                    </button>
+                    <button
+                      type="button"
+                      className="cta ghost"
+                      onClick={() => setClientStep(1)}
+                    >
+                      Back
+                    </button>
+                    {paymentState.status && paymentState.mode === "access" && (
+                      <p className="helper">{paymentState.status}</p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
-            {clientStep === 3 && (
-              <div className="flow-card">
-                <h3>You are ready</h3>
-                <p>Browse verified creators, buy content, or book a session.</p>
-                <button
-                  type="button"
-                  className="cta primary"
-                  onClick={() =>
-                    document
-                      .getElementById("client-gallery")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                  }
-                >
-                  Open Gallery
-                </button>
-                {galleryStatus && <p className="helper error">{galleryStatus}</p>}
-                {galleryStatus && galleryStatus.includes("Access fee") && (
+            {clientAccessPaid && (
+              <>
+                <div className="dash-actions">
                   <button
                     type="button"
-                    className="cta primary alt"
-                    onClick={() => startCryptoPayment({ mode: "access" })}
+                    className={`cta ${clientTab === "gallery" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("gallery")}
                   >
-                    Pay access fee
+                    Gallery
                   </button>
-                )}
-                {!galleryStatus && galleryItems.length === 0 && (
-                  <p className="helper">No approved teasers yet.</p>
-                )}
-                {!galleryStatus && galleryItems.length > 0 && (
-                  <div className="gallery-grid" id="client-gallery">
+                  <button
+                    type="button"
+                    className={`cta ${clientTab === "profile" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("profile")}
+                  >
+                    Profile
+                  </button>
+                  <button
+                    type="button"
+                    className={`cta ${clientTab === "purchases" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("purchases")}
+                  >
+                    Purchases
+                  </button>
+                  <button
+                    type="button"
+                    className={`cta ${clientTab === "sessions" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("sessions")}
+                  >
+                    Sessions
+                  </button>
+                  <button
+                    type="button"
+                    className={`cta ${clientTab === "wallet" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("wallet")}
+                  >
+                    Wallet
+                  </button>
+                </div>
+
+                {clientTab === "gallery" && (
+                  <div className="flow-card">
+                    <h3>Content Gallery</h3>
+                    <p>Browse verified creators, buy content, or book a session.</p>
+                    {galleryStatus && <p className="helper error">{galleryStatus}</p>}
+                    {!galleryStatus && galleryItems.length === 0 && (
+                      <p className="helper">No approved teasers yet.</p>
+                    )}
+                    {!galleryStatus && galleryItems.length > 0 && (
+                      <div className="gallery-grid" id="client-gallery">
                         {galleryItems.map((item) => (
                           <div key={`gallery-${item.id}`} className="gallery-card">
                             <div className="gallery-media">
                               <div className="media-fallback">Tap to view</div>
                             </div>
                             <div className="gallery-body">
-                              <h4>{item.title}</h4>
-                              <p>{item.description || "Teaser content"}</p>
+                              <div>
+                                <h4>{item.title}</h4>
+                                <p>{item.description || "Exclusive teaser content."}</p>
+                              </div>
                               <div className="gallery-meta">
                                 <span>{item.display_name || item.public_id}</span>
-                                <strong>{item.price ? `Unlock ₦${item.price}` : "Teaser"}</strong>
+                                <span>{item.content_type}</span>
                               </div>
-                              <button
-                                type="button"
-                                className="cta ghost"
-                                onClick={() => openPreview(item)}
-                                disabled={consumedTeasers[item.id]}
-                              >
-                                {consumedTeasers[item.id] ? "Viewed" : "View teaser"}
-                              </button>
-                              <button
-                                type="button"
-                                className="cta ghost"
-                                onClick={() => openBooking(item)}
-                              >
-                                Book session
-                              </button>
-                              <button
-                                type="button"
-                                className="cta ghost"
-                                onClick={() =>
-                                  startCryptoPayment({ mode: "content", contentId: item.id })
-                                }
-                                disabled={!item.price || Number(item.price) <= 0}
-                              >
-                                Unlock full content
-                              </button>
-                              <button
-                                type="button"
-                                className="cta ghost"
-                                onClick={() =>
-                                  startFlutterwavePayment({ mode: "content", contentId: item.id })
-                                }
-                                disabled={!item.price || Number(item.price) <= 0}
-                              >
-                                Pay with Flutterwave
-                              </button>
+                              <div className="gallery-actions">
+                                <button
+                                  type="button"
+                                  className="cta primary"
+                                  onClick={() => openPreview(item)}
+                                >
+                                  View once
+                                </button>
+                                {item.price ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="cta primary alt"
+                                      onClick={() =>
+                                        startCryptoPayment({ mode: "content", contentId: item.id })
+                                      }
+                                    >
+                                      Unlock {`₦${item.price}`}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="cta ghost"
+                                      onClick={() =>
+                                        startFlutterwavePayment({
+                                          mode: "content",
+                                          contentId: item.id,
+                                        })
+                                      }
+                                    >
+                                      Pay with Flutterwave
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="pill">Teaser</span>
+                                )}
+                                <button
+                                  type="button"
+                                  className="cta ghost"
+                                  onClick={() => openBooking(item)}
+                                >
+                                  Book session
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {clientTab === "profile" && (
+                  <div className="flow-card">
+                    <h3>Your Profile</h3>
+                    <div className="line">
+                      <span>Username</span>
+                      <strong>{profile?.user?.username || "-"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Email</span>
+                      <strong>{profile?.user?.email || "-"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Joined</span>
+                      <strong>{profile?.user?.created_at || "-"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Access status</span>
+                      <strong>{clientAccessPaid ? "Unlocked" : "Pending"}</strong>
+                    </div>
+                  </div>
+                )}
+
+                {clientTab === "purchases" && (
+                  <div className="flow-card">
+                    <h3>Your Purchases</h3>
+                    {clientPurchasesStatus && (
+                      <p className="helper error">{clientPurchasesStatus}</p>
+                    )}
+                    {!clientPurchasesStatus && clientPurchases.length === 0 && (
+                      <p className="helper">No purchases yet.</p>
+                    )}
+                    {clientPurchases.map((item) => (
+                      <div key={`purchase-${item.id}`} className="list-row">
+                        <div>
+                          <strong>{item.title}</strong>
+                          <p className="muted">
+                            {item.display_name || item.public_id} · {item.content_type}
+                          </p>
                         </div>
+                        <span className="pill">{item.status}</span>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+
+                {clientTab === "sessions" && (
+                  <div className="flow-card">
+                    <h3>Your Sessions</h3>
+                    {clientSessionsStatus && (
+                      <p className="helper error">{clientSessionsStatus}</p>
+                    )}
+                    {!clientSessionsStatus && clientSessions.length === 0 && (
+                      <p className="helper">No sessions yet.</p>
+                    )}
+                    {clientSessions.map((item) => (
+                      <div key={`session-${item.id}`} className="list-row">
+                        <div>
+                          <strong>{item.model_label || "Model"}</strong>
+                          <p className="muted">
+                            {item.session_type} · {item.duration_minutes} min
+                          </p>
+                        </div>
+                        <span className="pill">{item.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {clientTab === "wallet" && (
+                  <div className="flow-card">
+                    <h3>Wallet</h3>
+                    <div className="line">
+                      <span>Balance</span>
+                      <strong>
+                        ₦{Number(profile?.user?.wallet_balance || 0).toLocaleString()}
+                      </strong>
+                    </div>
+                    <p className="helper">
+                      Escrow payments and releases appear here once completed.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
           {clientStatus && <p className="helper error">{clientStatus}</p>}
-          {clientStep === 1 && (
+          {clientStep === 1 && !clientAccessPaid && (
             <button type="button" className="cta primary" onClick={handleClientNext}>
               Continue
             </button>
