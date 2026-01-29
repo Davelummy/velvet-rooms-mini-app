@@ -93,6 +93,25 @@ async function sendGalleryPost(content, modelTelegramId) {
   return { ok: true };
 }
 
+async function notifyModel(telegramId, contentTitle) {
+  const token = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
+  if (!token || !telegramId) {
+    return;
+  }
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: telegramId,
+        text: `Your teaser "${contentTitle}" has been approved ✅ It is now live in the gallery.`,
+      }),
+    });
+  } catch {
+    // ignore notification failures
+  }
+}
+
 export async function POST(request) {
   const initData = request.headers.get("x-telegram-init") || "";
   const auth = requireAdmin(initData);
@@ -145,6 +164,8 @@ export async function POST(request) {
       { status: 502 }
     );
   }
+
+  await notifyModel(content.telegram_id, content.title || "your teaser");
 
   return NextResponse.json({ ok: true });
 }

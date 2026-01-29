@@ -352,6 +352,16 @@ export default function Home() {
   }, [initData, role, modelApproved, contentRefreshKey]);
 
   useEffect(() => {
+    if (!modelApproved || role !== "model" || modelTab !== "content") {
+      return undefined;
+    }
+    const interval = setInterval(() => {
+      setContentRefreshKey((prev) => prev + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [modelApproved, role, modelTab]);
+
+  useEffect(() => {
     if (!initData || role !== "model" || !modelApproved || modelTab !== "earnings") {
       return;
     }
@@ -1895,6 +1905,13 @@ export default function Home() {
                       Teasers appear in the public gallery after admin approval.
                     </p>
                     <div className="dash-actions">
+                      <button
+                        type="button"
+                        className="cta ghost"
+                        onClick={() => setContentRefreshKey((prev) => prev + 1)}
+                      >
+                        Refresh list
+                      </button>
                       <button
                         type="button"
                         className="cta primary alt"
