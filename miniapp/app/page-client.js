@@ -135,6 +135,7 @@ export default function Home() {
         }
         if (tg.initData) {
           setInitData(tg.initData);
+          window.localStorage.setItem("vr_init_data", tg.initData);
           return;
         }
       }
@@ -143,6 +144,12 @@ export default function Home() {
       const tgData = search.get("tgWebAppData") || hash.get("tgWebAppData");
       if (tgData) {
         setInitData(tgData);
+        window.localStorage.setItem("vr_init_data", tgData);
+        return;
+      }
+      const cached = window.localStorage.getItem("vr_init_data");
+      if (cached) {
+        setInitData(cached);
         return;
       }
       attempts += 1;
