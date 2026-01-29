@@ -81,12 +81,22 @@ export async function POST(request) {
   }
 
   const now = new Date();
+  const deliveryPath = fullPath || previewPath;
   const insertRes = await query(
     `INSERT INTO digital_content
      (model_id, content_type, title, description, price, telegram_file_id, preview_file_id, is_active, created_at)
-     VALUES ($1, $2, $3, $4, $5, NULL, $6, FALSE, $7)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8)
      RETURNING id`,
-    [userId, safeType, title, description, sanitizedPrice, fullPath || null, previewPath, now]
+    [
+      userId,
+      safeType,
+      title,
+      description,
+      sanitizedPrice,
+      deliveryPath,
+      previewPath,
+      now,
+    ]
   );
 
   const adminToken = process.env.ADMIN_BOT_TOKEN || "";
@@ -100,16 +110,20 @@ export async function POST(request) {
         [{ text: "Open Admin Console", web_app: { url: `${process.env.WEBAPP_URL || ""}/admin` } }],
       ],
     };
-    for (const adminId of adminIds) {
-      await fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: adminId,
-          text: `New teaser submitted: ${title}. Review in admin console.`,
-          reply_markup: keyboard,
-        }),
-      });
+    try {
+      for (const adminId of adminIds) {
+        await fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: adminId,
+            text: `New teaser submitted: ${title}. Review in admin console.`,
+            reply_markup: keyboard,
+          }),
+        });
+      }
+    } catch {
+      // avoid failing the submission if Telegram is unreachable
     }
   }
 
