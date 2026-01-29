@@ -5,6 +5,24 @@ import { ensureUser } from "../../../_lib/users";
 
 export const runtime = "nodejs";
 
+const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
+const WEBAPP_URL = process.env.WEBAPP_URL || "";
+
+async function sendMessage(chatId, text) {
+  if (!BOT_TOKEN || !chatId) {
+    return;
+  }
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch {
+    // ignore notification errors
+  }
+}
+
 function calculateFees(amount, escrowType) {
   if (escrowType === "access_fee") {
     return { platformFee: amount, receiverPayout: null };
@@ -181,6 +199,19 @@ export async function POST(request) {
      VALUES ($1, 'approve_crypto', 'transaction', $2, $3, NOW())`,
     [adminUserId, transaction.id, JSON.stringify({ escrow_ref: escrowRef })]
   );
+
+  if (escrowType === "session" && receiverId) {
+    const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+      receiverId,
+    ]);
+    if (modelRes.rowCount) {
+      const link = WEBAPP_URL ? `\nOpen: ${WEBAPP_URL}` : "";
+      await sendMessage(
+        modelRes.rows[0].telegram_id,
+        `New booking approved. Please review and accept the session.${link}`
+      );
+    }
+  }
 
   return NextResponse.json({ ok: true, escrow_ref: escrowRef });
 }

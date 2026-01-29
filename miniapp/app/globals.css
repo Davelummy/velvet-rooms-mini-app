@@ -367,6 +367,14 @@ h1 {
   margin-top: 0;
 }
 
+.notice-card {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(26, 12, 16, 0.7);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+}
+
 .field {
   display: grid;
   gap: 8px;

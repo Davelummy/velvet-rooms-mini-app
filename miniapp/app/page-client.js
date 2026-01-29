@@ -41,6 +41,13 @@ export default function Home() {
   const [clientAccessPaid, setClientAccessPaid] = useState(false);
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryStatus, setGalleryStatus] = useState("");
+  const [galleryJoinStatus, setGalleryJoinStatus] = useState({
+    joined: false,
+    status: "",
+    checked: false,
+  });
+  const [galleryJoinError, setGalleryJoinError] = useState("");
+  const [galleryInviteLink, setGalleryInviteLink] = useState("");
   const [clientPurchases, setClientPurchases] = useState([]);
   const [clientPurchasesStatus, setClientPurchasesStatus] = useState("");
   const [clientSessions, setClientSessions] = useState([]);
@@ -59,6 +66,7 @@ export default function Home() {
   const [modelItemsStatus, setModelItemsStatus] = useState("");
   const [myBookings, setMyBookings] = useState([]);
   const [myBookingsStatus, setMyBookingsStatus] = useState("");
+  const [bookingActionStatus, setBookingActionStatus] = useState({});
   const [modelEarnings, setModelEarnings] = useState(null);
   const [modelEarningsStatus, setModelEarningsStatus] = useState("");
   const [contentForm, setContentForm] = useState({
@@ -114,6 +122,92 @@ export default function Home() {
     }
     return true;
   });
+
+  const refreshBookings = async () => {
+    if (!initData || role !== "model" || !modelApproved) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/sessions?scope=mine", {
+        headers: { "x-telegram-init": initData },
+      });
+      if (!res.ok) {
+        setMyBookingsStatus(`Unable to load bookings (HTTP ${res.status}).`);
+        setMyBookings([]);
+        return;
+      }
+      const data = await res.json();
+      setMyBookings(data.items || []);
+      setMyBookingsStatus("");
+    } catch {
+      setMyBookingsStatus("Unable to load bookings.");
+      setMyBookings([]);
+    }
+  };
+
+  const handleBookingAction = async (sessionId, action) => {
+    if (!initData || !sessionId) {
+      return;
+    }
+    setBookingActionStatus((prev) => ({
+      ...prev,
+      [sessionId]: { loading: true, error: "", info: "" },
+    }));
+    try {
+      const res = await fetch("/api/sessions/respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, session_id: sessionId, action }),
+      });
+      if (!res.ok) {
+        setBookingActionStatus((prev) => ({
+          ...prev,
+          [sessionId]: {
+            loading: false,
+            error: `Action failed (HTTP ${res.status}).`,
+            info: "",
+          },
+        }));
+        return;
+      }
+      const data = await res.json();
+      if (!data?.ok) {
+        setBookingActionStatus((prev) => ({
+          ...prev,
+          [sessionId]: {
+            loading: false,
+            error: data?.error || "Action failed.",
+            info: "",
+          },
+        }));
+        return;
+      }
+      if (data?.invite_link && window?.Telegram?.WebApp?.openTelegramLink) {
+        window.Telegram.WebApp.openTelegramLink(data.invite_link);
+      }
+      setBookingActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "",
+          info:
+            action === "accept"
+              ? "Session accepted. Invite link sent."
+              : "Session declined.",
+        },
+      }));
+      await refreshBookings();
+    } catch {
+      setBookingActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "Action failed.",
+          info: "",
+        },
+      }));
+    }
+  };
 
   useEffect(() => {
     if (roleLocked) {
@@ -283,6 +377,71 @@ export default function Home() {
     loadGallery();
   }, [initData, role, clientAccessPaid, galleryRefreshKey]);
 
+  const checkGalleryMembership = async () => {
+    if (!initData || role !== "client" || !clientAccessPaid) {
+      return;
+    }
+    setGalleryJoinError("");
+    try {
+      const res = await fetch("/api/gallery/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      });
+      if (!res.ok) {
+        setGalleryJoinStatus({ joined: false, status: "", checked: true });
+        setGalleryJoinError(`Unable to check access (HTTP ${res.status}).`);
+        return;
+      }
+      const data = await res.json();
+      setGalleryJoinStatus({
+        joined: Boolean(data?.joined),
+        status: data?.status || "",
+        checked: true,
+      });
+    } catch {
+      setGalleryJoinStatus({ joined: false, status: "", checked: true });
+      setGalleryJoinError("Unable to check access.");
+    }
+  };
+
+  const requestGalleryInvite = async () => {
+    if (!initData) {
+      return;
+    }
+    setGalleryJoinError("");
+    try {
+      const res = await fetch("/api/gallery/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      });
+      if (!res.ok) {
+        setGalleryJoinError(`Unable to create invite (HTTP ${res.status}).`);
+        return;
+      }
+      const data = await res.json();
+      const link = data?.invite_link || "";
+      setGalleryInviteLink(link);
+      if (link) {
+        if (window.Telegram?.WebApp?.openTelegramLink) {
+          window.Telegram.WebApp.openTelegramLink(link);
+        } else {
+          window.open(link, "_blank");
+        }
+      }
+    } catch {
+      setGalleryJoinError("Unable to create invite.");
+    }
+  };
+
+  useEffect(() => {
+    if (!initData || role !== "client" || !clientAccessPaid || clientTab !== "gallery") {
+      return;
+    }
+    checkGalleryMembership();
+  }, [initData, role, clientAccessPaid, clientTab]);
+
   useEffect(() => {
     if (!modelId || role !== "client" || galleryItems.length === 0) {
       return;
@@ -409,25 +568,7 @@ export default function Home() {
     if (!initData || role !== "model" || !modelApproved || modelTab !== "sessions") {
       return;
     }
-    const loadBookings = async () => {
-      try {
-        const res = await fetch("/api/sessions?scope=mine", {
-          headers: { "x-telegram-init": initData },
-        });
-        if (!res.ok) {
-          setMyBookingsStatus(`Unable to load bookings (HTTP ${res.status}).`);
-          setMyBookings([]);
-          return;
-        }
-        const data = await res.json();
-        setMyBookings(data.items || []);
-        setMyBookingsStatus("");
-      } catch {
-        setMyBookingsStatus("Unable to load bookings.");
-        setMyBookings([]);
-      }
-    };
-    loadBookings();
+    refreshBookings();
   }, [initData, role, modelApproved, modelTab]);
 
   useEffect(() => {
@@ -571,6 +712,7 @@ export default function Home() {
   const refreshGalleryAccess = async () => {
     await refreshClientAccess(false);
     setGalleryRefreshKey((prev) => prev + 1);
+    await checkGalleryMembership();
   };
 
   const refreshModelStatus = async () => {
@@ -1444,6 +1586,36 @@ export default function Home() {
                   <div className="flow-card">
                     <h3>Content Gallery</h3>
                     <p>Browse verified creators, buy content, or book a session.</p>
+                    {galleryJoinStatus.checked && !galleryJoinStatus.joined && (
+                      <div className="notice-card">
+                        <p className="helper">
+                          Join the gallery channel to receive verified teaser posts.
+                        </p>
+                        <div className="gallery-actions">
+                          <button
+                            type="button"
+                            className="cta primary"
+                            onClick={requestGalleryInvite}
+                          >
+                            Join gallery
+                          </button>
+                          <button
+                            type="button"
+                            className="cta ghost"
+                            onClick={checkGalleryMembership}
+                          >
+                            I joined
+                          </button>
+                        </div>
+                        {galleryInviteLink && (
+                          <p className="helper">Invite link: {galleryInviteLink}</p>
+                        )}
+                      </div>
+                    )}
+                    {galleryJoinStatus.checked && galleryJoinStatus.joined && (
+                      <p className="helper">Gallery channel connected ✅</p>
+                    )}
+                    {galleryJoinError && <p className="helper error">{galleryJoinError}</p>}
                     {galleryStatus && <p className="helper error">{galleryStatus}</p>}
                     {galleryStatus && (
                       <button
@@ -2121,6 +2293,36 @@ export default function Home() {
                                 <span>{item.client_label || "Client"}</span>
                                 <strong>{item.duration_minutes || "-"} mins</strong>
                               </div>
+                              {item.status === "pending" && (
+                                <div className="gallery-actions">
+                                  <button
+                                    type="button"
+                                    className="cta primary"
+                                    disabled={bookingActionStatus[item.id]?.loading}
+                                    onClick={() => handleBookingAction(item.id, "accept")}
+                                  >
+                                    Accept booking
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="cta ghost"
+                                    disabled={bookingActionStatus[item.id]?.loading}
+                                    onClick={() => handleBookingAction(item.id, "decline")}
+                                  >
+                                    Decline
+                                  </button>
+                                </div>
+                              )}
+                              {bookingActionStatus[item.id]?.error && (
+                                <p className="helper error">
+                                  {bookingActionStatus[item.id]?.error}
+                                </p>
+                              )}
+                              {bookingActionStatus[item.id]?.info && (
+                                <p className="helper">
+                                  {bookingActionStatus[item.id]?.info}
+                                </p>
+                              )}
                             </div>
                           </div>
                         ))}

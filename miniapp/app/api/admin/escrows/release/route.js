@@ -6,9 +6,48 @@ import { getSupabase } from "../../../_lib/supabase";
 
 export const runtime = "nodejs";
 
+const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
+
+function normalizeChannelId(rawId) {
+  if (!rawId) {
+    return null;
+  }
+  const asString = String(rawId);
+  if (asString.startsWith("-")) {
+    return asString;
+  }
+  if (asString.startsWith("100")) {
+    return `-${asString}`;
+  }
+  return `-100${asString}`;
+}
+
+async function createInviteLink() {
+  const channelId = normalizeChannelId(process.env.MAIN_GALLERY_CHANNEL_ID || "");
+  if (!BOT_TOKEN || !channelId) {
+    return null;
+  }
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: channelId,
+        name: "Velvet Rooms Gallery",
+      }),
+    });
+    const data = await res.json();
+    if (!data?.ok) {
+      return null;
+    }
+    return data?.result?.invite_link || null;
+  } catch {
+    return null;
+  }
+}
+
 async function sendContent(buyerTelegramId, content) {
-  const token = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
-  if (!token) {
+  if (!BOT_TOKEN) {
     return false;
   }
   let media = content.telegram_file_id;
@@ -31,7 +70,7 @@ async function sendContent(buyerTelegramId, content) {
     caption: `${content.title}\n${content.description || ""}`.trim(),
     [content.content_type === "video" ? "video" : "photo"]: media,
   };
-  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -40,11 +79,10 @@ async function sendContent(buyerTelegramId, content) {
 }
 
 async function sendMessage(chatId, text) {
-  const token = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
-  if (!token) {
+  if (!BOT_TOKEN) {
     return;
   }
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text }),
@@ -158,13 +196,19 @@ export async function POST(request) {
     escrow.payer_id,
   ]);
   if (payerRes.rowCount) {
-    const message =
-      escrow.escrow_type === "access_fee"
-        ? "Access granted ✅ Your gallery is now unlocked."
-        : escrow.escrow_type === "session"
-        ? `Session completed ✅ Escrow ${escrowRef} released.`
-        : `Escrow ${escrowRef} has been released.`;
-    await sendMessage(payerRes.rows[0].telegram_id, message);
+    if (escrow.escrow_type === "access_fee") {
+      const inviteLink = await createInviteLink();
+      const message = inviteLink
+        ? `Access granted ✅ Join the gallery: ${inviteLink}`
+        : "Access granted ✅ Your gallery is now unlocked.";
+      await sendMessage(payerRes.rows[0].telegram_id, message);
+    } else {
+      const message =
+        escrow.escrow_type === "session"
+          ? `Session completed ✅ Escrow ${escrowRef} released.`
+          : `Escrow ${escrowRef} has been released.`;
+      await sendMessage(payerRes.rows[0].telegram_id, message);
+    }
   }
   if (escrow.receiver_id) {
     const receiverRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
