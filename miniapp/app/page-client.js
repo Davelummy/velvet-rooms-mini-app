@@ -14,6 +14,10 @@ export default function Home() {
   const [clientStep, setClientStep] = useState(1);
   const [modelStep, setModelStep] = useState(1);
   const [initData, setInitData] = useState("");
+  const [booting, setBooting] = useState(true);
+  const [clientLoading, setClientLoading] = useState(false);
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [contentSubmitting, setContentSubmitting] = useState(false);
   const [clientTab, setClientTab] = useState("gallery");
   const [modelTab, setModelTab] = useState("profile");
   const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
@@ -41,6 +45,7 @@ export default function Home() {
   const [clientAccessPaid, setClientAccessPaid] = useState(false);
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryStatus, setGalleryStatus] = useState("");
+  const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryJoinStatus, setGalleryJoinStatus] = useState({
     joined: false,
     status: "",
@@ -50,8 +55,10 @@ export default function Home() {
   const [galleryInviteLink, setGalleryInviteLink] = useState("");
   const [clientPurchases, setClientPurchases] = useState([]);
   const [clientPurchasesStatus, setClientPurchasesStatus] = useState("");
+  const [clientPurchasesLoading, setClientPurchasesLoading] = useState(false);
   const [clientSessions, setClientSessions] = useState([]);
   const [clientSessionsStatus, setClientSessionsStatus] = useState("");
+  const [clientSessionsLoading, setClientSessionsLoading] = useState(false);
   const [clientDeleteStatus, setClientDeleteStatus] = useState("");
   const [visibleTeasers, setVisibleTeasers] = useState({});
   const [consumedTeasers, setConsumedTeasers] = useState({});
@@ -66,8 +73,16 @@ export default function Home() {
   const [modelItemsStatus, setModelItemsStatus] = useState("");
   const [myBookings, setMyBookings] = useState([]);
   const [myBookingsStatus, setMyBookingsStatus] = useState("");
+  const [myBookingsLoading, setMyBookingsLoading] = useState(false);
   const [bookingActionStatus, setBookingActionStatus] = useState({});
   const [sessionActionStatus, setSessionActionStatus] = useState({});
+  const [disputeState, setDisputeState] = useState({
+    open: false,
+    sessionId: null,
+    reason: "",
+    status: "",
+    loading: false,
+  });
   const [modelEarnings, setModelEarnings] = useState(null);
   const [modelEarningsStatus, setModelEarningsStatus] = useState("");
   const [contentForm, setContentForm] = useState({
@@ -96,6 +111,7 @@ export default function Home() {
     selectedNetwork: "",
     selectedCurrency: "",
     txHash: "",
+    submitting: false,
     status: "",
   });
   const [bookingSheet, setBookingSheet] = useState({
@@ -107,6 +123,18 @@ export default function Home() {
     price: 9000,
     status: "",
     paymentMethod: "flutterwave",
+    scheduledFor: "",
+    loading: false,
+  });
+  const [extensionSheet, setExtensionSheet] = useState({
+    open: false,
+    sessionId: null,
+    sessionType: "",
+    minutes: 5,
+    price: 0,
+    paymentMethod: "flutterwave",
+    status: "",
+    loading: false,
   });
   const teaserViewMs = 60000;
   const sessionPricing = {
@@ -114,9 +142,75 @@ export default function Home() {
     voice: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
     video: { 5: 5000, 10: 9000, 20: 16000, 30: 22000 },
   };
+  const extensionPricing = {
+    voice: 1500,
+    video: 4000,
+  };
 
   const getSessionPrice = (type, duration) =>
     sessionPricing[type]?.[duration] ?? null;
+  const getExtensionPrice = (type) => extensionPricing[type] ?? null;
+  const formatSessionStatus = (status) => {
+    switch (status) {
+      case "pending_payment":
+        return "Awaiting payment verification";
+      case "pending":
+        return "Awaiting model acceptance";
+      case "accepted":
+        return "Accepted · waiting to start";
+      case "active":
+        return "Active";
+      case "awaiting_confirmation":
+        return "Awaiting confirmation";
+      case "disputed":
+        return "Disputed";
+      case "completed":
+        return "Completed";
+      case "rejected":
+        return "Rejected by admin";
+      case "cancelled_by_client":
+        return "Cancelled by client";
+      case "cancelled_by_model":
+        return "Cancelled by model";
+      default:
+        return status || "-";
+    }
+  };
+  const getStatusTone = (status) => {
+    switch (status) {
+      case "active":
+      case "completed":
+      case "accepted":
+        return "success";
+      case "rejected":
+      case "cancelled_by_client":
+      case "cancelled_by_model":
+      case "disputed":
+        return "danger";
+      case "pending":
+      case "pending_payment":
+      case "awaiting_confirmation":
+        return "warning";
+      default:
+        return "";
+    }
+  };
+  const toLocalInput = (date) => {
+    const tzOffset = date.getTimezoneOffset() * 60000;
+    const local = new Date(date.getTime() - tzOffset);
+    return local.toISOString().slice(0, 16);
+  };
+  const roundToNextHour = (date) => {
+    const rounded = new Date(date);
+    rounded.setMinutes(0, 0, 0);
+    if (rounded < date) {
+      rounded.setHours(rounded.getHours() + 1);
+    }
+    return rounded;
+  };
+  const scheduleBase = roundToNextHour(new Date());
+  const scheduleMin = toLocalInput(scheduleBase);
+  const scheduleMax = toLocalInput(new Date(scheduleBase.getTime() + 24 * 60 * 60 * 1000));
   const filteredModelItems = modelItems.filter((item) => {
     if (modelContentFilter === "approved") {
       return item.is_active;
@@ -131,6 +225,7 @@ export default function Home() {
     if (!initData || role !== "model" || !modelApproved) {
       return;
     }
+    setMyBookingsLoading(true);
     try {
       const res = await fetch("/api/sessions?scope=mine", {
         headers: { "x-telegram-init": initData },
@@ -138,14 +233,17 @@ export default function Home() {
       if (!res.ok) {
         setMyBookingsStatus(`Unable to load bookings (HTTP ${res.status}).`);
         setMyBookings([]);
+        setMyBookingsLoading(false);
         return;
       }
       const data = await res.json();
       setMyBookings(data.items || []);
       setMyBookingsStatus("");
+      setMyBookingsLoading(false);
     } catch {
       setMyBookingsStatus("Unable to load bookings.");
       setMyBookings([]);
+      setMyBookingsLoading(false);
     }
   };
 
@@ -197,6 +295,8 @@ export default function Home() {
           info:
             action === "accept"
               ? "Session accepted. Invite link sent."
+              : action === "cancel"
+              ? "Session cancelled. Client refunded."
               : "Session declined.",
         },
       }));
@@ -324,6 +424,95 @@ export default function Home() {
     }
   };
 
+  const handleSessionCancel = async (sessionId) => {
+    if (!initData || !sessionId) {
+      return;
+    }
+    setSessionActionStatus((prev) => ({
+      ...prev,
+      [sessionId]: { loading: true, error: "", info: "" },
+    }));
+    try {
+      const res = await fetch("/api/sessions/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, session_id: sessionId }),
+      });
+      if (!res.ok) {
+        setSessionActionStatus((prev) => ({
+          ...prev,
+          [sessionId]: {
+            loading: false,
+            error: `Unable to cancel (HTTP ${res.status}).`,
+            info: "",
+          },
+        }));
+        return;
+      }
+      setSessionActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "",
+          info: "Session cancelled. Payment released to model.",
+        },
+      }));
+      setClientSessions((prev) =>
+        prev.map((item) =>
+          item.id === sessionId ? { ...item, status: "cancelled_by_client" } : item
+        )
+      );
+    } catch {
+      setSessionActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "Unable to cancel.",
+          info: "",
+        },
+      }));
+    }
+  };
+
+  const submitDispute = async () => {
+    if (!initData || !disputeState.sessionId) {
+      return;
+    }
+    if (disputeState.reason.trim().length < 5) {
+      setDisputeState((prev) => ({ ...prev, status: "Add a reason to continue." }));
+      return;
+    }
+    setDisputeState((prev) => ({ ...prev, loading: true }));
+    try {
+      const res = await fetch("/api/sessions/dispute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          session_id: disputeState.sessionId,
+          reason: disputeState.reason,
+        }),
+      });
+      if (!res.ok) {
+        setDisputeState((prev) => ({
+          ...prev,
+          loading: false,
+          status: `Dispute failed (HTTP ${res.status}).`,
+        }));
+        return;
+      }
+      setDisputeState({
+        open: false,
+        sessionId: null,
+        reason: "",
+        status: "Dispute submitted.",
+        loading: false,
+      });
+    } catch {
+      setDisputeState((prev) => ({ ...prev, loading: false, status: "Dispute failed." }));
+    }
+  };
+
   useEffect(() => {
     if (roleLocked) {
       return;
@@ -443,6 +632,7 @@ export default function Home() {
       return;
     }
     const loadGallery = async () => {
+      setGalleryLoading(true);
       try {
         const res = await fetch("/api/content", {
           headers: { "x-telegram-init": initData },
@@ -479,14 +669,17 @@ export default function Home() {
             setGalleryStatus(`Gallery unavailable (HTTP ${res.status}).`);
           }
           setGalleryItems([]);
+          setGalleryLoading(false);
           return;
         }
         const data = await res.json();
         setGalleryItems(data.items || []);
         setGalleryStatus("");
+        setGalleryLoading(false);
       } catch {
         setGalleryStatus("Gallery unavailable.");
         setGalleryItems([]);
+        setGalleryLoading(false);
       }
     };
     loadGallery();
@@ -574,6 +767,7 @@ export default function Home() {
       return;
     }
     const loadPurchases = async () => {
+      setClientPurchasesLoading(true);
       try {
         const res = await fetch("/api/purchases", {
           headers: { "x-telegram-init": initData },
@@ -581,14 +775,17 @@ export default function Home() {
         if (!res.ok) {
           setClientPurchasesStatus(`Unable to load purchases (HTTP ${res.status}).`);
           setClientPurchases([]);
+          setClientPurchasesLoading(false);
           return;
         }
         const data = await res.json();
         setClientPurchases(data.items || []);
         setClientPurchasesStatus("");
+        setClientPurchasesLoading(false);
       } catch {
         setClientPurchasesStatus("Unable to load purchases.");
         setClientPurchases([]);
+        setClientPurchasesLoading(false);
       }
     };
     loadPurchases();
@@ -599,6 +796,7 @@ export default function Home() {
       return;
     }
     const loadSessions = async () => {
+      setClientSessionsLoading(true);
       try {
         const res = await fetch("/api/sessions?scope=client", {
           headers: { "x-telegram-init": initData },
@@ -606,14 +804,17 @@ export default function Home() {
         if (!res.ok) {
           setClientSessionsStatus(`Unable to load sessions (HTTP ${res.status}).`);
           setClientSessions([]);
+          setClientSessionsLoading(false);
           return;
         }
         const data = await res.json();
         setClientSessions(data.items || []);
         setClientSessionsStatus("");
+        setClientSessionsLoading(false);
       } catch {
         setClientSessionsStatus("Unable to load sessions.");
         setClientSessions([]);
+        setClientSessionsLoading(false);
       }
     };
     loadSessions();
@@ -653,6 +854,16 @@ export default function Home() {
     }, 30000);
     return () => clearInterval(interval);
   }, [modelApproved, role, modelTab]);
+
+  useEffect(() => {
+    if (!initData || role !== "client" || !clientAccessPaid || clientTab !== "gallery") {
+      return;
+    }
+    const interval = setInterval(() => {
+      setGalleryRefreshKey((prev) => prev + 1);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [initData, role, clientAccessPaid, clientTab]);
 
   useEffect(() => {
     if (!initData || role !== "model" || !modelApproved || modelTab !== "earnings") {
@@ -754,9 +965,19 @@ export default function Home() {
         }
       } catch {
         // ignore load errors
+      } finally {
+        setBooting(false);
       }
     };
     loadProfile();
+  }, [initData]);
+
+  useEffect(() => {
+    if (initData) {
+      return;
+    }
+    const timer = setTimeout(() => setBooting(false), 2000);
+    return () => clearTimeout(timer);
   }, [initData]);
 
   useEffect(() => {
@@ -765,6 +986,39 @@ export default function Home() {
       setClientTab("gallery");
     }
   }, [clientAccessPaid]);
+
+  useEffect(() => {
+    if (profile?.client && !clientAccessPaid && clientStep < 2) {
+      setClientStep(2);
+    }
+  }, [profile, clientAccessPaid, clientStep]);
+
+  useEffect(() => {
+    if (!initData || role !== "client" || clientAccessPaid) {
+      return;
+    }
+    const interval = setInterval(() => {
+      refreshClientAccess(true);
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [initData, role, clientAccessPaid]);
+
+  useEffect(() => {
+    if (!initData || role !== "model" || modelApproved) {
+      return;
+    }
+    const interval = setInterval(() => {
+      refreshModelStatus();
+    }, 25000);
+    return () => clearInterval(interval);
+  }, [initData, role, modelApproved]);
+
+  useEffect(() => {
+    if (!initData || role !== "client" || !clientAccessPaid) {
+      return;
+    }
+    checkGalleryMembership();
+  }, [initData, role, clientAccessPaid]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -858,16 +1112,14 @@ export default function Home() {
   };
 
   const uploadToSignedUrl = async (signedUrl, file) => {
-    const formData = new FormData();
-    formData.append("cacheControl", "3600");
-    formData.append("", file);
     try {
       const res = await fetch(signedUrl, {
         method: "PUT",
         headers: {
+          "Content-Type": file.type || "application/octet-stream",
           "x-upsert": "true",
         },
-        body: formData,
+        body: file,
       });
       return res;
     } catch (err) {
@@ -942,6 +1194,7 @@ export default function Home() {
     const defaultType = "video";
     const defaultDuration = 10;
     const price = getSessionPrice(defaultType, defaultDuration);
+    const defaultSchedule = scheduleMin;
     setBookingSheet({
       open: true,
       modelId: item.model_id,
@@ -951,6 +1204,26 @@ export default function Home() {
       price: price || 0,
       status: "",
       paymentMethod: "flutterwave",
+      scheduledFor: defaultSchedule,
+      loading: false,
+    });
+  };
+
+  const openExtension = (session) => {
+    const price = getExtensionPrice(session.session_type);
+    if (!price) {
+      setClientStatus("Extensions are available for video or voice sessions only.");
+      return;
+    }
+    setExtensionSheet({
+      open: true,
+      sessionId: session.id,
+      sessionType: session.session_type,
+      minutes: 5,
+      price,
+      paymentMethod: "flutterwave",
+      status: "",
+      loading: false,
     });
   };
 
@@ -971,10 +1244,20 @@ export default function Home() {
     setPreviewOverlay({ open: false, item: null, remaining: 0 });
   };
 
-  const startFlutterwavePayment = async ({ mode, contentId = null, session = null }) => {
+  const startFlutterwavePayment = async ({
+    mode,
+    contentId = null,
+    session = null,
+    onError,
+  }) => {
     if (!initData) {
-      setClientStatus("Open this mini app inside Telegram to proceed.");
-      return;
+      const message = "Open this mini app inside Telegram to proceed.";
+      if (onError) {
+        onError(message);
+      } else {
+        setClientStatus(message);
+      }
+      return false;
     }
     try {
       const res = await fetch("/api/payments/flutterwave/initiate", {
@@ -985,32 +1268,50 @@ export default function Home() {
           escrow_type: mode === "access" ? "access_fee" : mode,
           content_id: contentId,
           model_id: session?.modelId,
+          session_id: session?.sessionId,
           session_type: session?.sessionType,
           duration_minutes: session?.duration,
+          scheduled_for: session?.scheduledFor,
+          extension_minutes: session?.extensionMinutes,
         }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setClientStatus(
-          data?.error
-            ? `Flutterwave init failed: ${data.error}`
-            : `Flutterwave init failed (HTTP ${res.status}).`
-        );
-        return;
+        const message = data?.error
+          ? `Flutterwave init failed: ${data.error}`
+          : `Flutterwave init failed (HTTP ${res.status}).`;
+        if (onError) {
+          onError(message);
+        } else {
+          setClientStatus(message);
+        }
+        return false;
       }
       const data = await res.json();
       const link = data.payment_link;
       if (!link) {
-        setClientStatus("Flutterwave link missing.");
-        return;
+        const message = "Flutterwave link missing.";
+        if (onError) {
+          onError(message);
+        } else {
+          setClientStatus(message);
+        }
+        return false;
       }
       if (window.Telegram?.WebApp?.openLink) {
         window.Telegram.WebApp.openLink(link);
       } else {
         window.location.href = link;
       }
+      return true;
     } catch {
-      setClientStatus("Flutterwave init failed. Try again.");
+      const message = "Flutterwave init failed. Try again.";
+      if (onError) {
+        onError(message);
+      } else {
+        setClientStatus(message);
+      }
+      return false;
     }
   };
 
@@ -1022,25 +1323,47 @@ export default function Home() {
     setBookingSheet((prev) => ({ ...prev, price: price || 0 }));
   }, [bookingSheet.open, bookingSheet.sessionType, bookingSheet.duration]);
 
-  const startCryptoPayment = async ({ mode, contentId = null, session = null }) => {
+  const startCryptoPayment = async ({
+    mode,
+    contentId = null,
+    session = null,
+    onError,
+  }) => {
     if (!initData) {
+      const message = "Open this mini app inside Telegram to proceed.";
+      if (onError) {
+        onError(message);
+        return false;
+      }
       setPaymentState((prev) => ({
         ...prev,
         open: true,
-        status: "Open this mini app inside Telegram to proceed.",
+        status: message,
       }));
-      return;
+      return false;
     }
     const payload = {
       initData,
       escrow_type:
-        mode === "access" ? "access_fee" : mode === "session" ? "session" : "content",
+        mode === "access"
+          ? "access_fee"
+          : mode === "session"
+          ? "session"
+          : mode === "extension"
+          ? "extension"
+          : "content",
       content_id: contentId,
     };
     if (mode === "session" && session) {
       payload.model_id = session.modelId;
       payload.session_type = session.sessionType;
       payload.duration_minutes = session.duration;
+      payload.scheduled_for = session.scheduledFor;
+    }
+    if (mode === "extension" && session) {
+      payload.session_id = session.sessionId;
+      payload.session_type = session.sessionType;
+      payload.extension_minutes = session.extensionMinutes;
     }
     try {
       const res = await fetch("/api/payments/crypto/initiate", {
@@ -1050,14 +1373,19 @@ export default function Home() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        const message = data?.error
+          ? `Payment init failed: ${data.error}`
+          : `Payment init failed (HTTP ${res.status}).`;
+        if (onError) {
+          onError(message);
+          return false;
+        }
         setPaymentState((prev) => ({
           ...prev,
           open: true,
-          status: data?.error
-            ? `Payment init failed: ${data.error}`
-            : `Payment init failed (HTTP ${res.status}).`,
+          status: message,
         }));
-        return;
+        return false;
       }
       const data = await res.json();
       const networks = data.networks || [];
@@ -1075,14 +1403,111 @@ export default function Home() {
         selectedNetwork: networks[0] || "",
         selectedCurrency: currencies[0] || "",
         txHash: "",
+        submitting: false,
         status: "Send payment and submit the transaction hash.",
       });
+      return true;
     } catch {
+      const message = "Payment init failed. Try again.";
+      if (onError) {
+        onError(message);
+        return false;
+      }
       setPaymentState((prev) => ({
         ...prev,
         open: true,
-        status: "Payment init failed. Try again.",
+        status: message,
       }));
+      return false;
+    }
+  };
+
+  const submitExtensionPayment = async () => {
+    if (!extensionSheet.sessionId) {
+      return;
+    }
+    const sessionPayload = {
+      sessionId: extensionSheet.sessionId,
+      sessionType: extensionSheet.sessionType,
+      extensionMinutes: extensionSheet.minutes,
+    };
+    setExtensionSheet((prev) => ({ ...prev, loading: true, status: "" }));
+    const onError = (message) =>
+      setExtensionSheet((prev) => ({ ...prev, loading: false, status: message }));
+    if (extensionSheet.paymentMethod === "crypto") {
+      const ok = await startCryptoPayment({
+        mode: "extension",
+        session: sessionPayload,
+        onError,
+      });
+      if (ok) {
+        setExtensionSheet((prev) => ({ ...prev, open: false, loading: false }));
+      }
+      return;
+    }
+    const ok = await startFlutterwavePayment({
+      mode: "extension",
+      session: sessionPayload,
+      onError,
+    });
+    if (ok) {
+      setExtensionSheet((prev) => ({ ...prev, open: false, loading: false }));
+    } else {
+      setExtensionSheet((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  const submitBookingPayment = async () => {
+    if (!bookingSheet.modelId) {
+      return;
+    }
+    if (!bookingSheet.scheduledFor) {
+      setBookingSheet((prev) => ({ ...prev, status: "Pick a schedule within 24 hours." }));
+      return;
+    }
+    const scheduled = new Date(bookingSheet.scheduledFor);
+    if (Number.isNaN(scheduled.getTime())) {
+      setBookingSheet((prev) => ({ ...prev, status: "Pick a valid schedule time." }));
+      return;
+    }
+    const minDate = scheduleBase;
+    const maxDate = new Date(scheduleBase.getTime() + 24 * 60 * 60 * 1000);
+    if (scheduled < minDate || scheduled > maxDate) {
+      setBookingSheet((prev) => ({
+        ...prev,
+        status: "Schedule must be within the next 24 hours.",
+      }));
+      return;
+    }
+    const sessionPayload = {
+      modelId: bookingSheet.modelId,
+      sessionType: bookingSheet.sessionType,
+      duration: bookingSheet.duration,
+      scheduledFor: bookingSheet.scheduledFor,
+    };
+    setBookingSheet((prev) => ({ ...prev, loading: true, status: "" }));
+    const onError = (message) =>
+      setBookingSheet((prev) => ({ ...prev, loading: false, status: message }));
+    if (bookingSheet.paymentMethod === "crypto") {
+      const ok = await startCryptoPayment({
+        mode: "session",
+        session: sessionPayload,
+        onError,
+      });
+      if (ok) {
+        setBookingSheet((prev) => ({ ...prev, open: false, loading: false }));
+      }
+      return;
+    }
+    const ok = await startFlutterwavePayment({
+      mode: "session",
+      session: sessionPayload,
+      onError,
+    });
+    if (ok) {
+      setBookingSheet((prev) => ({ ...prev, open: false, loading: false }));
+    } else {
+      setBookingSheet((prev) => ({ ...prev, loading: false }));
     }
   };
 
@@ -1095,6 +1520,7 @@ export default function Home() {
       setPaymentState((prev) => ({ ...prev, status: "Provide network, currency, and hash." }));
       return;
     }
+    setPaymentState((prev) => ({ ...prev, submitting: true }));
     try {
       const res = await fetch("/api/payments/crypto/submit", {
         method: "POST",
@@ -1110,16 +1536,22 @@ export default function Home() {
       if (!res.ok) {
         setPaymentState((prev) => ({
           ...prev,
+          submitting: false,
           status: `Submission failed (HTTP ${res.status}).`,
         }));
         return;
       }
       setPaymentState((prev) => ({
         ...prev,
+        submitting: false,
         status: "Payment submitted ✅ Await admin approval.",
       }));
     } catch {
-      setPaymentState((prev) => ({ ...prev, status: "Submission failed. Try again." }));
+      setPaymentState((prev) => ({
+        ...prev,
+        submitting: false,
+        status: "Submission failed. Try again.",
+      }));
     }
   };
 
@@ -1142,6 +1574,7 @@ export default function Home() {
         setClientStatus("Open this mini app inside Telegram to continue.");
         return;
       }
+      setClientLoading(true);
       try {
         const res = await fetch("/api/client/register", {
           method: "POST",
@@ -1182,6 +1615,8 @@ export default function Home() {
       } catch {
         setClientStatus("Registration failed. Please try again.");
         return;
+      } finally {
+        setClientLoading(false);
       }
     }
     setClientStatus("");
@@ -1223,11 +1658,16 @@ export default function Home() {
       setModelStatus("Stage name, email, and verification video are required.");
       return;
     }
+    if (modelForm.videoFile && modelForm.videoFile.size > 50 * 1024 * 1024) {
+      setModelStatus("Verification video must be under 50MB.");
+      return;
+    }
     const ageCheck = isAdult(modelForm.birthYear, modelForm.birthMonth);
     if (!ageCheck.ok) {
       setModelStatus(ageCheck.message);
       return;
     }
+    setVerificationLoading(true);
     try {
       const uploadInit = await fetch("/api/verification/upload-url", {
         method: "POST",
@@ -1282,6 +1722,8 @@ export default function Home() {
     } catch (err) {
       setModelStatus("Submission failed (network error).");
       return;
+    } finally {
+      setVerificationLoading(false);
     }
     setModelStatus("Verification submitted. Await admin approval.");
     setModelStep(3);
@@ -1302,6 +1744,7 @@ export default function Home() {
       setContentStatus("Upload the full content for paid unlocks.");
       return;
     }
+    setContentSubmitting(true);
     try {
       setContentStatus("Preparing upload…");
       const uploadInit = await fetch("/api/content/upload-url", {
@@ -1370,12 +1813,23 @@ export default function Home() {
         }),
       });
       if (!res.ok) {
-        setContentStatus(`Content submission failed (HTTP ${res.status}).`);
+        let detail = `Content submission failed (HTTP ${res.status}).`;
+        try {
+          const payload = await res.json();
+          if (payload?.error) {
+            detail = `${detail} ${payload.error}`;
+          }
+        } catch {
+          // ignore parse errors
+        }
+        setContentStatus(detail);
         return;
       }
     } catch {
       setContentStatus("Content submission failed.");
       return;
+    } finally {
+      setContentSubmitting(false);
     }
     setContentStatus("Teaser submitted for admin approval.");
     setShowContentForm(false);
@@ -1392,12 +1846,27 @@ export default function Home() {
     });
   };
 
+  if (booting) {
+    return (
+      <main className="app-shell">
+        <div className="loading-card">
+          <div className="brand">
+            <span className="brand-dot" />
+            <span className="logo-text">Velvet Rooms</span>
+          </div>
+          <div className="spinner" />
+          <p className="helper">Loading your dashboard…</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <header className="top">
         <div className="brand">
           <span className="brand-dot" />
-          Velvet Rooms
+          <span className="logo-text">Velvet Rooms</span>
         </div>
         {!roleLocked && (
           <div className="top-actions">
@@ -1519,8 +1988,12 @@ export default function Home() {
         <article className="flow-panel" id="client-flow">
           <header className="flow-head">
             <div>
-              <p className="eyebrow">Client Onboarding</p>
-              <h2>Unlock the content gallery.</h2>
+              <p className="eyebrow">
+                {clientAccessPaid ? "Client Dashboard" : "Client Onboarding"}
+              </p>
+              <h2>
+                {clientAccessPaid ? "Welcome to the content gallery." : "Unlock the content gallery."}
+              </h2>
             </div>
             {!clientAccessPaid && (
               <div className="stepper">
@@ -1616,6 +2089,11 @@ export default function Home() {
                       </label>
                     </div>
                     <p className="helper">18+ only. Your birth date stays private.</p>
+                    {!roleLocked && (
+                      <button type="button" className="cta ghost" onClick={goToRolePicker}>
+                        Back
+                      </button>
+                    )}
                   </div>
                 )}
                 {clientStep === 2 && (
@@ -1739,6 +2217,7 @@ export default function Home() {
                       <p className="helper">Gallery channel connected ✅</p>
                     )}
                     {galleryJoinError && <p className="helper error">{galleryJoinError}</p>}
+                    {galleryLoading && <p className="helper">Loading gallery…</p>}
                     {galleryStatus && <p className="helper error">{galleryStatus}</p>}
                     {galleryStatus && (
                       <button
@@ -1749,10 +2228,10 @@ export default function Home() {
                         Refresh access
                       </button>
                     )}
-                    {!galleryStatus && galleryItems.length === 0 && (
+                    {!galleryStatus && !galleryLoading && galleryItems.length === 0 && (
                       <p className="helper">No approved teasers yet.</p>
                     )}
-                    {!galleryStatus && galleryItems.length > 0 && (
+                    {!galleryStatus && !galleryLoading && galleryItems.length > 0 && (
                       <div className="gallery-grid" id="client-gallery">
                         {galleryItems.map((item) => (
                           <div key={`gallery-${item.id}`} className="gallery-card">
@@ -1866,10 +2345,11 @@ export default function Home() {
                     {clientPurchasesStatus && (
                       <p className="helper error">{clientPurchasesStatus}</p>
                     )}
-                    {!clientPurchasesStatus && clientPurchases.length === 0 && (
+                    {clientPurchasesLoading && <p className="helper">Loading purchases…</p>}
+                    {!clientPurchasesStatus && !clientPurchasesLoading && clientPurchases.length === 0 && (
                       <p className="helper">No purchases yet.</p>
                     )}
-                    {clientPurchases.map((item) => (
+                    {!clientPurchasesLoading && clientPurchases.map((item) => (
                       <div key={`purchase-${item.id}`} className="list-row">
                         <div>
                           <strong>{item.title || "Session"}</strong>
@@ -1877,7 +2357,7 @@ export default function Home() {
                             {item.display_name || item.public_id} · {item.content_type}
                           </p>
                         </div>
-                        <span className="pill">
+                        <span className={`pill ${getStatusTone(item.status)}`}>
                           {item.item_type === "session"
                             ? "Session completed"
                             : item.status === "rejected"
@@ -1895,10 +2375,11 @@ export default function Home() {
                     {clientSessionsStatus && (
                       <p className="helper error">{clientSessionsStatus}</p>
                     )}
-                    {!clientSessionsStatus && clientSessions.length === 0 && (
+                    {clientSessionsLoading && <p className="helper">Loading sessions…</p>}
+                    {!clientSessionsStatus && !clientSessionsLoading && clientSessions.length === 0 && (
                       <p className="helper">No sessions yet.</p>
                     )}
-                    {clientSessions.map((item) => (
+                    {!clientSessionsLoading && clientSessions.map((item) => (
                       <div key={`session-${item.id}`} className="list-row">
                         <div>
                           <strong>{item.model_label || "Model"}</strong>
@@ -1907,25 +2388,75 @@ export default function Home() {
                           </p>
                         </div>
                         <div className="session-actions">
-                          <span className="pill">{item.status}</span>
-                          {item.status === "active" && (
+                          <span className={`pill ${getStatusTone(item.status)}`}>
+                            {formatSessionStatus(item.status)}
+                          </span>
+                          {["accepted", "active"].includes(item.status) && (
                             <button
                               type="button"
-                              className="cta ghost"
+                              className={`cta ghost ${
+                                sessionActionStatus[item.id]?.loading ? "loading" : ""
+                              }`}
                               onClick={() => handleSessionJoin(item.id)}
                               disabled={sessionActionStatus[item.id]?.loading}
                             >
                               Start session
                             </button>
                           )}
+                          {item.status === "active" &&
+                            ["video", "voice"].includes(item.session_type) && (
+                              <button
+                                type="button"
+                                className="cta primary alt"
+                                onClick={() => openExtension(item)}
+                              >
+                                Extend 5 min
+                              </button>
+                            )}
                           {item.status === "awaiting_confirmation" && (
                             <button
                               type="button"
-                              className="cta ghost"
+                              className={`cta ghost ${
+                                sessionActionStatus[item.id]?.loading ? "loading" : ""
+                              }`}
                               onClick={() => handleSessionConfirm(item.id)}
                               disabled={sessionActionStatus[item.id]?.loading}
                             >
                               Confirm completed
+                            </button>
+                          )}
+                          {["pending_payment", "pending", "accepted", "active"].includes(
+                            item.status
+                          ) && (
+                            <button
+                              type="button"
+                              className={`cta danger ${
+                                sessionActionStatus[item.id]?.loading ? "loading" : ""
+                              }`}
+                              onClick={() => handleSessionCancel(item.id)}
+                              disabled={sessionActionStatus[item.id]?.loading}
+                            >
+                              Cancel
+                            </button>
+                          )}
+                          {["active", "awaiting_confirmation"].includes(item.status) && (
+                            <button
+                              type="button"
+                              className={`cta ghost ${
+                                sessionActionStatus[item.id]?.loading ? "loading" : ""
+                              }`}
+                              onClick={() =>
+                                setDisputeState({
+                                  open: true,
+                                  sessionId: item.id,
+                                  reason: "",
+                                  status: "",
+                                  loading: false,
+                                })
+                              }
+                              disabled={sessionActionStatus[item.id]?.loading}
+                            >
+                              Dispute
                             </button>
                           )}
                         </div>
@@ -1963,7 +2494,12 @@ export default function Home() {
           </div>
           {clientStatus && <p className="helper error">{clientStatus}</p>}
           {clientStep === 1 && !clientAccessPaid && (
-            <button type="button" className="cta primary" onClick={handleClientNext}>
+            <button
+              type="button"
+              className={`cta primary ${clientLoading ? "loading" : ""}`}
+              onClick={handleClientNext}
+              disabled={clientLoading}
+            >
               Continue
             </button>
           )}
@@ -1980,7 +2516,12 @@ export default function Home() {
                 type="button"
                 className="cta ghost"
                 onClick={() =>
-                  setPaymentState((prev) => ({ ...prev, open: false, status: "" }))
+                  setPaymentState((prev) => ({
+                    ...prev,
+                    open: false,
+                    status: "",
+                    submitting: false,
+                  }))
                 }
               >
                 Close
@@ -2046,8 +2587,61 @@ export default function Home() {
               />
             </label>
             {paymentState.status && <p className="helper">{paymentState.status}</p>}
-            <button type="button" className="cta primary" onClick={submitCryptoPayment}>
+            <button
+              type="button"
+              className={`cta primary ${paymentState.submitting ? "loading" : ""}`}
+              onClick={submitCryptoPayment}
+              disabled={paymentState.submitting}
+            >
               Submit payment
+            </button>
+          </div>
+        </section>
+      )}
+
+      {disputeState.open && (
+        <section className="payment-sheet">
+          <div className="payment-card">
+            <header>
+              <h3>Open a dispute</h3>
+              <button
+                type="button"
+                className="cta ghost"
+                onClick={() =>
+                  setDisputeState({
+                    open: false,
+                    sessionId: null,
+                    reason: "",
+                    status: "",
+                    loading: false,
+                  })
+                }
+              >
+                Close
+              </button>
+            </header>
+            <p className="helper">
+              Tell us what went wrong. Admin will review and contact both parties.
+            </p>
+            <label className="field">
+              Dispute reason
+              <textarea
+                rows={4}
+                value={disputeState.reason}
+                onChange={(event) =>
+                  setDisputeState((prev) => ({ ...prev, reason: event.target.value }))
+                }
+                placeholder="Describe the issue..."
+              />
+            </label>
+            {disputeState.status && <p className="helper error">{disputeState.status}</p>}
+            <button
+              type="button"
+              className={`cta primary ${disputeState.loading ? "loading" : ""}`}
+              onClick={submitDispute}
+              disabled={disputeState.loading}
+            >
+              Submit dispute
             </button>
           </div>
         </section>
@@ -2135,6 +2729,19 @@ export default function Home() {
                 </select>
               </label>
             </div>
+            <label className="field">
+              Schedule (within 24h)
+              <input
+                type="datetime-local"
+                value={bookingSheet.scheduledFor}
+                min={scheduleMin}
+                max={scheduleMax}
+                step="3600"
+                onChange={(event) =>
+                  setBookingSheet((prev) => ({ ...prev, scheduledFor: event.target.value }))
+                }
+              />
+            </label>
             <div className="wallet-box">
               <span>Session fee</span>
               <strong>₦{bookingSheet.price || "-"}</strong>
@@ -2154,31 +2761,59 @@ export default function Home() {
             {bookingSheet.status && <p className="helper">{bookingSheet.status}</p>}
             <button
               type="button"
-              className="cta primary"
-              onClick={() => {
-                if (bookingSheet.paymentMethod === "crypto") {
-                  startCryptoPayment({
-                    mode: "session",
-                    session: {
-                      modelId: bookingSheet.modelId,
-                      sessionType: bookingSheet.sessionType,
-                      duration: bookingSheet.duration,
-                    },
-                  });
-                } else {
-                  startFlutterwavePayment({
-                    mode: "session",
-                    session: {
-                      modelId: bookingSheet.modelId,
-                      sessionType: bookingSheet.sessionType,
-                      duration: bookingSheet.duration,
-                    },
-                  });
-                }
-                setBookingSheet((prev) => ({ ...prev, open: false, status: "" }));
-              }}
+              className={`cta primary ${bookingSheet.loading ? "loading" : ""}`}
+              onClick={submitBookingPayment}
+              disabled={bookingSheet.loading}
             >
               Proceed to payment
+            </button>
+          </div>
+        </section>
+      )}
+
+      {extensionSheet.open && (
+        <section className="payment-sheet">
+          <div className="payment-card">
+            <header>
+              <h3>Extend session</h3>
+              <button
+                type="button"
+                className="cta ghost"
+                onClick={() => setExtensionSheet((prev) => ({ ...prev, open: false }))}
+              >
+                Close
+              </button>
+            </header>
+            <p className="helper">
+              Extend this {extensionSheet.sessionType} session by {extensionSheet.minutes} minutes.
+            </p>
+            <div className="wallet-box">
+              <span>Extension fee</span>
+              <strong>₦{extensionSheet.price || "-"}</strong>
+            </div>
+            <label className="field">
+              Payment method
+              <select
+                value={extensionSheet.paymentMethod}
+                onChange={(event) =>
+                  setExtensionSheet((prev) => ({
+                    ...prev,
+                    paymentMethod: event.target.value,
+                  }))
+                }
+              >
+                <option value="flutterwave">Flutterwave</option>
+                <option value="crypto">Crypto (BTC/USDT)</option>
+              </select>
+            </label>
+            {extensionSheet.status && <p className="helper">{extensionSheet.status}</p>}
+            <button
+              type="button"
+              className={`cta primary ${extensionSheet.loading ? "loading" : ""}`}
+              onClick={submitExtensionPayment}
+              disabled={extensionSheet.loading}
+            >
+              Pay &amp; extend
             </button>
           </div>
         </section>
@@ -2415,7 +3050,12 @@ export default function Home() {
                           </span>
                         </label>
                         {contentStatus && <p className="helper error">{contentStatus}</p>}
-                        <button type="button" className="cta primary alt" onClick={submitContent}>
+                        <button
+                          type="button"
+                          className={`cta primary alt ${contentSubmitting ? "loading" : ""}`}
+                          onClick={submitContent}
+                          disabled={contentSubmitting}
+                        >
                           Submit teaser
                         </button>
                       </div>
@@ -2461,25 +3101,30 @@ export default function Home() {
                   <div className="flow-card">
                     <h3>My Bookings</h3>
                     {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}
-                    {!myBookingsStatus && myBookings.length === 0 && (
+                    {myBookingsLoading && <p className="helper">Loading bookings…</p>}
+                    {!myBookingsStatus && !myBookingsLoading && myBookings.length === 0 && (
                       <p className="helper">No bookings yet.</p>
                     )}
-                    {!myBookingsStatus && myBookings.length > 0 && (
+                    {!myBookingsStatus && !myBookingsLoading && myBookings.length > 0 && (
                       <div className="gallery-grid">
                         {myBookings.map((item) => (
                           <div key={`booking-${item.id}`} className="gallery-card">
-                            <div className="gallery-body">
-                              <h4>{item.session_type || "Session"}</h4>
-                              <p>{item.status || "pending"}</p>
-                              <div className="gallery-meta">
-                                <span>{item.client_label || "Client"}</span>
-                                <strong>{item.duration_minutes || "-"} mins</strong>
-                              </div>
+                              <div className="gallery-body">
+                                <h4>{item.session_type || "Session"}</h4>
+                              <span className={`pill ${getStatusTone(item.status)}`}>
+                                {formatSessionStatus(item.status || "pending")}
+                              </span>
+                                <div className="gallery-meta">
+                                  <span>{item.client_label || "Client"}</span>
+                                  <strong>{item.duration_minutes || "-"} mins</strong>
+                                </div>
                               {item.status === "pending" && (
                                 <div className="gallery-actions">
                                   <button
                                     type="button"
-                                    className="cta primary"
+                                    className={`cta primary ${
+                                      bookingActionStatus[item.id]?.loading ? "loading" : ""
+                                    }`}
                                     disabled={bookingActionStatus[item.id]?.loading}
                                     onClick={() => handleBookingAction(item.id, "accept")}
                                   >
@@ -2487,7 +3132,9 @@ export default function Home() {
                                   </button>
                                   <button
                                     type="button"
-                                    className="cta ghost"
+                                    className={`cta ghost ${
+                                      bookingActionStatus[item.id]?.loading ? "loading" : ""
+                                    }`}
                                     disabled={bookingActionStatus[item.id]?.loading}
                                     onClick={() => handleBookingAction(item.id, "decline")}
                                   >
@@ -2495,15 +3142,27 @@ export default function Home() {
                                   </button>
                                 </div>
                               )}
-                              {item.status === "active" && (
+                              {["accepted", "active"].includes(item.status) && (
                                 <div className="gallery-actions">
                                   <button
                                     type="button"
-                                    className="cta ghost"
+                                    className={`cta ghost ${
+                                      sessionActionStatus[item.id]?.loading ? "loading" : ""
+                                    }`}
                                     onClick={() => handleSessionJoin(item.id)}
                                     disabled={sessionActionStatus[item.id]?.loading}
                                   >
                                     Start session
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`cta danger ${
+                                      bookingActionStatus[item.id]?.loading ? "loading" : ""
+                                    }`}
+                                    onClick={() => handleBookingAction(item.id, "cancel")}
+                                    disabled={bookingActionStatus[item.id]?.loading}
+                                  >
+                                    Cancel session
                                   </button>
                                 </div>
                               )}
@@ -2511,7 +3170,9 @@ export default function Home() {
                                 <div className="gallery-actions">
                                   <button
                                     type="button"
-                                    className="cta ghost"
+                                    className={`cta ghost ${
+                                      sessionActionStatus[item.id]?.loading ? "loading" : ""
+                                    }`}
                                     onClick={() => handleSessionConfirm(item.id)}
                                     disabled={sessionActionStatus[item.id]?.loading}
                                   >
@@ -2741,7 +3402,12 @@ export default function Home() {
             </button>
           )}
           {modelStep === 2 && (
-            <button type="button" className="cta primary alt" onClick={submitModelVerification}>
+            <button
+              type="button"
+              className={`cta primary alt ${verificationLoading ? "loading" : ""}`}
+              onClick={submitModelVerification}
+              disabled={verificationLoading}
+            >
               Submit verification
             </button>
           )}

@@ -137,6 +137,49 @@ export async function POST(request) {
     );
   }
 
+  if (escrowType === "extension") {
+    relatedId = metadata.session_id || null;
+    receiverId = metadata.model_id || null;
+    releaseCondition = "both_confirmed";
+    const extensionMinutes = Number(metadata.extension_minutes || 5);
+    if (!relatedId || !receiverId) {
+      return NextResponse.json({ error: "extension_metadata_missing" }, { status: 400 });
+    }
+    if (extensionMinutes !== 5) {
+      return NextResponse.json({ error: "invalid_extension" }, { status: 400 });
+    }
+    const sessionRes = await query(
+      `SELECT id, status, duration_minutes, actual_start, scheduled_end
+       FROM sessions WHERE id = $1`,
+      [relatedId]
+    );
+    if (!sessionRes.rowCount) {
+      return NextResponse.json({ error: "session_missing" }, { status: 404 });
+    }
+    const session = sessionRes.rows[0];
+    if (!["accepted", "active", "awaiting_confirmation"].includes(session.status)) {
+      return NextResponse.json({ error: "extension_not_allowed" }, { status: 409 });
+    }
+    const currentDuration = Number(session.duration_minutes || 0);
+    const newDuration = currentDuration + extensionMinutes;
+    let newEnd = null;
+    if (session.scheduled_end) {
+      const base = new Date(session.scheduled_end);
+      newEnd = new Date(base.getTime() + extensionMinutes * 60 * 1000).toISOString();
+    } else if (session.actual_start) {
+      const base = new Date(session.actual_start);
+      newEnd = new Date(base.getTime() + newDuration * 60 * 1000).toISOString();
+    }
+    await query(
+      `UPDATE sessions
+       SET duration_minutes = $1,
+           extension_minutes = COALESCE(extension_minutes, 0) + $2,
+           scheduled_end = COALESCE($3, scheduled_end)
+       WHERE id = $4`,
+      [newDuration, extensionMinutes, newEnd, relatedId]
+    );
+  }
+
   const amount = Number(transaction.amount || 0);
   const { platformFee, receiverPayout } = calculateFees(amount, escrowType);
   const escrowRef = generateEscrowRef(escrowType.slice(0, 3));
@@ -209,6 +252,34 @@ export async function POST(request) {
       await sendMessage(
         modelRes.rows[0].telegram_id,
         `New booking approved. Please review and accept the session.${link}`
+      );
+    }
+  }
+
+  if (escrowType === "extension" && receiverId) {
+    const sessionClientRes = await query(
+      "SELECT client_id FROM sessions WHERE id = $1",
+      [relatedId]
+    );
+    const clientId = sessionClientRes.rows[0]?.client_id;
+    if (clientId) {
+      const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+        clientId,
+      ]);
+      if (clientRes.rowCount) {
+        await sendMessage(
+          clientRes.rows[0].telegram_id,
+          "Extension approved ✅ Your session has been extended by 5 minutes."
+        );
+      }
+    }
+    const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+      receiverId,
+    ]);
+    if (modelRes.rowCount) {
+      await sendMessage(
+        modelRes.rows[0].telegram_id,
+        "Extension approved ✅ Your session has been extended by 5 minutes."
       );
     }
   }

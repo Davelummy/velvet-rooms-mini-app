@@ -125,7 +125,7 @@ export async function POST(request) {
     await query(
       `UPDATE escrow_accounts
        SET release_condition_met = TRUE
-       WHERE escrow_type = 'session' AND related_id = $1`,
+       WHERE escrow_type IN ('session','extension') AND related_id = $1`,
       [sessionId]
     );
 

@@ -88,20 +88,24 @@ export async function POST(request) {
   const now = new Date();
 
   const sessionRes = await query(
-    `SELECT id, session_ref, client_id, model_id, started_at, duration_minutes
+    `SELECT id, session_ref, client_id, model_id, actual_start, duration_minutes, scheduled_end
      FROM sessions
      WHERE status = 'active'
-       AND started_at IS NOT NULL
+       AND actual_start IS NOT NULL
        AND duration_minutes IS NOT NULL`
   );
 
   for (const session of sessionRes.rows) {
-    const startedAt = session.started_at ? new Date(session.started_at) : null;
-    if (!startedAt) {
+    const startedAt = session.actual_start ? new Date(session.actual_start) : null;
+    const scheduledEnd = session.scheduled_end ? new Date(session.scheduled_end) : null;
+    const cutoff = scheduledEnd
+      ? scheduledEnd
+      : startedAt
+      ? new Date(startedAt.getTime() + Number(session.duration_minutes || 0) * 60 * 1000)
+      : null;
+    if (!cutoff) {
       continue;
     }
-    const cutoff = new Date(startedAt.getTime());
-    cutoff.setMinutes(cutoff.getMinutes() + Number(session.duration_minutes || 0));
     if (cutoff > now) {
       continue;
     }

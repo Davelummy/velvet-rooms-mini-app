@@ -51,6 +51,16 @@ body {
   gap: 8px;
 }
 
+.logo-text {
+  font-family: "DM Serif Display", "Times New Roman", serif;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  font-size: 14px;
+  background: linear-gradient(120deg, #fff2f4, #ff9fb4 45%, #ffd2a8);
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
 .brand-dot {
   width: 10px;
   height: 10px;
@@ -134,11 +144,54 @@ h1 {
   font-family: "Space Grotesk", sans-serif;
   cursor: pointer;
   font-size: 14px;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+.cta::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.25), transparent 60%);
+  opacity: 0.6;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+.cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  pointer-events: none;
 }
 .cta:disabled {
   cursor: not-allowed;
   opacity: 0.55;
   box-shadow: none;
+}
+.cta:active {
+  transform: translateY(1px) scale(0.98);
+}
+.cta.loading {
+  opacity: 0.7;
+  pointer-events: none;
+}
+.cta.loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  animation: shimmer 1.2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 .cta.primary {
@@ -155,6 +208,23 @@ h1 {
   background: transparent;
   border: 1px solid var(--line);
   color: var(--ink);
+}
+
+.cta.success {
+  background: linear-gradient(120deg, #19c37d, #0e9f66);
+  color: #071a12;
+  box-shadow: 0 14px 26px rgba(25, 195, 125, 0.25);
+}
+
+.cta.danger {
+  background: linear-gradient(120deg, #ff5f6d, #ff2d55);
+  color: white;
+  box-shadow: 0 14px 26px rgba(255, 47, 85, 0.28);
+}
+
+.cta.warning {
+  background: linear-gradient(120deg, #ffb347, #ff7c47);
+  color: #2b1305;
 }
 
 .cta.block {
@@ -244,11 +314,35 @@ h1 {
 }
 
 .pill {
-  background: var(--accent);
-  color: white;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
   padding: 6px 12px;
   border-radius: 999px;
   font-size: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  letter-spacing: 0.02em;
+  font-family: "Space Grotesk", sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pill.success {
+  background: rgba(25, 195, 125, 0.2);
+  color: #b6f7dd;
+  border-color: rgba(25, 195, 125, 0.45);
+}
+
+.pill.danger {
+  background: rgba(255, 71, 100, 0.2);
+  color: #ffc0cc;
+  border-color: rgba(255, 71, 100, 0.5);
+}
+
+.pill.warning {
+  background: rgba(255, 179, 71, 0.2);
+  color: #ffd6a3;
+  border-color: rgba(255, 179, 71, 0.5);
 }
 
 .card-body {
@@ -550,7 +644,7 @@ h1 {
   color: #ffb4c2;
 }
 .helper.success {
-  color: #ff8f6f;
+  color: #8ff1c2;
 }
 .dash-actions {
   display: flex;
@@ -570,8 +664,15 @@ h1 {
 .session-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
+}
+
+.gallery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .list-row:last-child {
@@ -590,6 +691,40 @@ h1 {
   border-radius: 18px;
   padding: 20px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 20px;
+}
+
+.loading-card {
+  background: rgba(19, 10, 12, 0.85);
+  border: 1px solid rgba(227, 23, 62, 0.3);
+  border-radius: 20px;
+  padding: 32px 36px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  display: grid;
+  gap: 18px;
+  justify-items: center;
+}
+
+.spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .admin-shell {
@@ -751,6 +886,10 @@ h1 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.brand .admin-pill {
+  margin-top: 0;
 }
 
 .admin-list {

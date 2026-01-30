@@ -67,6 +67,27 @@ async function sendMessage(chatId, text) {
   }
 }
 
+async function removeFromSessionGroup(userTelegramId) {
+  const channelId = normalizeChatId(SESSION_HUB_CHAT_ID);
+  if (!BOT_TOKEN || !channelId || !userTelegramId) {
+    return;
+  }
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/banChatMember`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: channelId, user_id: userTelegramId }),
+    });
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/unbanChatMember`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: channelId, user_id: userTelegramId }),
+    });
+  } catch {
+    // ignore cleanup errors
+  }
+}
+
 export async function POST(request) {
   const body = await request.json();
   const initData = body?.initData || "";
@@ -80,7 +101,7 @@ export async function POST(request) {
 
   const sessionId = Number(body?.session_id || 0);
   const action = (body?.action || "").toString().toLowerCase();
-  if (!sessionId || !["accept", "decline"].includes(action)) {
+  if (!sessionId || !["accept", "decline", "cancel"].includes(action)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
@@ -108,24 +129,15 @@ export async function POST(request) {
   if (session.model_id !== userId) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
-  if (session.status !== "pending") {
-    return NextResponse.json({ error: "invalid_status" }, { status: 409 });
-  }
-
   if (action === "accept") {
-    const duration = Number(session.duration_minutes || 0);
-    const now = new Date();
-    const baseStart = session.started_at ? new Date(session.started_at) : now;
-    const scheduledEnd =
-      duration > 0 ? new Date(baseStart.getTime() + duration * 60 * 1000) : null;
+    if (session.status !== "pending") {
+      return NextResponse.json({ error: "invalid_status" }, { status: 409 });
+    }
     await query(
       `UPDATE sessions
-       SET status = 'active',
-           started_at = COALESCE(started_at, NOW()),
-           actual_start = COALESCE(actual_start, NOW()),
-           scheduled_end = COALESCE($2, scheduled_end)
+       SET status = 'accepted'
        WHERE id = $1`,
-      [sessionId, scheduledEnd]
+      [sessionId]
     );
     const inviteLink = await createSessionInviteLink(session.session_ref);
     const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
@@ -146,29 +158,103 @@ export async function POST(request) {
       await sendMessage(clientRes.rows[0].telegram_id, clientMsg);
     }
     await sendMessage(tgUser.id, modelMsg);
-    return NextResponse.json({ ok: true, status: "active", invite_link: inviteLink });
+    return NextResponse.json({ ok: true, status: "accepted", invite_link: inviteLink });
   }
 
+  if (action === "decline") {
+    if (session.status !== "pending") {
+      return NextResponse.json({ error: "invalid_status" }, { status: 409 });
+    }
+    await query(
+      `UPDATE sessions
+       SET status = 'cancelled_by_model', completed_at = NOW()
+       WHERE id = $1`,
+      [sessionId]
+    );
+    const escrowRes = await query(
+      `SELECT id, amount, payer_id
+       FROM escrow_accounts
+       WHERE escrow_type IN ('session','extension') AND related_id = $1 AND status = 'held'`,
+      [sessionId]
+    );
+    if (escrowRes.rowCount) {
+      const escrow = escrowRes.rows[0];
+      await query(
+        `UPDATE escrow_accounts
+         SET status = 'refunded', released_at = NOW(), release_condition_met = TRUE,
+             dispute_reason = 'model_cancelled'
+         WHERE id = $1`,
+        [escrow.id]
+      );
+      await query(
+        `UPDATE users
+         SET wallet_balance = COALESCE(wallet_balance, 0) + $1
+         WHERE id = $2`,
+        [escrow.amount, escrow.payer_id]
+      );
+    }
+    const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+      session.client_id,
+    ]);
+    if (clientRes.rowCount) {
+      await sendMessage(
+        clientRes.rows[0].telegram_id,
+        "Your model declined the booking. Payment has been refunded."
+      );
+    }
+    return NextResponse.json({ ok: true, status: "declined" });
+  }
+
+  if (!["accepted", "active"].includes(session.status)) {
+    return NextResponse.json({ error: "invalid_status" }, { status: 409 });
+  }
   await query(
     `UPDATE sessions
-     SET status = 'declined', completed_at = NOW()
+     SET status = 'cancelled_by_model', completed_at = NOW(), ended_at = NOW()
      WHERE id = $1`,
     [sessionId]
   );
-  await query(
-    `UPDATE escrow_accounts
-     SET status = 'disputed', dispute_reason = 'model_declined'
-     WHERE escrow_type = 'session' AND related_id = $1 AND status = 'held'`,
+  const escrowRes = await query(
+    `SELECT id, amount, payer_id
+     FROM escrow_accounts
+     WHERE escrow_type IN ('session','extension') AND related_id = $1 AND status = 'held'`,
     [sessionId]
   );
+  if (escrowRes.rowCount) {
+    const escrow = escrowRes.rows[0];
+    await query(
+      `UPDATE escrow_accounts
+       SET status = 'refunded', released_at = NOW(), release_condition_met = TRUE,
+           dispute_reason = 'model_cancelled'
+       WHERE id = $1`,
+      [escrow.id]
+    );
+    await query(
+      `UPDATE users
+       SET wallet_balance = COALESCE(wallet_balance, 0) + $1
+       WHERE id = $2`,
+      [escrow.amount, escrow.payer_id]
+    );
+  }
   const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
     session.client_id,
+  ]);
+  const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+    session.model_id,
   ]);
   if (clientRes.rowCount) {
     await sendMessage(
       clientRes.rows[0].telegram_id,
-      "Your model declined the booking. Admin will follow up on the escrow."
+      "Session cancelled by the model. Your payment has been refunded."
     );
+    await removeFromSessionGroup(clientRes.rows[0].telegram_id);
   }
-  return NextResponse.json({ ok: true, status: "declined" });
+  if (modelRes.rowCount) {
+    await sendMessage(
+      modelRes.rows[0].telegram_id,
+      "You cancelled the session. The client has been refunded."
+    );
+    await removeFromSessionGroup(modelRes.rows[0].telegram_id);
+  }
+  return NextResponse.json({ ok: true, status: "cancelled" });
 }

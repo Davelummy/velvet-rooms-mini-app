@@ -33,7 +33,7 @@ export async function GET(request) {
        FROM sessions s
        JOIN users u ON u.id = s.client_id
        WHERE s.model_id = $1
-         AND s.status != 'rejected'
+         AND s.status NOT IN ('pending_payment', 'rejected', 'cancelled_by_client', 'cancelled_by_model')
        ORDER BY s.created_at DESC`,
       [userId]
     );

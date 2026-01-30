@@ -300,7 +300,8 @@ export default function Admin() {
       <header className="admin-top">
         <div className="brand">
           <span className="brand-dot" />
-          Velvet Rooms Admin
+          <span className="logo-text">Velvet Rooms</span>
+          <span className="admin-pill">Admin</span>
         </div>
         <div className="admin-tabs">
           <button

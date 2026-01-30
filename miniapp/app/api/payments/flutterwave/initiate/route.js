@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { query } from "../../../_lib/db";
 import { extractUser, verifyInitData } from "../../../_lib/telegram";
 import { ensureUser } from "../../../_lib/users";
+import { ensureSessionColumns } from "../../_lib/sessions";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,7 @@ const WEBAPP_URL = (WEBAPP_URL_RAW.startsWith("http://") || WEBAPP_URL_RAW.start
   : ""
 ).replace(/\/$/, "");
 const ACCESS_FEE_AMOUNT = 5000;
+const PENDING_WINDOW_HOURS = 2;
 
 function generateTransactionRef() {
   const random = crypto.randomBytes(4).toString("hex").toUpperCase();
@@ -29,6 +31,23 @@ function sessionPricing(type, duration) {
     video: { 5: 5000, 10: 9000, 20: 16000, 30: 22000 },
   };
   return table[type]?.[duration] ?? null;
+}
+
+function extensionPricing(type) {
+  const table = { voice: 1500, video: 4000 };
+  return table[type] ?? null;
+}
+
+function parseScheduledFor(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const now = new Date();
+  const max = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  if (parsed < now || parsed > max) {
+    return null;
+  }
+  return parsed.toISOString();
 }
 
 export async function POST(request) {
@@ -51,7 +70,7 @@ export async function POST(request) {
 
   const escrowType = body?.escrow_type || "";
   const contentId = Number(body?.content_id || 0);
-  if (!["access_fee", "content", "session"].includes(escrowType)) {
+  if (!["access_fee", "content", "session", "extension"].includes(escrowType)) {
     return NextResponse.json({ error: "invalid_escrow_type" }, { status: 400 });
   }
 
@@ -133,11 +152,16 @@ export async function POST(request) {
   }
 
   if (escrowType === "session") {
+    await ensureSessionColumns();
     const modelId = Number(body?.model_id || 0);
     const sessionType = (body?.session_type || "").toString().trim().toLowerCase();
     const durationMinutes = Number(body?.duration_minutes || 0);
+    const scheduledFor = parseScheduledFor(body?.scheduled_for);
     if (!modelId || !sessionType || !durationMinutes) {
       return NextResponse.json({ error: "missing_session_fields" }, { status: 400 });
+    }
+    if (!scheduledFor) {
+      return NextResponse.json({ error: "invalid_schedule" }, { status: 400 });
     }
     const modelRes = await query(
       `SELECT u.id, mp.verification_status
@@ -159,12 +183,61 @@ export async function POST(request) {
     metadata.duration_minutes = durationMinutes;
     const sessionRef = generateTransactionRef().replace("FLW", "SES");
     const sessionRes = await query(
-      `INSERT INTO sessions (session_ref, client_id, model_id, session_type, package_price, status, duration_minutes, created_at)
-       VALUES ($1, $2, $3, $4, $5, 'pending_payment', $6, NOW())
+      `INSERT INTO sessions (session_ref, client_id, model_id, session_type, package_price, status, duration_minutes, scheduled_for, created_at)
+       VALUES ($1, $2, $3, $4, $5, 'pending_payment', $6, $7, NOW())
        RETURNING id`,
-      [sessionRef, userId, modelId, sessionType, amount, durationMinutes]
+      [sessionRef, userId, modelId, sessionType, amount, durationMinutes, scheduledFor]
     );
     metadata.session_id = sessionRes.rows[0]?.id;
+  }
+
+  if (escrowType === "extension") {
+    await ensureSessionColumns();
+    const sessionId = Number(body?.session_id || 0);
+    const extensionMinutes = Number(body?.extension_minutes || 5);
+    if (!sessionId || extensionMinutes !== 5) {
+      return NextResponse.json({ error: "invalid_extension_request" }, { status: 400 });
+    }
+    const sessionRes = await query(
+      `SELECT id, client_id, model_id, session_type, status
+       FROM sessions WHERE id = $1`,
+      [sessionId]
+    );
+    if (!sessionRes.rowCount) {
+      return NextResponse.json({ error: "session_missing" }, { status: 404 });
+    }
+    const session = sessionRes.rows[0];
+    if (session.client_id !== userId) {
+      return NextResponse.json({ error: "client_only" }, { status: 403 });
+    }
+    if (!["accepted", "active"].includes(session.status)) {
+      return NextResponse.json({ error: "extension_not_allowed" }, { status: 409 });
+    }
+    const extensionAmount = extensionPricing(session.session_type);
+    if (!extensionAmount) {
+      return NextResponse.json({ error: "extension_not_supported" }, { status: 400 });
+    }
+    const existingRes = await query(
+      `SELECT transaction_ref
+       FROM transactions
+       WHERE user_id = $1
+         AND payment_provider = 'flutterwave'
+         AND status IN ('pending','submitted')
+         AND metadata_json->>'escrow_type' = 'extension'
+         AND metadata_json->>'session_id' = $2
+         AND created_at >= NOW() - INTERVAL '${PENDING_WINDOW_HOURS} hours'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, String(sessionId)]
+    );
+    if (existingRes.rowCount) {
+      return NextResponse.json({ error: "extension_pending" }, { status: 409 });
+    }
+    amount = extensionAmount;
+    metadata.session_id = sessionId;
+    metadata.model_id = session.model_id;
+    metadata.session_type = session.session_type;
+    metadata.extension_minutes = extensionMinutes;
   }
 
   const transactionRef = generateTransactionRef();

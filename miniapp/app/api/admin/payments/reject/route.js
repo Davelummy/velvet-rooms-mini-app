@@ -111,6 +111,34 @@ export async function POST(request) {
     }
   }
 
+  if (metadata.escrow_type === "extension" && metadata.session_id) {
+    const sessionRes = await query(
+      "SELECT client_id, model_id FROM sessions WHERE id = $1",
+      [metadata.session_id]
+    );
+    if (sessionRes.rowCount) {
+      const session = sessionRes.rows[0];
+      const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+        session.client_id,
+      ]);
+      const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+        session.model_id,
+      ]);
+      if (clientRes.rowCount) {
+        await sendMessage(
+          clientRes.rows[0].telegram_id,
+          "Session extension was rejected by admin."
+        );
+      }
+      if (modelRes.rowCount) {
+        await sendMessage(
+          modelRes.rows[0].telegram_id,
+          "Session extension request was rejected."
+        );
+      }
+    }
+  }
+
   await query(
     `INSERT INTO admin_actions (admin_id, action_type, target_type, target_id, details, created_at)
      VALUES ($1, 'reject_crypto', 'transaction', $2, $3, NOW())`,
