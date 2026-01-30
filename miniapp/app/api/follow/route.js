@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
 import { ensureFollowTable } from "../_lib/follows";
+import { ensureBlockTable } from "../_lib/blocks";
+import { logUserAction } from "../_lib/user_actions";
 
 export const runtime = "nodejs";
 
@@ -23,6 +25,7 @@ export async function POST(request) {
   }
 
   await ensureFollowTable();
+  await ensureBlockTable();
   const userRes = await query("SELECT id FROM users WHERE telegram_id = $1", [
     tgUser.id,
   ]);
@@ -32,6 +35,13 @@ export async function POST(request) {
   const followerId = userRes.rows[0].id;
   if (followerId === targetId) {
     return NextResponse.json({ error: "self_follow" }, { status: 400 });
+  }
+  const blockRes = await query(
+    "SELECT 1 FROM blocks WHERE (blocker_id = $1 AND blocked_id = $2) OR (blocker_id = $2 AND blocked_id = $1)",
+    [followerId, targetId]
+  );
+  if (blockRes.rowCount) {
+    return NextResponse.json({ error: "blocked" }, { status: 403 });
   }
 
   const exists = await query(
@@ -46,6 +56,11 @@ export async function POST(request) {
       [followerId, targetId]
     );
     following = false;
+    await logUserAction({
+      actorId: followerId,
+      actionType: "unfollow_user",
+      targetId,
+    });
   } else {
     await query(
       "INSERT INTO follows (follower_id, followee_id) VALUES ($1, $2)",
@@ -53,6 +68,11 @@ export async function POST(request) {
     );
     following = true;
     shouldNotify = true;
+    await logUserAction({
+      actorId: followerId,
+      actionType: "follow_user",
+      targetId,
+    });
   }
 
   const counts = await query(

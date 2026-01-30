@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureUser } from "../../_lib/users";
+import { ensureClientProfileColumns } from "../../_lib/clients";
 
 export const runtime = "nodejs";
 
@@ -82,13 +83,28 @@ export async function POST(request) {
   const existing = await query("SELECT id FROM client_profiles WHERE user_id = $1", [
     userId,
   ]);
+  await ensureClientProfileColumns();
   if (!existing.rowCount) {
     await query(
-      `INSERT INTO client_profiles (user_id, total_spent, access_fee_paid)
-       VALUES ($1, 0, FALSE)`,
-      [userId]
+      `INSERT INTO client_profiles (user_id, total_spent, access_fee_paid, display_name, location, birth_month, birth_year)
+       VALUES ($1, 0, FALSE, $2, $3, $4, $5)`,
+      [userId, displayName, location || null, Number(birthMonth) || null, Number(birthYear) || null]
+    );
+  } else {
+    await query(
+      `UPDATE client_profiles
+       SET display_name = $2,
+           location = $3,
+           birth_month = $4,
+           birth_year = $5
+       WHERE user_id = $1`,
+      [userId, displayName, location || null, Number(birthMonth) || null, Number(birthYear) || null]
     );
   }
+  await query(
+    "UPDATE users SET privacy_hide_email = TRUE, privacy_hide_location = TRUE WHERE id = $1",
+    [userId]
+  );
 
   await query("UPDATE users SET status = 'active' WHERE id = $1", [userId]);
 

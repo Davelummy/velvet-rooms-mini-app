@@ -6,6 +6,10 @@ export async function ensureSessionColumns() {
   if (ensured) {
     return;
   }
+  await query("ALTER TABLE model_profiles ADD COLUMN IF NOT EXISTS tags TEXT");
+  await query("ALTER TABLE model_profiles ADD COLUMN IF NOT EXISTS availability TEXT");
+  await query("ALTER TABLE model_profiles ADD COLUMN IF NOT EXISTS bio TEXT");
+  await query("ALTER TABLE model_profiles ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ");
   await query(
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ"
   );

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureUser } from "../../_lib/users";
+import { ensureSessionColumns } from "../../_lib/sessions";
 
 export const runtime = "nodejs";
 
@@ -67,6 +68,9 @@ export async function POST(request) {
   const birthMonth = (body?.birth_month || "").toString().trim();
   const birthYear = (body?.birth_year || "").toString().trim();
   const videoPath = (body?.video_path || "").toString().trim();
+  const tags = (body?.tags || "").toString().trim();
+  const availability = (body?.availability || "").toString().trim();
+  const bio = (body?.bio || "").toString().trim();
 
   if (!displayName || !email || !videoPath) {
     return NextResponse.json(
@@ -90,6 +94,7 @@ export async function POST(request) {
   }
 
   const now = new Date();
+  await ensureSessionColumns();
   const userId = await ensureUser({
     telegramId: tgUser.id,
     username: tgUser.username || null,
@@ -111,15 +116,18 @@ export async function POST(request) {
            verification_status = $2,
            verification_submitted_at = $3,
            verification_video_url = $4,
-           verification_video_path = $5
-       WHERE user_id = $6`,
-      [displayName, "submitted", now, null, videoPath, userId]
+           verification_video_path = $5,
+           tags = COALESCE(NULLIF($6,''), tags),
+           availability = COALESCE(NULLIF($7,''), availability),
+           bio = COALESCE(NULLIF($8,''), bio)
+       WHERE user_id = $9`,
+      [displayName, "submitted", now, null, videoPath, tags, availability, bio, userId]
     );
   } else {
     await query(
-      `INSERT INTO model_profiles (user_id, display_name, verification_status, verification_submitted_at, verification_video_url, verification_video_path, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [userId, displayName, "submitted", now, null, videoPath, now]
+      `INSERT INTO model_profiles (user_id, display_name, verification_status, verification_submitted_at, verification_video_url, verification_video_path, tags, availability, bio, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [userId, displayName, "submitted", now, null, videoPath, tags, availability, bio, now]
     );
   }
 

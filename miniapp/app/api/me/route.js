@@ -3,7 +3,9 @@ import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
 import { ensureFollowTable } from "../_lib/follows";
 import { ensureUserColumns } from "../_lib/users";
+import { ensureBlockTable } from "../_lib/blocks";
 import { getSupabase } from "../_lib/supabase";
+import { ensureClientProfileColumns } from "../_lib/clients";
 
 export const runtime = "nodejs";
 
@@ -16,13 +18,15 @@ export async function GET(request) {
   }
   await ensureUserColumns();
   await ensureFollowTable();
+  await ensureBlockTable();
+  await ensureClientProfileColumns();
   const tgUser = extractUser(initData);
   if (!tgUser || !tgUser.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
   }
 
   const userRes = await query(
-    `SELECT id, telegram_id, public_id, username, role, status, email, created_at, wallet_balance, first_name, last_name, avatar_path
+    `SELECT id, telegram_id, public_id, username, role, status, email, created_at, wallet_balance, first_name, last_name, avatar_path, privacy_hide_email, privacy_hide_location
      FROM users WHERE telegram_id = $1`,
     [tgUser.id]
   );
@@ -32,13 +36,13 @@ export async function GET(request) {
   const user = userRes.rows[0];
 
   const modelRes = await query(
-    `SELECT display_name, verification_status, is_online, last_seen_at
+    `SELECT display_name, verification_status, is_online, last_seen_at, tags, availability, bio
      FROM model_profiles WHERE user_id = $1`,
     [user.id]
   );
   const model = modelRes.rowCount ? modelRes.rows[0] : null;
   const clientRes = await query(
-    `SELECT access_fee_paid, access_granted_at
+    `SELECT access_fee_paid, access_granted_at, display_name, location, birth_month, birth_year
      FROM client_profiles WHERE user_id = $1`,
     [user.id]
   );
@@ -49,6 +53,11 @@ export async function GET(request) {
         (SELECT COUNT(*) FROM follows WHERE follower_id = $1) AS following`,
     [user.id]
   );
+  const blockedRes = await query(
+    "SELECT blocked_id FROM blocks WHERE blocker_id = $1",
+    [user.id]
+  );
+  const blockedIds = blockedRes.rows.map((row) => row.blocked_id);
   const followersCount = Number(followCountsRes.rows[0]?.followers || 0);
   const followingCount = Number(followCountsRes.rows[0]?.following || 0);
   let avatarUrl = null;
@@ -79,6 +88,13 @@ export async function GET(request) {
     user.status = "active";
   }
 
+  const clientProfile = clientRes.rowCount
+    ? {
+        ...clientRes.rows[0],
+        location: user.privacy_hide_location ? null : clientRes.rows[0].location,
+      }
+    : null;
+
   return NextResponse.json({
     ok: true,
     user: {
@@ -86,7 +102,7 @@ export async function GET(request) {
       telegram_id: user.telegram_id,
       public_id: user.public_id,
       username: user.username,
-      email: user.email,
+      email: user.privacy_hide_email ? null : user.email,
       created_at: user.created_at,
       wallet_balance: user.wallet_balance,
       first_name: user.first_name,
@@ -95,10 +111,13 @@ export async function GET(request) {
       avatar_url: avatarUrl,
       followers_count: followersCount,
       following_count: followingCount,
+      privacy_hide_email: Boolean(user.privacy_hide_email),
+      privacy_hide_location: Boolean(user.privacy_hide_location),
       role: user.role,
       status: user.status,
     },
     model,
-    client,
+    client: clientProfile,
+    blocked_ids: blockedIds,
   });
 }

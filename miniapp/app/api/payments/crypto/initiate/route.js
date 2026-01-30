@@ -5,6 +5,7 @@ import { extractUser, verifyInitData } from "../../../_lib/telegram";
 import { ensureUser } from "../../../_lib/users";
 import { getCryptoCurrencies, getCryptoNetworks, getCryptoWallets } from "../../../_lib/crypto";
 import { ensureSessionColumns } from "../../../_lib/sessions";
+import { ensureBlockTable } from "../../../_lib/blocks";
 
 export const runtime = "nodejs";
 
@@ -121,6 +122,7 @@ export async function POST(request) {
   }
 
   if (escrowType === "content") {
+    await ensureBlockTable();
     if (!contentId) {
       return NextResponse.json({ error: "missing_content" }, { status: 400 });
     }
@@ -142,6 +144,15 @@ export async function POST(request) {
     }
     if (!content.telegram_file_id) {
       return NextResponse.json({ error: "content_missing_full_media" }, { status: 400 });
+    }
+    const blockRes = await query(
+      `SELECT 1 FROM blocks
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)`,
+      [userId, content.model_id]
+    );
+    if (blockRes.rowCount) {
+      return NextResponse.json({ error: "blocked" }, { status: 403 });
     }
     amount = Number(content.price);
     metadata.content_id = contentId;
@@ -166,6 +177,7 @@ export async function POST(request) {
 
   if (escrowType === "session") {
     await ensureSessionColumns();
+    await ensureBlockTable();
     const modelId = Number(body?.model_id || 0);
     const sessionType = (body?.session_type || "").toString().trim().toLowerCase();
     const durationMinutes = Number(body?.duration_minutes || 0);
@@ -185,6 +197,15 @@ export async function POST(request) {
     );
     if (!modelRes.rowCount || modelRes.rows[0].verification_status !== "approved") {
       return NextResponse.json({ error: "model_not_approved" }, { status: 400 });
+    }
+    const blockRes = await query(
+      `SELECT 1 FROM blocks
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)`,
+      [userId, modelId]
+    );
+    if (blockRes.rowCount) {
+      return NextResponse.json({ error: "blocked" }, { status: 403 });
     }
     const priceTable = {
       chat: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
@@ -244,6 +265,7 @@ export async function POST(request) {
 
   if (escrowType === "extension") {
     await ensureSessionColumns();
+    await ensureBlockTable();
     const sessionId = Number(body?.session_id || 0);
     const extensionMinutes = Number(body?.extension_minutes || 5);
     if (!sessionId || extensionMinutes !== 5) {
@@ -263,6 +285,15 @@ export async function POST(request) {
     }
     if (!["accepted", "active"].includes(session.status)) {
       return NextResponse.json({ error: "extension_not_allowed" }, { status: 409 });
+    }
+    const blockRes = await query(
+      `SELECT 1 FROM blocks
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)`,
+      [userId, session.model_id]
+    );
+    if (blockRes.rowCount) {
+      return NextResponse.json({ error: "blocked" }, { status: 403 });
     }
     const extensionAmount = extensionPricing(session.session_type);
     if (!extensionAmount) {

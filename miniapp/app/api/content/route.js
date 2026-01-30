@@ -3,6 +3,8 @@ import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
 import { getSupabase } from "../_lib/supabase";
 import { ensureFollowTable } from "../_lib/follows";
+import { ensureBlockTable } from "../_lib/blocks";
+import { ensureSessionColumns } from "../_lib/sessions";
 
 export const runtime = "nodejs";
 
@@ -15,6 +17,10 @@ function getTeaserBucket() {
     process.env.SUPABASE_BUCKET ||
     "teaser content bucket"
   );
+}
+
+function getAvatarBucket() {
+  return process.env.SUPABASE_AVATAR_BUCKET || "velvetrooms-avatars";
 }
 
 export async function POST(request) {
@@ -137,6 +143,8 @@ export async function GET(request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   await ensureFollowTable();
+  await ensureBlockTable();
+  await ensureSessionColumns();
 
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope");
@@ -201,35 +209,67 @@ export async function GET(request) {
     }
     res = await query(
       `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
-              dc.preview_file_id, dc.model_id, u.public_id, mp.display_name,
+              dc.preview_file_id, dc.model_id, dc.created_at,
+              u.public_id, u.username, u.avatar_path,
+              mp.display_name, mp.verification_status, mp.approved_at,
+              mp.tags, mp.availability, mp.bio,
               EXISTS (
                 SELECT 1 FROM follows f
                 WHERE f.follower_id = $1 AND f.followee_id = dc.model_id
-              ) AS is_following
-       FROM digital_content dc
+              ) AS is_following,
+              CASE
+                WHEN mp.approved_at IS NOT NULL
+                  AND mp.approved_at >= NOW() - INTERVAL '7 days'
+                THEN TRUE
+                ELSE FALSE
+              END AS is_spotlight,
+              CASE
+                WHEN EXISTS (
+                  SELECT 1 FROM follows f
+                  WHERE f.follower_id = $1 AND f.followee_id = dc.model_id
+                )
+                AND dc.created_at >= NOW() - INTERVAL '7 days'
+                THEN TRUE
+                ELSE FALSE
+              END AS is_new_from_followed
+      FROM digital_content dc
        JOIN users u ON u.id = dc.model_id
        LEFT JOIN model_profiles mp ON mp.user_id = dc.model_id
        WHERE dc.is_active = TRUE
-       ORDER BY dc.created_at DESC`,
+         AND NOT EXISTS (
+           SELECT 1 FROM blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = dc.model_id)
+              OR (b.blocker_id = dc.model_id AND b.blocked_id = $1)
+         )
+       ORDER BY is_following DESC, is_spotlight DESC, dc.created_at DESC`,
       [userRes.rows[0].id]
     );
   }
 
   const bucket = getTeaserBucket();
+  const avatarBucket = getAvatarBucket();
   const supabase = getSupabase();
   const ttlSeconds = Number(process.env.TEASER_PREVIEW_TTL_SECONDS || 60);
   const items = [];
   for (const row of res.rows) {
     let previewUrl = null;
+    let avatarUrl = null;
     if (row.preview_file_id) {
       const { data } = await supabase.storage
         .from(bucket)
         .createSignedUrl(row.preview_file_id, ttlSeconds);
       previewUrl = data?.signedUrl || null;
     }
+    if (row.avatar_path) {
+      const { data } = await supabase.storage
+        .from(avatarBucket)
+        .createSignedUrl(row.avatar_path, ttlSeconds);
+      avatarUrl = data?.signedUrl || null;
+    }
     items.push({
       ...row,
       preview_url: previewUrl,
+      avatar_url: avatarUrl,
     });
   }
 

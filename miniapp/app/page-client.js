@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function Home() {
   const searchParams = useSearchParams();
@@ -35,6 +35,8 @@ export default function Home() {
     email: "",
     birthMonth: "",
     birthYear: "",
+    tags: "",
+    availability: "",
     videoFile: null,
     videoName: "",
   });
@@ -67,6 +69,7 @@ export default function Home() {
     uploading: false,
   });
   const [followState, setFollowState] = useState({});
+  const [blockState, setBlockState] = useState({});
   const [visibleTeasers, setVisibleTeasers] = useState({});
   const [consumedTeasers, setConsumedTeasers] = useState({});
   const [previewOverlay, setPreviewOverlay] = useState({
@@ -74,10 +77,21 @@ export default function Home() {
     item: null,
     remaining: 0,
   });
+  const [creatorOverlay, setCreatorOverlay] = useState({
+    open: false,
+    creator: null,
+  });
   const [showContentForm, setShowContentForm] = useState(false);
   const [contentStatus, setContentStatus] = useState("");
   const [modelItems, setModelItems] = useState([]);
   const [modelItemsStatus, setModelItemsStatus] = useState("");
+  const [followers, setFollowers] = useState([]);
+  const [followersStatus, setFollowersStatus] = useState("");
+  const [followersFilter, setFollowersFilter] = useState("all");
+  const [followersStats, setFollowersStats] = useState(null);
+  const [following, setFollowing] = useState([]);
+  const [followingStatus, setFollowingStatus] = useState("");
+  const [followingLoading, setFollowingLoading] = useState(false);
   const [myBookings, setMyBookings] = useState([]);
   const [myBookingsStatus, setMyBookingsStatus] = useState("");
   const [myBookingsLoading, setMyBookingsLoading] = useState(false);
@@ -144,6 +158,49 @@ export default function Home() {
     loading: false,
   });
   const avatarUrl = profile?.user?.avatar_url || "";
+  const blockedIds = profile?.blocked_ids || [];
+  const isBlocked = (targetId) => blockedIds.includes(targetId);
+
+  const profileChecklist = useMemo(() => {
+    if (!profile?.user || !role) {
+      return { percent: 0, total: 0, completed: 0, missing: [] };
+    }
+    if (role === "client") {
+      const client = profile.client || {};
+      const missing = [];
+      if (!profile.user.avatar_url) missing.push("Add a profile photo");
+      if (!client.display_name && !profile.user.username) missing.push("Add a display name");
+      if (!profile.user.email) missing.push("Add an email");
+      if (!client.location) missing.push("Add a location");
+      if (!client.birth_month || !client.birth_year) missing.push("Add birth month/year");
+      const total = 5;
+      const completed = total - missing.length;
+      const percent = total ? Math.round((completed / total) * 100) : 0;
+      return { percent, total, completed, missing };
+    }
+    const model = profile.model || {};
+    const missing = [];
+    if (!profile.user.avatar_url) missing.push("Add a profile photo");
+    if (!model.display_name) missing.push("Add a stage name");
+    if (!model.bio) missing.push("Add a short bio");
+    if (!model.tags) missing.push("Add creator tags");
+    if (!model.availability) missing.push("Set availability");
+    if (model.verification_status !== "approved") missing.push("Complete verification");
+    const total = 6;
+    const completed = total - missing.length;
+    const percent = total ? Math.round((completed / total) * 100) : 0;
+    return { percent, total, completed, missing };
+  }, [profile, role]);
+
+  const filteredFollowers = followers.filter((item) => {
+    if (followersFilter === "online") {
+      return item.is_online;
+    }
+    if (followersFilter === "offline") {
+      return !item.is_online;
+    }
+    return true;
+  });
   const teaserViewMs = 60000;
   const sessionPricing = {
     chat: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
@@ -899,11 +956,67 @@ export default function Home() {
   }, [initData, role, modelApproved, modelTab]);
 
   useEffect(() => {
-    if (!initData || role !== "model" || !modelApproved || modelTab !== "sessions") {
+    if (!initData || role !== "model" || !modelApproved) {
       return;
     }
-    refreshBookings();
+    if (modelTab === "sessions") {
+      refreshBookings();
+    }
+    if (modelTab === "followers") {
+      const loadFollowers = async () => {
+        setFollowersStatus("");
+        setFollowersStats(null);
+        try {
+          const res = await fetch("/api/followers", {
+            headers: { "x-telegram-init": initData },
+          });
+          if (!res.ok) {
+            setFollowersStatus(`Unable to load followers (HTTP ${res.status}).`);
+            setFollowers([]);
+            setFollowersStats(null);
+            return;
+          }
+          const data = await res.json();
+          setFollowers(data.items || []);
+          setFollowersStats(data.stats || null);
+        } catch {
+          setFollowersStatus("Unable to load followers.");
+          setFollowers([]);
+          setFollowersStats(null);
+        }
+      };
+      loadFollowers();
+    }
   }, [initData, role, modelApproved, modelTab]);
+
+  useEffect(() => {
+    if (!initData || role !== "client" || clientTab !== "following") {
+      return;
+    }
+    const loadFollowing = async () => {
+      setFollowingLoading(true);
+      setFollowingStatus("");
+      try {
+        const res = await fetch("/api/following", {
+          headers: { "x-telegram-init": initData },
+        });
+        if (!res.ok) {
+          setFollowingStatus(`Unable to load follows (HTTP ${res.status}).`);
+          setFollowing([]);
+          setFollowingLoading(false);
+          return;
+        }
+        const data = await res.json();
+        setFollowing(data.items || []);
+        setFollowingLoading(false);
+      } catch {
+        setFollowingStatus("Unable to load follows.");
+        setFollowing([]);
+        setFollowingLoading(false);
+      }
+    };
+    loadFollowing();
+  }, [initData, role, clientTab]);
 
   useEffect(() => {
     if (!initData) {
@@ -951,6 +1064,18 @@ export default function Home() {
           if (data.model?.display_name) {
             setModelForm((prev) => ({ ...prev, stageName: data.model.display_name }));
           }
+          if (data.model?.bio) {
+            setModelForm((prev) => ({ ...prev, bio: data.model.bio }));
+          }
+          if (data.model?.tags) {
+            setModelForm((prev) => ({ ...prev, tags: data.model.tags }));
+          }
+          if (data.model?.availability) {
+            setModelForm((prev) => ({ ...prev, availability: data.model.availability }));
+          }
+          if (data.user?.email) {
+            setModelForm((prev) => ({ ...prev, email: data.user.email }));
+          }
         } else if (data.user.role === "client") {
           setRoleLocked(true);
           setLockedRole("client");
@@ -964,6 +1089,18 @@ export default function Home() {
             setClientTab("gallery");
           } else if (data.client) {
             setClientStep(2);
+          }
+          if (data.client?.display_name) {
+            setClientForm((prev) => ({ ...prev, displayName: data.client.display_name }));
+          }
+          if (data.client?.location) {
+            setClientForm((prev) => ({ ...prev, location: data.client.location }));
+          }
+          if (data.client?.birth_month) {
+            setClientForm((prev) => ({ ...prev, birthMonth: String(data.client.birth_month) }));
+          }
+          if (data.client?.birth_year) {
+            setClientForm((prev) => ({ ...prev, birthYear: String(data.client.birth_year) }));
           }
         }
         if (data.client?.access_fee_paid) {
@@ -1306,6 +1443,15 @@ export default function Home() {
             : item
         )
       );
+      if (creatorOverlay.creator?.model_id === modelId) {
+        setCreatorOverlay((prev) => ({
+          ...prev,
+          creator: { ...prev.creator, is_following: Boolean(data.following) },
+        }));
+      }
+      if (clientTab === "following" && !data.following) {
+        setFollowing((prev) => prev.filter((creator) => creator.id !== modelId));
+      }
       setFollowState((prev) => ({
         ...prev,
         [modelId]: { loading: false, error: "" },
@@ -1316,6 +1462,102 @@ export default function Home() {
         ...prev,
         [modelId]: { loading: false, error: "Unable to update follow." },
       }));
+    }
+  };
+
+  const toggleBlock = async (targetId) => {
+    if (!initData || !targetId) {
+      return;
+    }
+    setBlockState((prev) => ({
+      ...prev,
+      [targetId]: { loading: true, error: "" },
+    }));
+    try {
+      const res = await fetch("/api/block", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, target_id: targetId }),
+      });
+      if (!res.ok) {
+        setBlockState((prev) => ({
+          ...prev,
+          [targetId]: { loading: false, error: "Unable to update block." },
+        }));
+        return;
+      }
+      const data = await res.json();
+      if (data.blocked) {
+        setGalleryItems((prev) => prev.filter((item) => item.model_id !== targetId));
+        setFollowing((prev) => prev.filter((creator) => creator.id !== targetId));
+        if (creatorOverlay.creator?.model_id === targetId) {
+          setCreatorOverlay({ open: false, creator: null });
+        }
+      }
+      await refreshProfile();
+      setBlockState((prev) => ({
+        ...prev,
+        [targetId]: { loading: false, error: "" },
+      }));
+    } catch {
+      setBlockState((prev) => ({
+        ...prev,
+        [targetId]: { loading: false, error: "Unable to update block." },
+      }));
+    }
+  };
+
+  const updatePrivacy = async (next) => {
+    if (!initData) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/profile/privacy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          hide_email: next.hideEmail,
+          hide_location: next.hideLocation,
+        }),
+      });
+      if (!res.ok) {
+        return;
+      }
+      await refreshProfile();
+    } catch {
+      // ignore
+    }
+  };
+
+  const openCreator = (item) => {
+    const modelId = item?.model_id || item?.id || null;
+    setCreatorOverlay({ open: true, creator: { ...item, model_id: modelId } });
+  };
+
+  const closeCreator = () => {
+    setCreatorOverlay({ open: false, creator: null });
+  };
+
+  const reportCreator = async (targetId, reason = "") => {
+    if (!initData || !targetId) {
+      return false;
+    }
+    try {
+      const res = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, target_id: targetId, reason }),
+      });
+      if (res.ok) {
+        setClientStatus("Report submitted. Admin will review.");
+        return true;
+      }
+      setClientStatus("Report failed. Try again.");
+      return false;
+    } catch {
+      setClientStatus("Report failed. Try again.");
+      return false;
     }
   };
 
@@ -1782,6 +2024,18 @@ export default function Home() {
       setModelStatus("Add a stage name to continue.");
       return;
     }
+    if (modelStep === 1 && !modelForm.availability) {
+      setModelStatus("Add your availability to continue.");
+      return;
+    }
+    if (modelStep === 1 && !modelForm.bio) {
+      setModelStatus("Add a short bio to continue.");
+      return;
+    }
+    if (modelStep === 1 && !modelForm.tags) {
+      setModelStatus("Add at least one tag to continue.");
+      return;
+    }
     if (modelStep === 1) {
       const ageCheck = isAdult(modelForm.birthYear, modelForm.birthMonth);
       if (!ageCheck.ok) {
@@ -1851,13 +2105,16 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           initData: tgInit,
-          display_name: modelForm.stageName,
-          email: modelForm.email,
-          birth_month: modelForm.birthMonth,
-          birth_year: modelForm.birthYear,
-          video_path: uploadPayload.path,
-        }),
-      });
+        display_name: modelForm.stageName,
+        email: modelForm.email,
+        birth_month: modelForm.birthMonth,
+        birth_year: modelForm.birthYear,
+        bio: modelForm.bio,
+        tags: modelForm.tags,
+        availability: modelForm.availability,
+        video_path: uploadPayload.path,
+      }),
+    });
       if (!res.ok) {
         let detail = `Submission failed (HTTP ${res.status}).`;
         try {
@@ -2323,6 +2580,13 @@ export default function Home() {
                   </button>
                   <button
                     type="button"
+                    className={`cta ${clientTab === "following" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("following")}
+                  >
+                    Following
+                  </button>
+                  <button
+                    type="button"
                     className={`cta ${clientTab === "sessions" ? "primary" : "ghost"}`}
                     onClick={() => setClientTab("sessions")}
                   >
@@ -2341,6 +2605,15 @@ export default function Home() {
                   <div className="flow-card">
                     <h3>Content Gallery</h3>
                     <p>Browse verified creators, buy content, or book a session.</p>
+                    <div className="dash-actions">
+                      <button
+                        type="button"
+                        className="cta ghost"
+                        onClick={refreshGalleryAccess}
+                      >
+                        Refresh gallery
+                      </button>
+                    </div>
                     {galleryJoinStatus.checked && !galleryJoinStatus.joined && (
                       <div className="notice-card">
                         <p className="helper">
@@ -2393,12 +2666,34 @@ export default function Home() {
                               <div className="media-fallback">Tap to view</div>
                             </div>
                             <div className="gallery-body">
-                              <div>
-                                <h4>{item.title}</h4>
-                                <p>{item.description || "Exclusive teaser content."}</p>
+                              <div className="gallery-headline">
+                                <div>
+                                  <h4>{item.title}</h4>
+                                  <p>{item.description || "Exclusive teaser content."}</p>
+                                </div>
+                                <div className="badge-row">
+                                  {item.verification_status === "approved" && (
+                                    <span className="pill success">Verified</span>
+                                  )}
+                                  {item.is_spotlight && (
+                                    <span className="pill spotlight">Spotlight</span>
+                                  )}
+                                  {item.is_new_from_followed && (
+                                    <span className="pill">New</span>
+                                  )}
+                                </div>
                               </div>
                               <div className="gallery-meta">
-                                <span>{item.display_name || item.public_id}</span>
+                                <span className="gallery-user">
+                                  <span className="avatar tiny">
+                                    {item.avatar_url ? (
+                                      <img src={item.avatar_url} alt="Creator" />
+                                    ) : (
+                                      <span>{(item.display_name || item.public_id || "M")[0]}</span>
+                                    )}
+                                  </span>
+                                  {item.display_name || item.public_id}
+                                </span>
                                 <span>{item.content_type}</span>
                               </div>
                               <div className="gallery-actions">
@@ -2418,6 +2713,30 @@ export default function Home() {
                                   disabled={followState[item.model_id]?.loading}
                                 >
                                   {item.is_following ? "Following" : "Follow"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cta ghost"
+                                  onClick={() => openCreator(item)}
+                                >
+                                  View profile
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`cta ghost ${
+                                    blockState[item.model_id]?.loading ? "loading" : ""
+                                  }`}
+                                  onClick={() => toggleBlock(item.model_id)}
+                                  disabled={blockState[item.model_id]?.loading}
+                                >
+                                  {isBlocked(item.model_id) ? "Unblock" : "Block"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cta ghost"
+                                  onClick={() => reportCreator(item.model_id)}
+                                >
+                                  Report
                                 </button>
                                 {item.price ? (
                                   <>
@@ -2474,6 +2793,11 @@ export default function Home() {
                                   {followState[item.model_id]?.error}
                                 </p>
                               )}
+                              {blockState[item.model_id]?.error && (
+                                <p className="helper error">
+                                  {blockState[item.model_id]?.error}
+                                </p>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -2485,6 +2809,24 @@ export default function Home() {
                 {clientTab === "profile" && (
                   <div className="flow-card">
                     <h3>Your Profile</h3>
+                    <div className="profile-progress">
+                      <div className="line">
+                        <span>Profile completion</span>
+                        <strong>{profileChecklist.percent}%</strong>
+                      </div>
+                      <div className="progress-bar">
+                        <span style={{ width: `${profileChecklist.percent}%` }} />
+                      </div>
+                      {profileChecklist.missing.length > 0 ? (
+                        <ul className="checklist">
+                          {profileChecklist.missing.map((item) => (
+                            <li key={`missing-${item}`}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="helper">Profile complete ✅</p>
+                      )}
+                    </div>
                     <div className="avatar-row">
                       <div className="avatar">
                         {avatarUrl ? (
@@ -2532,6 +2874,18 @@ export default function Home() {
                       <strong>{profile?.user?.email || "-"}</strong>
                     </div>
                     <div className="line">
+                      <span>Location</span>
+                      <strong>{profile?.client?.location || "-"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Birth month/year</span>
+                      <strong>
+                        {profile?.client?.birth_month && profile?.client?.birth_year
+                          ? `${profile.client.birth_month}/${profile.client.birth_year}`
+                          : "-"}
+                      </strong>
+                    </div>
+                    <div className="line">
                       <span>Joined</span>
                       <strong>{profile?.user?.created_at || "-"}</strong>
                     </div>
@@ -2547,10 +2901,89 @@ export default function Home() {
                       <span>Following</span>
                       <strong>{profile?.user?.following_count || 0}</strong>
                     </div>
+                    <div className="field-row">
+                      <label className="pill">
+                        <input
+                          type="checkbox"
+                          checked={profile?.user?.privacy_hide_email ?? true}
+                          onChange={(event) =>
+                            updatePrivacy({
+                              hideEmail: event.target.checked,
+                              hideLocation: profile?.user?.privacy_hide_location ?? true,
+                            })
+                          }
+                        />
+                        Hide email
+                      </label>
+                      <label className="pill">
+                        <input
+                          type="checkbox"
+                          checked={profile?.user?.privacy_hide_location ?? true}
+                          onChange={(event) =>
+                            updatePrivacy({
+                              hideEmail: profile?.user?.privacy_hide_email ?? true,
+                              hideLocation: event.target.checked,
+                            })
+                          }
+                        />
+                        Hide location
+                      </label>
+                    </div>
                     <button type="button" className="cta primary alt" onClick={deleteClientAccount}>
                       Delete account
                     </button>
                     {clientDeleteStatus && <p className="helper error">{clientDeleteStatus}</p>}
+                  </div>
+                )}
+
+                {clientTab === "following" && (
+                  <div className="flow-card">
+                    <h3>Following</h3>
+                    {followingStatus && <p className="helper error">{followingStatus}</p>}
+                    {followingLoading && <p className="helper">Loading creators…</p>}
+                    {!followingLoading && !followingStatus && following.length === 0 && (
+                      <p className="helper">
+                        You’re not following anyone yet. Follow a creator to see them here.
+                      </p>
+                    )}
+                    {!followingLoading &&
+                      following.map((creator) => (
+                        <div key={`follow-${creator.id}`} className="list-row">
+                          <div className="gallery-user">
+                            <span className="avatar tiny">
+                              {creator.avatar_url ? (
+                                <img src={creator.avatar_url} alt="Creator" />
+                              ) : (
+                                <span>{(creator.display_name || creator.public_id || "M")[0]}</span>
+                              )}
+                            </span>
+                            <div>
+                              <strong>{creator.display_name || creator.public_id}</strong>
+                              {creator.verified && <span className="pill success">Verified</span>}
+                            </div>
+                          </div>
+                          <div className="session-actions">
+                            {creator.is_online && <span className="pill success">Online</span>}
+                            <button
+                              type="button"
+                              className="cta ghost"
+                              onClick={() => openCreator(creator)}
+                            >
+                              View profile
+                            </button>
+                            <button
+                              type="button"
+                              className={`cta ghost ${
+                                followState[creator.id]?.loading ? "loading" : ""
+                              }`}
+                              onClick={() => toggleFollow(creator.id)}
+                              disabled={followState[creator.id]?.loading}
+                            >
+                              Unfollow
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                   </div>
                 )}
 
@@ -2893,6 +3326,95 @@ export default function Home() {
         </section>
       )}
 
+      {creatorOverlay.open && creatorOverlay.creator && (
+        <section className="preview-overlay" onClick={closeCreator}>
+          <div className="preview-card" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <div className="creator-header">
+                <span className="avatar">
+                  {creatorOverlay.creator.avatar_url ? (
+                    <img src={creatorOverlay.creator.avatar_url} alt="Creator" />
+                  ) : (
+                    <span>
+                      {(creatorOverlay.creator.display_name ||
+                        creatorOverlay.creator.public_id ||
+                        "M")[0]}
+                    </span>
+                  )}
+                </span>
+                <div>
+                  <p className="eyebrow">Creator profile</p>
+                  <h3>{creatorOverlay.creator.display_name || creatorOverlay.creator.public_id}</h3>
+                  {creatorOverlay.creator.verification_status === "approved" && (
+                    <span className="pill success">Verified</span>
+                  )}
+                </div>
+              </div>
+              <button type="button" className="cta ghost" onClick={closeCreator}>
+                Close
+              </button>
+            </header>
+            <div className="creator-body">
+              {creatorOverlay.creator.bio && (
+                <p className="helper">{creatorOverlay.creator.bio}</p>
+              )}
+              <div className="tag-row">
+                {(creatorOverlay.creator.tags || "")
+                  .split(",")
+                  .map((tag) => tag.trim())
+                  .filter(Boolean)
+                  .map((tag) => (
+                    <span key={`tag-${tag}`} className="pill">
+                      {tag}
+                    </span>
+                  ))}
+              </div>
+              {creatorOverlay.creator.availability && (
+                <p className="helper">
+                  Availability: {creatorOverlay.creator.availability}
+                </p>
+              )}
+              <div className="gallery-actions">
+                <button
+                  type="button"
+                  className={`cta ghost ${
+                    creatorOverlay.creator.is_following ? "active" : ""
+                  } ${followState[creatorOverlay.creator.model_id]?.loading ? "loading" : ""}`}
+                  onClick={() => toggleFollow(creatorOverlay.creator.model_id)}
+                  disabled={followState[creatorOverlay.creator.model_id]?.loading}
+                >
+                  {creatorOverlay.creator.is_following ? "Following" : "Follow"}
+                </button>
+                <button
+                  type="button"
+                  className={`cta ghost ${
+                    blockState[creatorOverlay.creator.model_id]?.loading ? "loading" : ""
+                  }`}
+                  onClick={() => toggleBlock(creatorOverlay.creator.model_id)}
+                  disabled={blockState[creatorOverlay.creator.model_id]?.loading}
+                >
+                  {isBlocked(creatorOverlay.creator.model_id) ? "Unblock" : "Block"}
+                </button>
+                <button
+                  type="button"
+                  className="cta ghost"
+                  onClick={() => reportCreator(creatorOverlay.creator.model_id)}
+                >
+                  Report
+                </button>
+                <button
+                  type="button"
+                  className="cta primary"
+                  onClick={() => openBooking(creatorOverlay.creator)}
+                >
+                  Book session
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {bookingSheet.open && (
         <section className="payment-sheet">
           <div className="payment-card">
@@ -3093,11 +3615,36 @@ export default function Home() {
                   >
                     Earnings
                   </button>
+                  <button
+                    type="button"
+                    className={`cta ${modelTab === "followers" ? "primary" : "ghost"}`}
+                    onClick={() => setModelTab("followers")}
+                  >
+                    Followers
+                  </button>
                 </div>
 
                 {modelTab === "profile" && (
                   <div className="flow-card">
                     <h3>Profile</h3>
+                    <div className="profile-progress">
+                      <div className="line">
+                        <span>Profile completion</span>
+                        <strong>{profileChecklist.percent}%</strong>
+                      </div>
+                      <div className="progress-bar">
+                        <span style={{ width: `${profileChecklist.percent}%` }} />
+                      </div>
+                      {profileChecklist.missing.length > 0 ? (
+                        <ul className="checklist">
+                          {profileChecklist.missing.map((item) => (
+                            <li key={`missing-${item}`}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="helper">Profile complete ✅</p>
+                      )}
+                    </div>
                     <div className="avatar-row">
                       <div className="avatar">
                         {avatarUrl ? (
@@ -3141,12 +3688,28 @@ export default function Home() {
                       <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
                     </div>
                     <div className="line">
+                      <span>Bio</span>
+                      <strong>{profile?.model?.bio || "—"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Tags</span>
+                      <strong>{profile?.model?.tags || "—"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Availability</span>
+                      <strong>{profile?.model?.availability || "—"}</strong>
+                    </div>
+                    <div className="line">
                       <span>Email</span>
                       <strong>{profile?.user?.email || "-"}</strong>
                     </div>
                     <div className="line">
                       <span>Verification</span>
-                      <strong>Approved</strong>
+                      <strong>
+                        {profile?.model?.verification_status === "approved"
+                          ? "Approved"
+                          : profile?.model?.verification_status || "Pending"}
+                      </strong>
                     </div>
                     <div className="line">
                       <span>Account type</span>
@@ -3171,6 +3734,34 @@ export default function Home() {
                     <div className="line">
                       <span>Following</span>
                       <strong>{profile?.user?.following_count || 0}</strong>
+                    </div>
+                    <div className="field-row">
+                      <label className="pill">
+                        <input
+                          type="checkbox"
+                          checked={profile?.user?.privacy_hide_email ?? true}
+                          onChange={(event) =>
+                            updatePrivacy({
+                              hideEmail: event.target.checked,
+                              hideLocation: profile?.user?.privacy_hide_location ?? true,
+                            })
+                          }
+                        />
+                        Hide email
+                      </label>
+                      <label className="pill">
+                        <input
+                          type="checkbox"
+                          checked={profile?.user?.privacy_hide_location ?? true}
+                          onChange={(event) =>
+                            updatePrivacy({
+                              hideEmail: profile?.user?.privacy_hide_email ?? true,
+                              hideLocation: event.target.checked,
+                            })
+                          }
+                        />
+                        Hide location
+                      </label>
                     </div>
                   </div>
                 )}
@@ -3526,6 +4117,90 @@ export default function Home() {
                     )}
                   </div>
                 )}
+
+                {modelTab === "followers" && (
+                  <div className="flow-card">
+                    <h3>Your Followers</h3>
+                    {followersStats && (
+                      <div className="metric-grid">
+                        <div className="metric-card">
+                          <span>Total followers</span>
+                          <strong>{followersStats.total}</strong>
+                        </div>
+                        <div className="metric-card">
+                          <span>New (7 days)</span>
+                          <strong>{followersStats.last_7d}</strong>
+                        </div>
+                        <div className="metric-card">
+                          <span>Growth (7 days)</span>
+                          <strong>{followersStats.growth_7d >= 0 ? "+" : ""}{followersStats.growth_7d}</strong>
+                        </div>
+                        <div className="metric-card">
+                          <span>New (30 days)</span>
+                          <strong>{followersStats.last_30d}</strong>
+                        </div>
+                      </div>
+                    )}
+                    <div className="dash-actions">
+                      <button
+                        type="button"
+                        className={`cta ${followersFilter === "all" ? "primary" : "ghost"}`}
+                        onClick={() => setFollowersFilter("all")}
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        className={`cta ${followersFilter === "online" ? "primary" : "ghost"}`}
+                        onClick={() => setFollowersFilter("online")}
+                      >
+                        Online
+                      </button>
+                      <button
+                        type="button"
+                        className={`cta ${followersFilter === "offline" ? "primary" : "ghost"}`}
+                        onClick={() => setFollowersFilter("offline")}
+                      >
+                        Offline
+                      </button>
+                    </div>
+                    {followersStatus && <p className="helper error">{followersStatus}</p>}
+                    {!followersStatus && followers.length === 0 && (
+                      <p className="helper">No followers yet.</p>
+                    )}
+                    {!followersStatus && followers.length > 0 && filteredFollowers.length === 0 && (
+                      <p className="helper">No followers match this filter.</p>
+                    )}
+                    {!followersStatus && filteredFollowers.length > 0 && (
+                      <div className="gallery-grid">
+                        {filteredFollowers.map((item) => (
+                          <div key={`follower-${item.id}`} className="gallery-card">
+                            <div className="gallery-body">
+                              <div className="list-row">
+                                <div className="avatar small">
+                                  {item.avatar_url ? (
+                                    <img src={item.avatar_url} alt="Follower" />
+                                  ) : (
+                                    <span>{(item.display_name || item.username || "U")[0]}</span>
+                                  )}
+                                </div>
+                                <div>
+                                  <strong>{item.display_name || item.username || item.public_id}</strong>
+                                  <p className="muted">{item.role || "user"}</p>
+                                </div>
+                              </div>
+                              <div className="gallery-actions">
+                                <span className={`pill ${item.is_online ? "success" : ""}`}>
+                                  {item.is_online ? "Online" : "Offline"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -3564,7 +4239,21 @@ export default function Home() {
                         onChange={(event) =>
                           setModelForm((prev) => ({ ...prev, email: event.target.value }))
                         }
-                        placeholder="you@email.com"
+                      placeholder="you@email.com"
+                    />
+                    </label>
+                    <label className="field">
+                      Availability
+                      <input
+                        type="text"
+                        value={modelForm.availability}
+                        onChange={(event) =>
+                          setModelForm((prev) => ({
+                            ...prev,
+                            availability: event.target.value,
+                          }))
+                        }
+                        placeholder="Weeknights · 8pm-12am"
                       />
                     </label>
                     <div className="field-row">
@@ -3591,9 +4280,9 @@ export default function Home() {
                           onChange={(event) =>
                             setModelForm((prev) => ({ ...prev, birthYear: event.target.value }))
                           }
-                          placeholder="YYYY"
-                        />
-                      </label>
+                        placeholder="YYYY"
+                      />
+                    </label>
                     </div>
                     <p className="helper">18+ only. We verify eligibility and keep this private.</p>
                     <label className="field">
@@ -3605,6 +4294,17 @@ export default function Home() {
                           setModelForm((prev) => ({ ...prev, bio: event.target.value }))
                         }
                         placeholder="Describe your vibe, services, and boundaries."
+                      />
+                    </label>
+                    <label className="field">
+                      Tags
+                      <input
+                        type="text"
+                        value={modelForm.tags}
+                        onChange={(event) =>
+                          setModelForm((prev) => ({ ...prev, tags: event.target.value }))
+                        }
+                        placeholder="Roleplay, Girlfriend, Voice, Video"
                       />
                     </label>
                   </div>

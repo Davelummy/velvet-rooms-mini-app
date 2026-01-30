@@ -87,6 +87,9 @@ export default function Admin() {
     if (section === "users") {
       return selectedItem.username || selectedItem.public_id || "User";
     }
+    if (section === "activity") {
+      return selectedItem.action_type || "Activity";
+    }
     return "Queue item";
   }, [section, selectedItem]);
 
@@ -148,6 +151,15 @@ export default function Admin() {
         { label: "Followers", value: selectedItem.followers || 0 },
         { label: "Following", value: selectedItem.following || 0 },
         { label: "Joined", value: selectedItem.created_at || "-" },
+      ];
+    }
+    if (section === "activity") {
+      return [
+        { label: "Action", value: selectedItem.action_type || "-" },
+        { label: "Actor", value: selectedItem.actor_username || selectedItem.actor_public_id || "-" },
+        { label: "Target", value: selectedItem.target_username || selectedItem.target_public_id || "-" },
+        { label: "Details", value: selectedItem.details ? JSON.stringify(selectedItem.details) : "-" },
+        { label: "Created", value: selectedItem.created_at || "-" },
       ];
     }
     return [
@@ -217,6 +229,7 @@ export default function Admin() {
     if (section === "escrows") endpoint = "/api/admin/escrows";
     if (section === "payments") endpoint = "/api/admin/payments";
     if (section === "disputes") endpoint = "/api/admin/escrows";
+    if (section === "activity") endpoint = "/api/admin/activity";
     if (section === "users") {
       const params = new URLSearchParams();
       if (userQuery) params.set("q", userQuery);
@@ -396,6 +409,13 @@ export default function Admin() {
             onClick={() => setSection("users")}
           >
             Users
+          </button>
+          <button
+            type="button"
+            className={`ghost ${section === "activity" ? "active" : ""}`}
+            onClick={() => setSection("activity")}
+          >
+            Activity
           </button>
         </div>
       </header>
@@ -583,6 +603,8 @@ export default function Admin() {
               ? "Crypto Payment Review"
               : section === "escrows"
               ? "Manual Releases"
+              : section === "activity"
+              ? "User Activity"
               : section === "users"
               ? "All Users"
               : "Dispute Desk"}
@@ -596,6 +618,8 @@ export default function Admin() {
               ? "Approve payments before escrows are created."
               : section === "escrows"
               ? "Release or refund escrow funds manually."
+              : section === "activity"
+              ? "Follow, block, and report actions across the platform."
               : section === "users"
               ? "Search every account, track roles, and monitor activity."
               : "Resolve disputes with a full audit trail."}
@@ -781,6 +805,7 @@ export default function Admin() {
                     {(section === "escrows" || section === "disputes") &&
                       `${selectedItem.status === "held" ? "Held" : "Released"} escrow · ${selectedItem.amount}`}
                     {section === "users" && `${selectedItem.role || "user"} · ${selectedItem.status || "status"}`}
+                    {section === "activity" && `${selectedItem.action_type || "activity"} logged`}
                   </p>
                 </div>
                 <div className="queue-actions">
@@ -976,6 +1001,8 @@ export default function Admin() {
                   <h3>
                     {section === "users"
                       ? item.username || item.public_id || "User"
+                      : section === "activity"
+                      ? item.action_type || "Activity"
                       : item.display_name || item.title || item.escrow_type || "Payment"}
                   </h3>
                   <p className="queue-meta">
@@ -997,6 +1024,10 @@ export default function Admin() {
                       }`}
                     {section === "users" &&
                       `${item.role || "user"} · ${item.status || "status"}`}
+                    {section === "activity" &&
+                      `${item.actor_username || item.actor_public_id || "Actor"} → ${
+                        item.target_username || item.target_public_id || "Target"
+                      }`}
                   </p>
                 </div>
                 <div className="queue-actions">

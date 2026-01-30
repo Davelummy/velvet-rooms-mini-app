@@ -97,6 +97,24 @@ body {
   object-fit: cover;
 }
 
+.avatar.small {
+  width: 42px;
+  height: 42px;
+  font-size: 14px;
+}
+
+.avatar.tiny {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.gallery-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .avatar-actions {
   display: flex;
   flex-direction: column;
@@ -361,6 +379,10 @@ h1 {
   gap: 6px;
 }
 
+.pill input {
+  accent-color: var(--accent);
+}
+
 .pill.success {
   background: rgba(25, 195, 125, 0.2);
   color: #b6f7dd;
@@ -377,6 +399,12 @@ h1 {
   background: rgba(255, 179, 71, 0.2);
   color: #ffd6a3;
   border-color: rgba(255, 179, 71, 0.5);
+}
+
+.pill.spotlight {
+  background: linear-gradient(135deg, rgba(255, 71, 100, 0.4), rgba(255, 152, 90, 0.35));
+  color: #ffe1e7;
+  border-color: rgba(255, 122, 90, 0.6);
 }
 
 .card-body {
@@ -1054,6 +1082,102 @@ h1 {
   text-align: center;
   color: var(--muted);
   font-family: "Space Grotesk", sans-serif;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.gallery-headline {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.profile-progress {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: rgba(12, 6, 9, 0.55);
+}
+
+.progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin: 8px 0 12px;
+}
+
+.progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+}
+
+.checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.checklist li::before {
+  content: "•";
+  margin-right: 8px;
+  color: var(--accent);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 12px 0 16px;
+}
+
+.metric-card {
+  background: rgba(16, 8, 12, 0.6);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.metric-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.metric-card strong {
+  font-size: 18px;
+}
+
+.creator-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.creator-body {
+  display: grid;
+  gap: 12px;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 @media (max-width: 860px) {
