@@ -81,6 +81,8 @@ export default function Home() {
     fullName: "",
   });
   const [contentRefreshKey, setContentRefreshKey] = useState(0);
+  const [accessPaymentMethod, setAccessPaymentMethod] = useState("flutterwave");
+  const [contentPaymentMethod, setContentPaymentMethod] = useState({});
   const [paymentState, setPaymentState] = useState({
     open: false,
     mode: null,
@@ -104,6 +106,7 @@ export default function Home() {
     duration: 10,
     price: 9000,
     status: "",
+    paymentMethod: "flutterwave",
   });
   const teaserViewMs = 60000;
   const sessionPricing = {
@@ -947,6 +950,7 @@ export default function Home() {
       duration: defaultDuration,
       price: price || 0,
       status: "",
+      paymentMethod: "flutterwave",
     });
   };
 
@@ -1623,19 +1627,26 @@ export default function Home() {
                     <div className="price-tag">
                       ₦5,000 <span>Escrow Held</span>
                     </div>
+                    <label className="field">
+                      Payment method
+                      <select
+                        value={accessPaymentMethod}
+                        onChange={(event) => setAccessPaymentMethod(event.target.value)}
+                      >
+                        <option value="flutterwave">Flutterwave</option>
+                        <option value="crypto">Crypto (BTC/USDT)</option>
+                      </select>
+                    </label>
                     <button
                       type="button"
                       className="cta primary"
-                      onClick={() => startCryptoPayment({ mode: "access" })}
+                      onClick={() =>
+                        accessPaymentMethod === "crypto"
+                          ? startCryptoPayment({ mode: "access" })
+                          : startFlutterwavePayment({ mode: "access" })
+                      }
                     >
-                      Show payment options
-                    </button>
-                    <button
-                      type="button"
-                      className="cta primary alt"
-                      onClick={() => startFlutterwavePayment({ mode: "access" })}
-                    >
-                      Pay with Flutterwave
+                      Continue to payment
                     </button>
                     <button type="button" className="cta ghost" onClick={refreshClientAccess}>
                       I already paid
@@ -1767,26 +1778,41 @@ export default function Home() {
                                 </button>
                                 {item.price ? (
                                   <>
+                                    <label className="field">
+                                      Payment method
+                                      <select
+                                        value={contentPaymentMethod[item.id] || "flutterwave"}
+                                        onChange={(event) =>
+                                          setContentPaymentMethod((prev) => ({
+                                            ...prev,
+                                            [item.id]: event.target.value,
+                                          }))
+                                        }
+                                      >
+                                        <option value="flutterwave">Flutterwave</option>
+                                        <option value="crypto">Crypto (BTC/USDT)</option>
+                                      </select>
+                                    </label>
                                     <button
                                       type="button"
                                       className="cta primary alt"
-                                      onClick={() =>
-                                        startCryptoPayment({ mode: "content", contentId: item.id })
-                                      }
+                                      onClick={() => {
+                                        const method =
+                                          contentPaymentMethod[item.id] || "flutterwave";
+                                        if (method === "crypto") {
+                                          startCryptoPayment({
+                                            mode: "content",
+                                            contentId: item.id,
+                                          });
+                                        } else {
+                                          startFlutterwavePayment({
+                                            mode: "content",
+                                            contentId: item.id,
+                                          });
+                                        }
+                                      }}
                                     >
-                                      Unlock {`₦${item.price}`}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="cta ghost"
-                                      onClick={() =>
-                                        startFlutterwavePayment({
-                                          mode: "content",
-                                          contentId: item.id,
-                                        })
-                                      }
-                                    >
-                                      Pay with Flutterwave
+                                      Pay {`₦${item.price}`}
                                     </button>
                                   </>
                                 ) : (
@@ -1943,7 +1969,7 @@ export default function Home() {
         <section className="payment-sheet">
           <div className="payment-card">
             <header>
-              <h3>Crypto payment</h3>
+              <h3>Crypto payment (BTC / USDT)</h3>
               <button
                 type="button"
                 className="cta ghost"
@@ -2107,40 +2133,46 @@ export default function Home() {
               <span>Session fee</span>
               <strong>₦{bookingSheet.price || "-"}</strong>
             </div>
+            <label className="field">
+              Payment method
+              <select
+                value={bookingSheet.paymentMethod}
+                onChange={(event) =>
+                  setBookingSheet((prev) => ({ ...prev, paymentMethod: event.target.value }))
+                }
+              >
+                <option value="flutterwave">Flutterwave</option>
+                <option value="crypto">Crypto (BTC/USDT)</option>
+              </select>
+            </label>
             {bookingSheet.status && <p className="helper">{bookingSheet.status}</p>}
             <button
               type="button"
               className="cta primary"
               onClick={() => {
-                startCryptoPayment({
-                  mode: "session",
-                  session: {
-                    modelId: bookingSheet.modelId,
-                    sessionType: bookingSheet.sessionType,
-                    duration: bookingSheet.duration,
-                  },
-                });
+                if (bookingSheet.paymentMethod === "crypto") {
+                  startCryptoPayment({
+                    mode: "session",
+                    session: {
+                      modelId: bookingSheet.modelId,
+                      sessionType: bookingSheet.sessionType,
+                      duration: bookingSheet.duration,
+                    },
+                  });
+                } else {
+                  startFlutterwavePayment({
+                    mode: "session",
+                    session: {
+                      modelId: bookingSheet.modelId,
+                      sessionType: bookingSheet.sessionType,
+                      duration: bookingSheet.duration,
+                    },
+                  });
+                }
                 setBookingSheet((prev) => ({ ...prev, open: false, status: "" }));
               }}
             >
               Proceed to payment
-            </button>
-            <button
-              type="button"
-              className="cta primary alt"
-              onClick={() => {
-                startFlutterwavePayment({
-                  mode: "session",
-                  session: {
-                    modelId: bookingSheet.modelId,
-                    sessionType: bookingSheet.sessionType,
-                    duration: bookingSheet.duration,
-                  },
-                });
-                setBookingSheet((prev) => ({ ...prev, open: false, status: "" }));
-              }}
-            >
-              Pay with Flutterwave
             </button>
           </div>
         </section>

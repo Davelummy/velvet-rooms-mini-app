@@ -6,6 +6,12 @@ import { getCryptoWallets } from "../../../_lib/crypto";
 export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
+const ALLOWED_CURRENCIES = ["USDT", "BTC"];
+const ALLOWED_NETWORKS = ["TRC20", "BSCCHAIN", "BTC"];
+
+function normalizeToken(value) {
+  return (value || "").toString().trim().toUpperCase();
+}
 
 export async function POST(request) {
   const body = await request.json();
@@ -20,10 +26,19 @@ export async function POST(request) {
 
   const transactionRef = body?.transaction_ref || "";
   const txHash = (body?.tx_hash || "").toString().trim();
-  const network = (body?.network || "").toString().trim();
-  const currency = (body?.currency || "").toString().trim();
+  const network = normalizeToken(body?.network);
+  const currency = normalizeToken(body?.currency);
   if (!transactionRef || !txHash || !network || !currency) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
+  }
+  if (!ALLOWED_CURRENCIES.includes(currency) || !ALLOWED_NETWORKS.includes(network)) {
+    return NextResponse.json({ error: "invalid_currency_or_network" }, { status: 400 });
+  }
+  if (currency === "BTC" && network !== "BTC") {
+    return NextResponse.json({ error: "invalid_network_for_btc" }, { status: 400 });
+  }
+  if (currency === "USDT" && !["TRC20", "BSCCHAIN"].includes(network)) {
+    return NextResponse.json({ error: "invalid_network_for_usdt" }, { status: 400 });
   }
 
   const txRes = await query(
@@ -44,8 +59,8 @@ export async function POST(request) {
     return NextResponse.json({ error: "transaction_owner_mismatch" }, { status: 403 });
   }
 
-  if (transaction.status === "completed") {
-    return NextResponse.json({ error: "already_completed" }, { status: 409 });
+  if (["submitted", "completed"].includes(transaction.status)) {
+    return NextResponse.json({ error: "already_submitted" }, { status: 409 });
   }
 
   const wallets = getCryptoWallets();

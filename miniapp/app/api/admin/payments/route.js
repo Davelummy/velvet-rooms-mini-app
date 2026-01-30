@@ -35,7 +35,14 @@ export async function GET(request) {
     provider === "all" ? [statusList] : [statusList, provider]
   );
 
-  const items = res.rows.map((row) => {
+  const filtered = res.rows.filter((row) => {
+    if (row.payment_provider === "crypto" && status === "pending") {
+      return row.status === "submitted";
+    }
+    return true;
+  });
+
+  const items = filtered.map((row) => {
     let metadata = row.metadata_json;
     if (typeof metadata === "string") {
       try {

@@ -9,6 +9,11 @@ export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 const ACCESS_FEE_AMOUNT = 5000;
+const PENDING_WINDOW_HOURS = 2;
+
+function normalizeToken(value) {
+  return (value || "").toString().trim().toUpperCase();
+}
 
 function generateTransactionRef() {
   const random = crypto.randomBytes(4).toString("hex").toUpperCase();
@@ -69,6 +74,7 @@ export async function POST(request) {
 
   let amount = ACCESS_FEE_AMOUNT;
   const metadata = { escrow_type: escrowType };
+  let existingTx = null;
 
   if (escrowType === "access_fee") {
     const profileRes = await query(
@@ -79,6 +85,21 @@ export async function POST(request) {
       return NextResponse.json({ error: "access_already_unlocked" }, { status: 409 });
     }
     metadata.client_id = userId;
+    const existingRes = await query(
+      `SELECT transaction_ref, amount, metadata_json
+       FROM transactions
+       WHERE user_id = $1
+         AND payment_provider = 'crypto'
+         AND status IN ('pending','submitted')
+         AND metadata_json->>'escrow_type' = 'access_fee'
+         AND created_at >= NOW() - INTERVAL '${PENDING_WINDOW_HOURS} hours'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+    if (existingRes.rowCount) {
+      existingTx = existingRes.rows[0];
+    }
   }
 
   if (escrowType === "content") {
@@ -107,6 +128,22 @@ export async function POST(request) {
     amount = Number(content.price);
     metadata.content_id = contentId;
     metadata.model_id = content.model_id;
+    const existingRes = await query(
+      `SELECT transaction_ref, amount, metadata_json
+       FROM transactions
+       WHERE user_id = $1
+         AND payment_provider = 'crypto'
+         AND status IN ('pending','submitted')
+         AND metadata_json->>'escrow_type' = 'content'
+         AND metadata_json->>'content_id' = $2
+         AND created_at >= NOW() - INTERVAL '${PENDING_WINDOW_HOURS} hours'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, String(contentId)]
+    );
+    if (existingRes.rowCount) {
+      existingTx = existingRes.rows[0];
+    }
   }
 
   if (escrowType === "session") {
@@ -138,8 +175,40 @@ export async function POST(request) {
     }
     amount = sessionAmount;
     metadata.model_id = modelId;
-    metadata.session_type = sessionType;
+    metadata.session_type = normalizeToken(sessionType);
     metadata.duration_minutes = durationMinutes;
+    const existingRes = await query(
+      `SELECT transaction_ref, amount, metadata_json
+       FROM transactions
+       WHERE user_id = $1
+         AND payment_provider = 'crypto'
+         AND status IN ('pending','submitted')
+         AND metadata_json->>'escrow_type' = 'session'
+         AND metadata_json->>'model_id' = $2
+         AND metadata_json->>'session_type' = $3
+         AND metadata_json->>'duration_minutes' = $4
+         AND created_at >= NOW() - INTERVAL '${PENDING_WINDOW_HOURS} hours'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, String(modelId), metadata.session_type, String(durationMinutes)]
+    );
+    if (existingRes.rowCount) {
+      existingTx = existingRes.rows[0];
+    }
+    if (existingTx) {
+      const wallets = getCryptoWallets();
+      if (!Object.keys(wallets).length) {
+        return NextResponse.json({ error: "wallets_not_configured" }, { status: 500 });
+      }
+      return NextResponse.json({
+        ok: true,
+        transaction_ref: existingTx.transaction_ref,
+        amount: existingTx.amount,
+        wallets,
+        networks: getCryptoNetworks(),
+        currencies: getCryptoCurrencies(),
+      });
+    }
     const sessionRef = generateTransactionRef().replace("CRYPTO", "SES");
     const sessionRes = await query(
       `INSERT INTO sessions (session_ref, client_id, model_id, session_type, package_price, status, duration_minutes, created_at)
@@ -148,6 +217,21 @@ export async function POST(request) {
       [sessionRef, userId, modelId, sessionType, amount, durationMinutes]
     );
     metadata.session_id = sessionRes.rows[0]?.id;
+  }
+
+  if (existingTx) {
+    const wallets = getCryptoWallets();
+    if (!Object.keys(wallets).length) {
+      return NextResponse.json({ error: "wallets_not_configured" }, { status: 500 });
+    }
+    return NextResponse.json({
+      ok: true,
+      transaction_ref: existingTx.transaction_ref,
+      amount: existingTx.amount,
+      wallets,
+      networks: getCryptoNetworks(),
+      currencies: getCryptoCurrencies(),
+    });
   }
 
   const transactionRef = generateTransactionRef();
