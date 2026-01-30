@@ -39,6 +39,7 @@ export async function POST(request) {
     [followerId, targetId]
   );
   let following = false;
+  let shouldNotify = false;
   if (exists.rowCount) {
     await query(
       "DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2",
@@ -51,6 +52,7 @@ export async function POST(request) {
       [followerId, targetId]
     );
     following = true;
+    shouldNotify = true;
   }
 
   const counts = await query(
@@ -59,6 +61,47 @@ export async function POST(request) {
         (SELECT COUNT(*) FROM follows WHERE follower_id = $1) AS following`,
     [targetId]
   );
+
+  if (shouldNotify) {
+    const userRes = await query(
+      "SELECT telegram_id, username, public_id FROM users WHERE id = $1",
+      [followerId]
+    );
+    const targetRes = await query(
+      "SELECT telegram_id FROM users WHERE id = $1",
+      [targetId]
+    );
+    const follower = userRes.rows[0];
+    const target = targetRes.rows[0];
+    const token = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
+    if (token && target?.telegram_id && follower) {
+      const handle = follower.username
+        ? `@${follower.username}`
+        : `User ${follower.public_id || followerId}`;
+      const webapp = (process.env.WEBAPP_URL || "").replace(/\/$/, "");
+      const keyboard =
+        webapp
+          ? {
+              inline_keyboard: [
+                [{ text: "Open Velvet Rooms", web_app: { url: webapp } }],
+              ],
+            }
+          : undefined;
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: target.telegram_id,
+            text: `New follower: ${handle}`,
+            reply_markup: keyboard,
+          }),
+        });
+      } catch {
+        // ignore notification failures
+      }
+    }
+  }
 
   return NextResponse.json({
     ok: true,
