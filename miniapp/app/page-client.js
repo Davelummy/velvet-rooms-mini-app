@@ -60,6 +60,13 @@ export default function Home() {
   const [clientSessionsStatus, setClientSessionsStatus] = useState("");
   const [clientSessionsLoading, setClientSessionsLoading] = useState(false);
   const [clientDeleteStatus, setClientDeleteStatus] = useState("");
+  const [avatarState, setAvatarState] = useState({
+    file: null,
+    name: "",
+    status: "",
+    uploading: false,
+  });
+  const [followState, setFollowState] = useState({});
   const [visibleTeasers, setVisibleTeasers] = useState({});
   const [consumedTeasers, setConsumedTeasers] = useState({});
   const [previewOverlay, setPreviewOverlay] = useState({
@@ -136,6 +143,7 @@ export default function Home() {
     status: "",
     loading: false,
   });
+  const avatarUrl = profile?.user?.avatar_url || "";
   const teaserViewMs = 60000;
   const sessionPricing = {
     chat: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
@@ -1111,6 +1119,32 @@ export default function Home() {
     }
   };
 
+  const refreshProfile = async () => {
+    if (!initData) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/me", {
+        headers: { "x-telegram-init": initData },
+      });
+      if (!res.ok) {
+        return;
+      }
+      const data = await res.json();
+      setProfile(data);
+      if (data.client?.access_fee_paid) {
+        setClientAccessPaid(true);
+        setClientStep(3);
+      }
+      if (data.model?.verification_status === "approved") {
+        setModelApproved(true);
+        setModelStep(4);
+      }
+    } catch {
+      // ignore refresh errors
+    }
+  };
+
   const uploadToSignedUrl = async (signedUrl, file) => {
     try {
       const res = await fetch(signedUrl, {
@@ -1162,6 +1196,126 @@ export default function Home() {
       }
     } catch {
       setClientDeleteStatus("Delete failed. Try again.");
+    }
+  };
+
+  const submitAvatar = async () => {
+    if (!initData) {
+      setAvatarState((prev) => ({
+        ...prev,
+        status: "Open this mini app inside Telegram to upload.",
+      }));
+      return;
+    }
+    if (!avatarState.file) {
+      setAvatarState((prev) => ({ ...prev, status: "Choose a photo to upload." }));
+      return;
+    }
+    setAvatarState((prev) => ({ ...prev, uploading: true, status: "Uploading…" }));
+    try {
+      const uploadInit = await fetch("/api/profile/avatar/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          filename: avatarState.file.name,
+        }),
+      });
+      if (!uploadInit.ok) {
+        setAvatarState((prev) => ({
+          ...prev,
+          uploading: false,
+          status: "Unable to start upload.",
+        }));
+        return;
+      }
+      const payload = await uploadInit.json();
+      if (!payload?.signed_url || !payload?.path) {
+        setAvatarState((prev) => ({
+          ...prev,
+          uploading: false,
+          status: "Upload link missing.",
+        }));
+        return;
+      }
+      const uploadRes = await uploadToSignedUrl(payload.signed_url, avatarState.file);
+      if (!uploadRes || !uploadRes.ok) {
+        const status = uploadRes?.status || "network";
+        setAvatarState((prev) => ({
+          ...prev,
+          uploading: false,
+          status: `Upload failed (${status}).`,
+        }));
+        return;
+      }
+      const saveRes = await fetch("/api/profile/avatar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, path: payload.path }),
+      });
+      if (!saveRes.ok) {
+        setAvatarState((prev) => ({
+          ...prev,
+          uploading: false,
+          status: "Unable to save avatar.",
+        }));
+        return;
+      }
+      setAvatarState({
+        file: null,
+        name: "",
+        status: "Profile photo updated ✅",
+        uploading: false,
+      });
+      await refreshProfile();
+    } catch {
+      setAvatarState((prev) => ({
+        ...prev,
+        uploading: false,
+        status: "Upload failed. Try again.",
+      }));
+    }
+  };
+
+  const toggleFollow = async (modelId) => {
+    if (!initData || !modelId) {
+      return;
+    }
+    setFollowState((prev) => ({
+      ...prev,
+      [modelId]: { loading: true, error: "" },
+    }));
+    try {
+      const res = await fetch("/api/follow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, target_id: modelId }),
+      });
+      if (!res.ok) {
+        setFollowState((prev) => ({
+          ...prev,
+          [modelId]: { loading: false, error: "Unable to update follow." },
+        }));
+        return;
+      }
+      const data = await res.json();
+      setGalleryItems((prev) =>
+        prev.map((item) =>
+          item.model_id === modelId
+            ? { ...item, is_following: Boolean(data.following) }
+            : item
+        )
+      );
+      setFollowState((prev) => ({
+        ...prev,
+        [modelId]: { loading: false, error: "" },
+      }));
+      await refreshProfile();
+    } catch {
+      setFollowState((prev) => ({
+        ...prev,
+        [modelId]: { loading: false, error: "Unable to update follow." },
+      }));
     }
   };
 
@@ -2255,6 +2409,16 @@ export default function Home() {
                                 >
                                   View once
                                 </button>
+                                <button
+                                  type="button"
+                                  className={`cta ghost ${item.is_following ? "active" : ""} ${
+                                    followState[item.model_id]?.loading ? "loading" : ""
+                                  }`}
+                                  onClick={() => toggleFollow(item.model_id)}
+                                  disabled={followState[item.model_id]?.loading}
+                                >
+                                  {item.is_following ? "Following" : "Follow"}
+                                </button>
                                 {item.price ? (
                                   <>
                                     <label className="field">
@@ -2305,6 +2469,11 @@ export default function Home() {
                                   Book session
                                 </button>
                               </div>
+                              {followState[item.model_id]?.error && (
+                                <p className="helper error">
+                                  {followState[item.model_id]?.error}
+                                </p>
+                              )}
                             </div>
                           </div>
                         ))}
@@ -2316,6 +2485,44 @@ export default function Home() {
                 {clientTab === "profile" && (
                   <div className="flow-card">
                     <h3>Your Profile</h3>
+                    <div className="avatar-row">
+                      <div className="avatar">
+                        {avatarUrl ? (
+                          <img src={avatarUrl} alt="Profile" />
+                        ) : (
+                          <span>{(profile?.user?.username || "C")[0]}</span>
+                        )}
+                      </div>
+                      <div className="avatar-actions">
+                        <label className="field file">
+                          Upload photo
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) =>
+                              setAvatarState((prev) => ({
+                                ...prev,
+                                name: event.target.files?.[0]?.name || "",
+                                file: event.target.files?.[0] || null,
+                                status: "",
+                              }))
+                            }
+                          />
+                          <span className="file-name">
+                            {avatarState.name || "No file selected"}
+                          </span>
+                        </label>
+                        <button
+                          type="button"
+                          className={`cta primary alt ${avatarState.uploading ? "loading" : ""}`}
+                          onClick={submitAvatar}
+                          disabled={avatarState.uploading}
+                        >
+                          Save photo
+                        </button>
+                        {avatarState.status && <p className="helper">{avatarState.status}</p>}
+                      </div>
+                    </div>
                     <div className="line">
                       <span>Username</span>
                       <strong>{profile?.user?.username || "-"}</strong>
@@ -2331,6 +2538,14 @@ export default function Home() {
                     <div className="line">
                       <span>Access status</span>
                       <strong>{clientAccessPaid ? "Unlocked" : "Pending"}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Followers</span>
+                      <strong>{profile?.user?.followers_count || 0}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Following</span>
+                      <strong>{profile?.user?.following_count || 0}</strong>
                     </div>
                     <button type="button" className="cta primary alt" onClick={deleteClientAccount}>
                       Delete account
@@ -2883,6 +3098,44 @@ export default function Home() {
                 {modelTab === "profile" && (
                   <div className="flow-card">
                     <h3>Profile</h3>
+                    <div className="avatar-row">
+                      <div className="avatar">
+                        {avatarUrl ? (
+                          <img src={avatarUrl} alt="Profile" />
+                        ) : (
+                          <span>{(profile?.model?.display_name || "M")[0]}</span>
+                        )}
+                      </div>
+                      <div className="avatar-actions">
+                        <label className="field file">
+                          Upload photo
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(event) =>
+                              setAvatarState((prev) => ({
+                                ...prev,
+                                name: event.target.files?.[0]?.name || "",
+                                file: event.target.files?.[0] || null,
+                                status: "",
+                              }))
+                            }
+                          />
+                          <span className="file-name">
+                            {avatarState.name || "No file selected"}
+                          </span>
+                        </label>
+                        <button
+                          type="button"
+                          className={`cta primary alt ${avatarState.uploading ? "loading" : ""}`}
+                          onClick={submitAvatar}
+                          disabled={avatarState.uploading}
+                        >
+                          Save photo
+                        </button>
+                        {avatarState.status && <p className="helper">{avatarState.status}</p>}
+                      </div>
+                    </div>
                     <div className="line">
                       <span>Display name</span>
                       <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
@@ -2910,6 +3163,14 @@ export default function Home() {
                     <div className="line">
                       <span>Pending teasers</span>
                       <strong>{modelItems.filter((item) => !item.is_active).length}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Followers</span>
+                      <strong>{profile?.user?.followers_count || 0}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Following</span>
+                      <strong>{profile?.user?.following_count || 0}</strong>
                     </div>
                   </div>
                 )}

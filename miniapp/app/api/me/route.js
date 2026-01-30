@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
+import { ensureFollowTable } from "../_lib/follows";
+import { ensureUserColumns } from "../_lib/users";
+import { getSupabase } from "../_lib/supabase";
 
 export const runtime = "nodejs";
 
@@ -11,13 +14,15 @@ export async function GET(request) {
   if (!verifyInitData(initData, BOT_TOKEN)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  await ensureUserColumns();
+  await ensureFollowTable();
   const tgUser = extractUser(initData);
   if (!tgUser || !tgUser.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
   }
 
   const userRes = await query(
-    `SELECT id, telegram_id, public_id, username, role, status, email, created_at, wallet_balance, first_name, last_name
+    `SELECT id, telegram_id, public_id, username, role, status, email, created_at, wallet_balance, first_name, last_name, avatar_path
      FROM users WHERE telegram_id = $1`,
     [tgUser.id]
   );
@@ -38,6 +43,28 @@ export async function GET(request) {
     [user.id]
   );
   const client = clientRes.rowCount ? clientRes.rows[0] : null;
+  const followCountsRes = await query(
+    `SELECT
+        (SELECT COUNT(*) FROM follows WHERE followee_id = $1) AS followers,
+        (SELECT COUNT(*) FROM follows WHERE follower_id = $1) AS following`,
+    [user.id]
+  );
+  const followersCount = Number(followCountsRes.rows[0]?.followers || 0);
+  const followingCount = Number(followCountsRes.rows[0]?.following || 0);
+  let avatarUrl = null;
+  if (user.avatar_path) {
+    try {
+      const bucket =
+        process.env.SUPABASE_AVATAR_BUCKET || "velvetrooms-avatars";
+      const supabase = getSupabase();
+      const { data } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(user.avatar_path, 60 * 60);
+      avatarUrl = data?.signedUrl || null;
+    } catch {
+      avatarUrl = null;
+    }
+  }
   if (model?.verification_status === "approved" && user.role !== "model") {
     await query("UPDATE users SET role = 'model', status = 'active' WHERE id = $1", [
       user.id,
@@ -64,6 +91,10 @@ export async function GET(request) {
       wallet_balance: user.wallet_balance,
       first_name: user.first_name,
       last_name: user.last_name,
+      avatar_path: user.avatar_path || null,
+      avatar_url: avatarUrl,
+      followers_count: followersCount,
+      following_count: followingCount,
       role: user.role,
       status: user.status,
     },

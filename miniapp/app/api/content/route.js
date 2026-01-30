@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
 import { getSupabase } from "../_lib/supabase";
+import { ensureFollowTable } from "../_lib/follows";
 
 export const runtime = "nodejs";
 
@@ -135,6 +136,7 @@ export async function GET(request) {
   if (!verifyInitData(initData, BOT_TOKEN)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  await ensureFollowTable();
 
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope");
@@ -199,12 +201,17 @@ export async function GET(request) {
     }
     res = await query(
       `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
-              dc.preview_file_id, dc.model_id, u.public_id, mp.display_name
+              dc.preview_file_id, dc.model_id, u.public_id, mp.display_name,
+              EXISTS (
+                SELECT 1 FROM follows f
+                WHERE f.follower_id = $1 AND f.followee_id = dc.model_id
+              ) AS is_following
        FROM digital_content dc
        JOIN users u ON u.id = dc.model_id
        LEFT JOIN model_profiles mp ON mp.user_id = dc.model_id
        WHERE dc.is_active = TRUE
-       ORDER BY dc.created_at DESC`
+       ORDER BY dc.created_at DESC`,
+      [userRes.rows[0].id]
     );
   }
 

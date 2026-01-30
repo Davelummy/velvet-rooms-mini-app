@@ -8,6 +8,9 @@ export default function Admin() {
   const [contentView, setContentView] = useState("pending");
   const [paymentView, setPaymentView] = useState("pending");
   const [escrowView, setEscrowView] = useState("pending");
+  const [userQuery, setUserQuery] = useState("");
+  const [userRole, setUserRole] = useState("all");
+  const [userStatus, setUserStatus] = useState("all");
   const [items, setItems] = useState([]);
   const [error, setError] = useState("");
   const [initData, setInitData] = useState("");
@@ -44,10 +47,26 @@ export default function Admin() {
     bookings_24h: 0,
     payments_volume_7d: 0,
     escrow_released_7d: 0,
+    approvals_today: 0,
+    median_review_seconds: 0,
+    disputes_24h: 0,
+    failed_payments_24h: 0,
+    escrow_inflow_7d: [],
+    approvals_7d: [],
   });
 
   const formatNumber = (value) => Number(value || 0).toLocaleString();
   const formatCurrency = (value) => `₦${formatNumber(value)}`;
+  const revenueSeries = metrics.escrow_inflow_7d || [];
+  const approvalsSeries = metrics.approvals_7d || [];
+  const maxRevenue = Math.max(
+    1,
+    ...revenueSeries.map((entry) => Number(entry.amount || 0))
+  );
+  const maxApprovals = Math.max(
+    1,
+    ...approvalsSeries.map((entry) => Number(entry.count || 0))
+  );
 
   const detailTitle = useMemo(() => {
     if (!selectedItem) {
@@ -64,6 +83,9 @@ export default function Admin() {
     }
     if (section === "escrows" || section === "disputes") {
       return selectedItem.escrow_ref || "Escrow";
+    }
+    if (section === "users") {
+      return selectedItem.username || selectedItem.public_id || "User";
     }
     return "Queue item";
   }, [section, selectedItem]);
@@ -114,6 +136,18 @@ export default function Admin() {
             selectedItem.metadata_json?.flutterwave_currency ||
             "-",
         },
+      ];
+    }
+    if (section === "users") {
+      return [
+        { label: "Public ID", value: selectedItem.public_id || "-" },
+        { label: "Username", value: selectedItem.username || "-" },
+        { label: "Role", value: selectedItem.role || "-" },
+        { label: "Status", value: selectedItem.status || "-" },
+        { label: "Email", value: selectedItem.email || "-" },
+        { label: "Followers", value: selectedItem.followers || 0 },
+        { label: "Following", value: selectedItem.following || 0 },
+        { label: "Joined", value: selectedItem.created_at || "-" },
       ];
     }
     return [
@@ -183,6 +217,13 @@ export default function Admin() {
     if (section === "escrows") endpoint = "/api/admin/escrows";
     if (section === "payments") endpoint = "/api/admin/payments";
     if (section === "disputes") endpoint = "/api/admin/escrows";
+    if (section === "users") {
+      const params = new URLSearchParams();
+      if (userQuery) params.set("q", userQuery);
+      if (userRole) params.set("role", userRole);
+      if (userStatus) params.set("status", userStatus);
+      endpoint = `/api/admin/users?${params.toString()}`;
+    }
     if (section === "models" && modelView === "approved") {
       endpoint = "/api/admin/models?status=approved";
     }
@@ -209,7 +250,17 @@ export default function Admin() {
     const payload = await res.json();
     setItems(payload.items || []);
     setLastRefreshAt(new Date().toISOString());
-  }, [initData, section, modelView, contentView, paymentView, escrowView]);
+  }, [
+    initData,
+    section,
+    modelView,
+    contentView,
+    paymentView,
+    escrowView,
+    userQuery,
+    userRole,
+    userStatus,
+  ]);
 
   const loadMetrics = useCallback(async () => {
     if (!initData) {
@@ -246,7 +297,7 @@ export default function Admin() {
   useEffect(() => {
     setSelectedItem(null);
     setPreview({ open: false, url: "", type: "video" });
-  }, [section, modelView, contentView, paymentView, escrowView]);
+  }, [section, modelView, contentView, paymentView, escrowView, userQuery, userRole, userStatus]);
 
   const handleAction = async (action, payload) => {
     if (!initData) {
@@ -338,6 +389,13 @@ export default function Admin() {
             onClick={() => setSection("disputes")}
           >
             Disputes
+          </button>
+          <button
+            type="button"
+            className={`ghost ${section === "users" ? "active" : ""}`}
+            onClick={() => setSection("users")}
+          >
+            Users
           </button>
         </div>
       </header>
@@ -462,8 +520,11 @@ export default function Admin() {
           <h3>Revenue Pulse</h3>
           <p>Escrow inflow (rolling 7 days)</p>
           <div className="sparkline">
-            {Array.from({ length: 18 }).map((_, idx) => (
-              <span key={`rev-${idx}`} style={{ height: `${30 + (idx % 6) * 10}%` }} />
+            {revenueSeries.map((entry) => (
+              <span
+                key={`rev-${entry.day}`}
+                style={{ height: `${(Number(entry.amount || 0) / maxRevenue) * 100}%` }}
+              />
             ))}
           </div>
           <div className="insight-foot">
@@ -475,13 +536,20 @@ export default function Admin() {
           <h3>Queue Velocity</h3>
           <p>Approvals closed today</p>
           <div className="sparkline alt">
-            {Array.from({ length: 18 }).map((_, idx) => (
-              <span key={`queue-${idx}`} style={{ height: `${40 + (idx % 5) * 9}%` }} />
+            {approvalsSeries.map((entry) => (
+              <span
+                key={`queue-${entry.day}`}
+                style={{ height: `${(Number(entry.count || 0) / maxApprovals) * 100}%` }}
+              />
             ))}
           </div>
           <div className="insight-foot">
             <span>Median review time</span>
-            <strong>—</strong>
+            <strong>
+              {metrics.median_review_seconds
+                ? `${Math.round(Number(metrics.median_review_seconds || 0) / 60)}m`
+                : "—"}
+            </strong>
           </div>
         </div>
         <div className="insight-card">
@@ -490,15 +558,15 @@ export default function Admin() {
           <div className="signal-stack">
             <div>
               <span>High‑risk flags</span>
-              <strong>—</strong>
+              <strong>{formatNumber(metrics.disputes_24h)}</strong>
             </div>
             <div>
               <span>Payment retries</span>
-              <strong>—</strong>
+              <strong>{formatNumber(metrics.failed_payments_24h)}</strong>
             </div>
             <div>
               <span>Chargeback risk</span>
-              <strong>—</strong>
+              <strong>0</strong>
             </div>
           </div>
         </div>
@@ -515,6 +583,8 @@ export default function Admin() {
               ? "Crypto Payment Review"
               : section === "escrows"
               ? "Manual Releases"
+              : section === "users"
+              ? "All Users"
               : "Dispute Desk"}
           </h2>
           <p>
@@ -526,6 +596,8 @@ export default function Admin() {
               ? "Approve payments before escrows are created."
               : section === "escrows"
               ? "Release or refund escrow funds manually."
+              : section === "users"
+              ? "Search every account, track roles, and monitor activity."
               : "Resolve disputes with a full audit trail."}
           </p>
           {section === "models" && (
@@ -600,6 +672,43 @@ export default function Admin() {
               </button>
             </div>
           )}
+          {section === "users" && (
+            <div className="panel-actions">
+              <label className="field">
+                Search
+                <input
+                  type="text"
+                  value={userQuery}
+                  onChange={(event) => setUserQuery(event.target.value)}
+                  placeholder="Search username, email, ID"
+                />
+              </label>
+              <label className="field">
+                Role
+                <select
+                  value={userRole}
+                  onChange={(event) => setUserRole(event.target.value)}
+                >
+                  <option value="all">All</option>
+                  <option value="client">Client</option>
+                  <option value="model">Model</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </label>
+              <label className="field">
+                Status
+                <select
+                  value={userStatus}
+                  onChange={(event) => setUserStatus(event.target.value)}
+                >
+                  <option value="all">All</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </label>
+            </div>
+          )}
           <div className="panel-actions">
             <button
               type="button"
@@ -671,6 +780,7 @@ export default function Admin() {
                       }`}
                     {(section === "escrows" || section === "disputes") &&
                       `${selectedItem.status === "held" ? "Held" : "Released"} escrow · ${selectedItem.amount}`}
+                    {section === "users" && `${selectedItem.role || "user"} · ${selectedItem.status || "status"}`}
                   </p>
                 </div>
                 <div className="queue-actions">
@@ -863,7 +973,11 @@ export default function Admin() {
                       item.transaction_ref ||
                       item.id}
                   </p>
-                  <h3>{item.display_name || item.title || item.escrow_type || "Payment"}</h3>
+                  <h3>
+                    {section === "users"
+                      ? item.username || item.public_id || "User"
+                      : item.display_name || item.title || item.escrow_type || "Payment"}
+                  </h3>
                   <p className="queue-meta">
                     {section === "models" &&
                       (modelView === "approved" ? "Verified model" : "Verification pending")}
@@ -881,6 +995,8 @@ export default function Admin() {
                       `${escrowView === "released" ? "Released" : "Held"} escrow · ${
                         item.amount
                       }`}
+                    {section === "users" &&
+                      `${item.role || "user"} · ${item.status || "status"}`}
                   </p>
                 </div>
                 <div className="queue-actions">
@@ -1079,6 +1195,13 @@ export default function Admin() {
                           </button>
                         </>
                       )}
+                    </>
+                  )}
+                  {section === "users" && (
+                    <>
+                      <div className={`status-pill ${item.status === "active" ? "live" : "idle"}`}>
+                        {item.status || "status"}
+                      </div>
                     </>
                   )}
                 </div>

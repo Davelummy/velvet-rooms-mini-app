@@ -11,16 +11,6 @@ export async function GET(request) {
     return NextResponse.json({ error: auth.error }, { status: 401 });
   }
 
-  const adminIds = (process.env.ADMIN_TELEGRAM_IDS || "")
-    .split(",")
-    .map((val) => Number(val.trim()))
-    .filter((val) => Number.isFinite(val));
-  const adminFilterClause = adminIds.length ? "WHERE telegram_id <> ALL($1::bigint[])" : "";
-  const adminFilterParams = adminIds.length ? [adminIds] : [];
-  const adminClientClause = adminIds.length
-    ? "WHERE role = 'client' AND telegram_id <> ALL($1::bigint[])"
-    : "WHERE role = 'client'";
-
   const [
     pendingModels,
     approvedModels,
@@ -37,6 +27,7 @@ export async function GET(request) {
     approvedPayments,
     totalPayments,
     failedPayments,
+    failedPayments24h,
     totalUsers,
     totalClients,
     approvedClients,
@@ -50,6 +41,11 @@ export async function GET(request) {
     bookings24h,
     paymentsVolume7d,
     escrowReleased7d,
+    approvalsToday,
+    medianReviewSeconds,
+    disputes24h,
+    inflowSeries,
+    approvalsSeries,
   ] = await Promise.all([
     query("SELECT COUNT(*)::int AS count FROM model_profiles WHERE verification_status = 'submitted'"),
     query("SELECT COUNT(*)::int AS count FROM model_profiles WHERE verification_status = 'approved'"),
@@ -63,20 +59,22 @@ export async function GET(request) {
     query("SELECT COUNT(*)::int AS count FROM escrow_accounts WHERE status = 'disputed'"),
     query("SELECT COUNT(*)::int AS count FROM escrow_accounts"),
     query(
-      "SELECT COUNT(*)::int AS count FROM transactions WHERE status IN ('pending','submitted')"
+      `SELECT COUNT(*)::int AS count
+       FROM transactions
+       WHERE (payment_provider = 'crypto' AND status = 'submitted')
+          OR (payment_provider <> 'crypto' AND status IN ('pending','submitted'))`
     ),
     query(
       "SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'completed'"
     ),
     query("SELECT COUNT(*)::int AS count FROM transactions"),
     query("SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'failed'"),
+    query("SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'failed' AND created_at >= NOW() - INTERVAL '24 hours'"),
     query(
-      `SELECT COUNT(*)::int AS count FROM users ${adminFilterClause}`,
-      adminFilterParams
+      "SELECT COUNT(*)::int AS count FROM users"
     ),
     query(
-      `SELECT COUNT(*)::int AS count FROM users ${adminClientClause}`,
-      adminFilterParams
+      "SELECT COUNT(*)::int AS count FROM users WHERE role = 'client'"
     ),
     query("SELECT COUNT(*)::int AS count FROM client_profiles WHERE access_fee_paid = TRUE"),
     query("SELECT COUNT(*)::int AS count FROM client_profiles WHERE access_fee_paid = FALSE"),
@@ -89,6 +87,49 @@ export async function GET(request) {
     query("SELECT COUNT(*)::int AS count FROM sessions WHERE created_at >= NOW() - INTERVAL '24 hours'"),
     query("SELECT COALESCE(SUM(amount),0)::numeric AS amount FROM transactions WHERE status = 'completed' AND created_at >= NOW() - INTERVAL '7 days'"),
     query("SELECT COALESCE(SUM(amount),0)::numeric AS amount FROM escrow_accounts WHERE status = 'released' AND released_at >= NOW() - INTERVAL '7 days'"),
+    query(
+      `SELECT COUNT(*)::int AS count
+       FROM admin_actions
+       WHERE (action_type ILIKE 'approve%' OR action_type = 'release_escrow')
+         AND created_at::date = CURRENT_DATE`
+    ),
+    query(
+      `SELECT COALESCE(EXTRACT(EPOCH FROM percentile_cont(0.5)
+       WITHIN GROUP (ORDER BY (approved_at - verification_submitted_at))),0)::numeric AS seconds
+       FROM model_profiles
+       WHERE approved_at IS NOT NULL AND verification_submitted_at IS NOT NULL
+         AND approved_at >= NOW() - INTERVAL '30 days'`
+    ),
+    query(
+      `SELECT COUNT(*)::int AS count
+       FROM escrow_accounts
+       WHERE status = 'disputed' AND held_at >= NOW() - INTERVAL '24 hours'`
+    ),
+    query(
+      `WITH days AS (
+         SELECT generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') AS day
+       )
+       SELECT to_char(day, 'YYYY-MM-DD') AS day,
+              COALESCE(SUM(e.amount),0)::numeric AS amount
+       FROM days
+       LEFT JOIN escrow_accounts e
+         ON e.status = 'released' AND DATE(e.released_at) = DATE(day)
+       GROUP BY day
+       ORDER BY day`
+    ),
+    query(
+      `WITH days AS (
+         SELECT generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') AS day
+       )
+       SELECT to_char(day, 'YYYY-MM-DD') AS day,
+              COALESCE(COUNT(a.id),0)::int AS count
+       FROM days
+       LEFT JOIN admin_actions a
+         ON (a.action_type ILIKE 'approve%' OR a.action_type = 'release_escrow')
+         AND DATE(a.created_at) = DATE(day)
+       GROUP BY day
+       ORDER BY day`
+    ),
   ]);
 
   return NextResponse.json({
@@ -108,6 +149,7 @@ export async function GET(request) {
     approved_payments: approvedPayments.rows[0]?.count || 0,
     total_payments: totalPayments.rows[0]?.count || 0,
     failed_payments: failedPayments.rows[0]?.count || 0,
+    failed_payments_24h: failedPayments24h.rows[0]?.count || 0,
     total_users: totalUsers.rows[0]?.count || 0,
     total_clients: totalClients.rows[0]?.count || 0,
     approved_clients: approvedClients.rows[0]?.count || 0,
@@ -121,5 +163,10 @@ export async function GET(request) {
     bookings_24h: bookings24h.rows[0]?.count || 0,
     payments_volume_7d: paymentsVolume7d.rows[0]?.amount || 0,
     escrow_released_7d: escrowReleased7d.rows[0]?.amount || 0,
+    approvals_today: approvalsToday.rows[0]?.count || 0,
+    median_review_seconds: medianReviewSeconds.rows[0]?.seconds || 0,
+    disputes_24h: disputes24h.rows[0]?.count || 0,
+    escrow_inflow_7d: inflowSeries.rows || [],
+    approvals_7d: approvalsSeries.rows || [],
   });
 }

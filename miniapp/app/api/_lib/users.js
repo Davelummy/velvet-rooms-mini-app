@@ -1,6 +1,15 @@
 import { query } from "./db";
 
 const ALPHANUM = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+let ensuredColumns = false;
+
+export async function ensureUserColumns() {
+  if (ensuredColumns) {
+    return;
+  }
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path TEXT");
+  ensuredColumns = true;
+}
 
 function generatePublicId() {
   let out = "";
@@ -38,6 +47,7 @@ export async function ensureUser({
   status,
   email,
 }) {
+  await ensureUserColumns();
   const normalizedUsername = normalizeUsername(username);
   const isClient = role === "client";
   const existing = await query(
