@@ -4,7 +4,7 @@ import { query } from "../../../_lib/db";
 import { extractUser, verifyInitData } from "../../../_lib/telegram";
 import { ensureUser } from "../../../_lib/users";
 import { getCryptoCurrencies, getCryptoNetworks, getCryptoWallets } from "../../../_lib/crypto";
-import { ensureSessionColumns } from "../../_lib/sessions";
+import { ensureSessionColumns } from "../../../_lib/sessions";
 
 export const runtime = "nodejs";
 
