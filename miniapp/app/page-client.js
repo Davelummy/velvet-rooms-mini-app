@@ -158,6 +158,18 @@ export default function Home() {
   });
   const [modelEarnings, setModelEarnings] = useState(null);
   const [modelEarningsStatus, setModelEarningsStatus] = useState("");
+  const modelEngagementTotals = useMemo(() => {
+    if (!Array.isArray(modelItems) || modelItems.length === 0) {
+      return { likes: 0, views: 0 };
+    }
+    return modelItems.reduce(
+      (acc, item) => ({
+        likes: acc.likes + Number(item.likes_count || 0),
+        views: acc.views + Number(item.views_count || 0),
+      }),
+      { likes: 0, views: 0 }
+    );
+  }, [modelItems]);
   const [contentForm, setContentForm] = useState({
     title: "",
     description: "",
@@ -1530,6 +1542,57 @@ export default function Home() {
     }
   };
 
+  const toggleLike = async (contentId) => {
+    if (!initData || !contentId) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/content/like", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, content_id: contentId }),
+      });
+      if (!res.ok) {
+        return;
+      }
+      const data = await res.json();
+      if (!data?.ok) {
+        return;
+      }
+      setGalleryItems((prev) =>
+        prev.map((row) =>
+          row.id === contentId
+            ? {
+                ...row,
+                has_liked: Boolean(data.liked),
+                likes_count:
+                  typeof data.likes_count === "number" ? data.likes_count : row.likes_count,
+                views_count:
+                  typeof data.views_count === "number" ? data.views_count : row.views_count,
+              }
+            : row
+        )
+      );
+      setPreviewOverlay((prev) =>
+        prev.item?.id === contentId
+          ? {
+              ...prev,
+              item: {
+                ...prev.item,
+                has_liked: Boolean(data.liked),
+                likes_count:
+                  typeof data.likes_count === "number" ? data.likes_count : prev.item.likes_count,
+                views_count:
+                  typeof data.views_count === "number" ? data.views_count : prev.item.views_count,
+              },
+            }
+          : prev
+      );
+    } catch {
+      // ignore
+    }
+  };
+
   const performBlockToggle = async (targetId) => {
     if (!initData || !targetId) {
       return;
@@ -1904,6 +1967,48 @@ export default function Home() {
     setGalleryStatus("");
     setConsumedTeasers((prev) => ({ ...prev, [item.id]: true }));
     setPreviewOverlay({ open: true, item, remaining: Math.ceil(teaserViewMs / 1000) });
+    // Record a unique view for engagement metrics (best-effort).
+    if (initData) {
+      fetch("/api/content/view", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, content_id: item.id }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data?.ok) {
+            return;
+          }
+          setGalleryItems((prev) =>
+            prev.map((row) =>
+              row.id === item.id
+                ? {
+                    ...row,
+                    views_count:
+                      typeof data.views_count === "number" ? data.views_count : row.views_count,
+                    likes_count:
+                      typeof data.likes_count === "number" ? data.likes_count : row.likes_count,
+                  }
+                : row
+            )
+          );
+          setPreviewOverlay((prev) =>
+            prev.item?.id === item.id
+              ? {
+                  ...prev,
+                  item: {
+                    ...prev.item,
+                    views_count:
+                      typeof data.views_count === "number" ? data.views_count : prev.item.views_count,
+                    likes_count:
+                      typeof data.likes_count === "number" ? data.likes_count : prev.item.likes_count,
+                  },
+                }
+              : prev
+          );
+        })
+        .catch(() => {});
+    }
   };
 
   const closePreview = () => {
@@ -2967,6 +3072,18 @@ export default function Home() {
                                 </span>
                                 <span>{item.content_type}</span>
                               </div>
+                              <div className="gallery-stats">
+                                <span className="pill ghost">
+                                  {Number(item.views_count || 0)} views
+                                </span>
+                                <button
+                                  type="button"
+                                  className={`pill ghost ${item.has_liked ? "active" : ""}`}
+                                  onClick={() => toggleLike(item.id)}
+                                >
+                                  {Number(item.likes_count || 0)} likes
+                                </button>
+                              </div>
                               <div className="gallery-actions">
                                 <button
                                   type="button"
@@ -3615,6 +3732,18 @@ export default function Home() {
             <p className="helper">
               Closing in {previewOverlay.remaining}s
             </p>
+            <div className="gallery-stats">
+              <span className="pill ghost">
+                {Number(previewOverlay.item.views_count || 0)} views
+              </span>
+              <button
+                type="button"
+                className={`pill ghost ${previewOverlay.item.has_liked ? "active" : ""}`}
+                onClick={() => toggleLike(previewOverlay.item.id)}
+              >
+                {Number(previewOverlay.item.likes_count || 0)} likes
+              </button>
+            </div>
             <div className="preview-media">
               {previewOverlay.item.content_type === "video" ? (
                 <video
@@ -4332,6 +4461,14 @@ export default function Home() {
                       <strong>{modelItems.filter((item) => !item.is_active).length}</strong>
                     </div>
                     <div className="line">
+                      <span>Total teaser views</span>
+                      <strong>{modelEngagementTotals.views}</strong>
+                    </div>
+                    <div className="line">
+                      <span>Total teaser likes</span>
+                      <strong>{modelEngagementTotals.likes}</strong>
+                    </div>
+                    <div className="line">
                       <span>Followers</span>
                       <strong>{profile?.user?.followers_count || 0}</strong>
                     </div>
@@ -4596,6 +4733,14 @@ export default function Home() {
                                 <div className="gallery-meta">
                                   <span>{item.is_active ? "Approved" : "Pending approval"}</span>
                                   <strong>{item.content_type}</strong>
+                                </div>
+                                <div className="gallery-stats">
+                                  <span className="pill ghost">
+                                    {Number(item.views_count || 0)} views
+                                  </span>
+                                  <span className="pill ghost">
+                                    {Number(item.likes_count || 0)} likes
+                                  </span>
                                 </div>
                               </div>
                             </div>

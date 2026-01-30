@@ -5,6 +5,7 @@ import { getSupabase } from "../_lib/supabase";
 import { ensureFollowTable } from "../_lib/follows";
 import { ensureBlockTable } from "../_lib/blocks";
 import { ensureSessionColumns } from "../_lib/sessions";
+import { ensureEngagementTables } from "../_lib/engagement";
 
 export const runtime = "nodejs";
 
@@ -145,6 +146,7 @@ export async function GET(request) {
   await ensureFollowTable();
   await ensureBlockTable();
   await ensureSessionColumns();
+  await ensureEngagementTables();
 
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope");
@@ -166,7 +168,9 @@ export async function GET(request) {
     const userId = userRes.rows[0].id;
     res = await query(
       `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
-              dc.preview_file_id, dc.is_active, dc.created_at
+              dc.preview_file_id, dc.is_active, dc.created_at,
+              (SELECT COUNT(*)::int FROM content_likes cl WHERE cl.content_id = dc.id) AS likes_count,
+              (SELECT COUNT(*)::int FROM content_views cv WHERE cv.content_id = dc.id) AS views_count
        FROM digital_content dc
        WHERE dc.model_id = $1
        ORDER BY dc.created_at DESC`,
@@ -213,6 +217,12 @@ export async function GET(request) {
               u.public_id, u.username, u.avatar_path,
               mp.display_name, mp.verification_status, mp.approved_at,
               mp.tags, mp.availability, mp.bio,
+              (SELECT COUNT(*)::int FROM content_likes cl WHERE cl.content_id = dc.id) AS likes_count,
+              (SELECT COUNT(*)::int FROM content_views cv WHERE cv.content_id = dc.id) AS views_count,
+              EXISTS (
+                SELECT 1 FROM content_likes cl
+                WHERE cl.content_id = dc.id AND cl.user_id = $1
+              ) AS has_liked,
               EXISTS (
                 SELECT 1 FROM follows f
                 WHERE f.follower_id = $1 AND f.followee_id = dc.model_id
@@ -268,6 +278,9 @@ export async function GET(request) {
     }
     items.push({
       ...row,
+      likes_count: row.likes_count ?? 0,
+      views_count: row.views_count ?? 0,
+      has_liked: Boolean(row.has_liked),
       preview_url: previewUrl,
       avatar_url: avatarUrl,
     });
