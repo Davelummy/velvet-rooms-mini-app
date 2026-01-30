@@ -58,6 +58,7 @@ export async function GET(request) {
       avatar_url: avatarUrl,
       is_online: Boolean(row.is_online),
       verified: row.verification_status === "approved",
+      is_following: true,
     });
   }
 
