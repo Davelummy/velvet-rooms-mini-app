@@ -67,6 +67,7 @@ export default function Home() {
   const [myBookings, setMyBookings] = useState([]);
   const [myBookingsStatus, setMyBookingsStatus] = useState("");
   const [bookingActionStatus, setBookingActionStatus] = useState({});
+  const [sessionActionStatus, setSessionActionStatus] = useState({});
   const [modelEarnings, setModelEarnings] = useState(null);
   const [modelEarningsStatus, setModelEarningsStatus] = useState("");
   const [contentForm, setContentForm] = useState({
@@ -203,6 +204,117 @@ export default function Home() {
         [sessionId]: {
           loading: false,
           error: "Action failed.",
+          info: "",
+        },
+      }));
+    }
+  };
+
+  const handleSessionJoin = async (sessionId) => {
+    if (!initData || !sessionId) {
+      return;
+    }
+    setSessionActionStatus((prev) => ({
+      ...prev,
+      [sessionId]: { loading: true, error: "", info: "" },
+    }));
+    try {
+      const res = await fetch("/api/sessions/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, session_id: sessionId }),
+      });
+      if (!res.ok) {
+        setSessionActionStatus((prev) => ({
+          ...prev,
+          [sessionId]: {
+            loading: false,
+            error: `Unable to join (HTTP ${res.status}).`,
+            info: "",
+          },
+        }));
+        return;
+      }
+      const data = await res.json();
+      if (!data?.invite_link) {
+        setSessionActionStatus((prev) => ({
+          ...prev,
+          [sessionId]: {
+            loading: false,
+            error: "Unable to create invite.",
+            info: "",
+          },
+        }));
+        return;
+      }
+      if (window?.Telegram?.WebApp?.openTelegramLink) {
+        window.Telegram.WebApp.openTelegramLink(data.invite_link);
+      } else {
+        window.open(data.invite_link, "_blank");
+      }
+      setSessionActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "",
+          info: "Session link opened.",
+        },
+      }));
+    } catch {
+      setSessionActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "Unable to join session.",
+          info: "",
+        },
+      }));
+    }
+  };
+
+  const handleSessionConfirm = async (sessionId) => {
+    if (!initData || !sessionId) {
+      return;
+    }
+    setSessionActionStatus((prev) => ({
+      ...prev,
+      [sessionId]: { loading: true, error: "", info: "" },
+    }));
+    try {
+      const res = await fetch("/api/sessions/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, session_id: sessionId }),
+      });
+      if (!res.ok) {
+        setSessionActionStatus((prev) => ({
+          ...prev,
+          [sessionId]: {
+            loading: false,
+            error: `Unable to confirm (HTTP ${res.status}).`,
+            info: "",
+          },
+        }));
+        return;
+      }
+      const data = await res.json();
+      setSessionActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "",
+          info: data?.completed
+            ? "Session completed."
+            : "Thanks! Waiting for the other person.",
+        },
+      }));
+      await refreshBookings();
+    } catch {
+      setSessionActionStatus((prev) => ({
+        ...prev,
+        [sessionId]: {
+          loading: false,
+          error: "Unable to confirm.",
           info: "",
         },
       }));
@@ -1762,7 +1874,39 @@ export default function Home() {
                             {item.session_type} · {item.duration_minutes} min
                           </p>
                         </div>
-                        <span className="pill">{item.status}</span>
+                        <div className="session-actions">
+                          <span className="pill">{item.status}</span>
+                          {item.status === "active" && (
+                            <button
+                              type="button"
+                              className="cta ghost"
+                              onClick={() => handleSessionJoin(item.id)}
+                              disabled={sessionActionStatus[item.id]?.loading}
+                            >
+                              Start session
+                            </button>
+                          )}
+                          {item.status === "awaiting_confirmation" && (
+                            <button
+                              type="button"
+                              className="cta ghost"
+                              onClick={() => handleSessionConfirm(item.id)}
+                              disabled={sessionActionStatus[item.id]?.loading}
+                            >
+                              Confirm completed
+                            </button>
+                          )}
+                        </div>
+                        {sessionActionStatus[item.id]?.error && (
+                          <p className="helper error">
+                            {sessionActionStatus[item.id]?.error}
+                          </p>
+                        )}
+                        {sessionActionStatus[item.id]?.info && (
+                          <p className="helper">
+                            {sessionActionStatus[item.id]?.info}
+                          </p>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2313,6 +2457,30 @@ export default function Home() {
                                   </button>
                                 </div>
                               )}
+                              {item.status === "active" && (
+                                <div className="gallery-actions">
+                                  <button
+                                    type="button"
+                                    className="cta ghost"
+                                    onClick={() => handleSessionJoin(item.id)}
+                                    disabled={sessionActionStatus[item.id]?.loading}
+                                  >
+                                    Start session
+                                  </button>
+                                </div>
+                              )}
+                              {item.status === "awaiting_confirmation" && (
+                                <div className="gallery-actions">
+                                  <button
+                                    type="button"
+                                    className="cta ghost"
+                                    onClick={() => handleSessionConfirm(item.id)}
+                                    disabled={sessionActionStatus[item.id]?.loading}
+                                  >
+                                    Confirm completed
+                                  </button>
+                                </div>
+                              )}
                               {bookingActionStatus[item.id]?.error && (
                                 <p className="helper error">
                                   {bookingActionStatus[item.id]?.error}
@@ -2321,6 +2489,16 @@ export default function Home() {
                               {bookingActionStatus[item.id]?.info && (
                                 <p className="helper">
                                   {bookingActionStatus[item.id]?.info}
+                                </p>
+                              )}
+                              {sessionActionStatus[item.id]?.error && (
+                                <p className="helper error">
+                                  {sessionActionStatus[item.id]?.error}
+                                </p>
+                              )}
+                              {sessionActionStatus[item.id]?.info && (
+                                <p className="helper">
+                                  {sessionActionStatus[item.id]?.info}
                                 </p>
                               )}
                             </div>

@@ -96,7 +96,7 @@ export async function POST(request) {
   const userId = userRes.rows[0].id;
 
   const sessionRes = await query(
-    `SELECT id, client_id, model_id, status, duration_minutes, session_ref, session_type
+    `SELECT id, client_id, model_id, status, duration_minutes, session_ref, session_type, started_at
      FROM sessions
      WHERE id = $1`,
     [sessionId]
@@ -114,11 +114,16 @@ export async function POST(request) {
 
   if (action === "accept") {
     const duration = Number(session.duration_minutes || 0);
+    const now = new Date();
+    const baseStart = session.started_at ? new Date(session.started_at) : now;
     const scheduledEnd =
-      duration > 0 ? new Date(Date.now() + duration * 60 * 1000) : null;
+      duration > 0 ? new Date(baseStart.getTime() + duration * 60 * 1000) : null;
     await query(
       `UPDATE sessions
-       SET status = 'active', started_at = NOW(), actual_start = NOW(), scheduled_end = $2
+       SET status = 'active',
+           started_at = COALESCE(started_at, NOW()),
+           actual_start = COALESCE(actual_start, NOW()),
+           scheduled_end = COALESCE($2, scheduled_end)
        WHERE id = $1`,
       [sessionId, scheduledEnd]
     );

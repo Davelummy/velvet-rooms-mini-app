@@ -567,6 +567,13 @@ h1 {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .list-row:last-child {
   border-bottom: none;
 }
