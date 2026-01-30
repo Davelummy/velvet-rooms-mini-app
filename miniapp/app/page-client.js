@@ -1877,7 +1877,11 @@ export default function Home() {
                             {item.display_name || item.public_id} · {item.content_type}
                           </p>
                         </div>
-                        <span className="pill">{item.status}</span>
+                        <span className="pill">
+                          {item.status === "rejected"
+                            ? "Rejected by admin"
+                            : item.status}
+                        </span>
                       </div>
                     ))}
                   </div>

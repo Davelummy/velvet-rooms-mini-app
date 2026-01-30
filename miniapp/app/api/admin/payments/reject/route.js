@@ -5,6 +5,23 @@ import { ensureUser } from "../../../_lib/users";
 
 export const runtime = "nodejs";
 
+const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
+
+async function sendMessage(chatId, text) {
+  if (!BOT_TOKEN || !chatId) {
+    return;
+  }
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+  } catch {
+    // ignore notification errors
+  }
+}
+
 export async function POST(request) {
   const initData = request.headers.get("x-telegram-init") || "";
   const auth = requireAdmin(initData);
@@ -57,6 +74,30 @@ export async function POST(request) {
     await query("UPDATE sessions SET status = 'rejected' WHERE id = $1", [
       metadata.session_id,
     ]);
+    const sessionRes = await query(
+      "SELECT client_id, model_id FROM sessions WHERE id = $1",
+      [metadata.session_id]
+    );
+    if (sessionRes.rowCount) {
+      const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+        sessionRes.rows[0].client_id,
+      ]);
+      const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+        sessionRes.rows[0].model_id,
+      ]);
+      if (clientRes.rowCount) {
+        await sendMessage(
+          clientRes.rows[0].telegram_id,
+          "Session payment was rejected by admin. Please try again."
+        );
+      }
+      if (modelRes.rowCount) {
+        await sendMessage(
+          modelRes.rows[0].telegram_id,
+          "Session booking was rejected by admin."
+        );
+      }
+    }
   }
 
   await query(

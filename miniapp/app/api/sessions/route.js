@@ -33,6 +33,7 @@ export async function GET(request) {
        FROM sessions s
        JOIN users u ON u.id = s.client_id
        WHERE s.model_id = $1
+         AND s.status != 'rejected'
        ORDER BY s.created_at DESC`,
       [userId]
     );
