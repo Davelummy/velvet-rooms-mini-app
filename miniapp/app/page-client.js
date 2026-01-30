@@ -4,6 +4,21 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 export default function Home() {
+  const cleanTagLabel = (value) => {
+    if (!value) {
+      return "";
+    }
+    let out = value.toString().trim();
+    // Strip common quote wrapping that can leak from JSON-ish sources.
+    if (out.length >= 2 && ((out[0] === '"' && out[out.length - 1] === '"') || (out[0] === "'" && out[out.length - 1] === "'"))) {
+      out = out.slice(1, -1).trim();
+    }
+    out = out.replace(/^#/, "").trim();
+    // Guard against people pasting JSON arrays into tags fields.
+    out = out.replace(/^\[/, "").replace(/\]$/, "").trim();
+    return out.slice(0, 24);
+  };
+
   const searchParams = useSearchParams();
   const contentId = searchParams.get("content");
   const modelId = searchParams.get("model_id") || searchParams.get("model");
@@ -2936,6 +2951,7 @@ export default function Home() {
                                   {item.is_new_from_followed && (
                                     <span className="pill">New</span>
                                   )}
+                                  {!item.price && <span className="pill">Teaser</span>}
                                 </div>
                               </div>
                               <div className="gallery-meta">
@@ -2961,6 +2977,13 @@ export default function Home() {
                                 </button>
                                 <button
                                   type="button"
+                                  className="cta primary alt"
+                                  onClick={() => openBooking(item)}
+                                >
+                                  Book session
+                                </button>
+                                <button
+                                  type="button"
                                   className={`cta ghost ${item.is_following ? "active" : ""} ${
                                     followState[item.model_id]?.loading ? "loading" : ""
                                   }`}
@@ -2975,33 +2998,6 @@ export default function Home() {
                                   onClick={() => openCreator(item)}
                                 >
                                   View profile
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`cta ghost ${
-                                    blockState[item.model_id]?.loading ? "loading" : ""
-                                  }`}
-                                  onClick={() =>
-                                    requestBlockToggle(
-                                      item.model_id,
-                                      item.display_name || item.public_id || ""
-                                    )
-                                  }
-                                  disabled={blockState[item.model_id]?.loading}
-                                >
-                                  {isBlocked(item.model_id) ? "Unblock" : "Block"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="cta ghost"
-                                  onClick={() =>
-                                    openReportDialog(
-                                      item.model_id,
-                                      item.display_name || item.public_id || ""
-                                    )
-                                  }
-                                >
-                                  Report
                                 </button>
                                 {item.price ? (
                                   <>
@@ -3042,16 +3038,7 @@ export default function Home() {
                                       Pay {`₦${item.price}`}
                                     </button>
                                   </>
-                                ) : (
-                                  <span className="pill">Teaser</span>
-                                )}
-                                <button
-                                  type="button"
-                                  className="cta ghost"
-                                  onClick={() => openBooking(item)}
-                                >
-                                  Book session
-                                </button>
+                                ) : null}
                               </div>
                               {followState[item.model_id]?.error && (
                                 <p className="helper error">
@@ -3684,6 +3671,7 @@ export default function Home() {
                       .split(",")
                       .map((tag) => tag.trim())
                 )
+                  .map((tag) => cleanTagLabel(tag))
                   .filter(Boolean)
                   .map((tag) => (
                     <span key={`tag-${tag}`} className="pill">
@@ -3697,6 +3685,13 @@ export default function Home() {
                 </p>
               )}
               <div className="gallery-actions">
+                <button
+                  type="button"
+                  className="cta primary"
+                  onClick={() => openBooking(creatorOverlay.creator)}
+                >
+                  Book session
+                </button>
                 <button
                   type="button"
                   className={`cta ghost ${
@@ -3737,13 +3732,6 @@ export default function Home() {
                   }
                 >
                   Report
-                </button>
-                <button
-                  type="button"
-                  className="cta primary"
-                  onClick={() => openBooking(creatorOverlay.creator)}
-                >
-                  Book session
                 </button>
               </div>
             </div>
@@ -4307,7 +4295,7 @@ export default function Home() {
                       <span>Tags</span>
                       <strong>
                         {Array.isArray(profile?.model?.tags)
-                          ? profile.model.tags.join(", ")
+                          ? profile.model.tags.map((tag) => cleanTagLabel(tag)).filter(Boolean).join(", ")
                           : profile?.model?.tags || "—"}
                       </strong>
                     </div>

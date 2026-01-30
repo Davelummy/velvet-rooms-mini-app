@@ -1260,6 +1260,13 @@ h1 {
   gap: 6px;
 }
 
+.tag-row .pill {
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-family: "Space Grotesk", sans-serif;
+  letter-spacing: 0.01em;
+}
+
 @media (max-width: 860px) {
   .admin-grid {
     grid-template-columns: 1fr;
