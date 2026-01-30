@@ -1872,13 +1872,15 @@ export default function Home() {
                     {clientPurchases.map((item) => (
                       <div key={`purchase-${item.id}`} className="list-row">
                         <div>
-                          <strong>{item.title}</strong>
+                          <strong>{item.title || "Session"}</strong>
                           <p className="muted">
                             {item.display_name || item.public_id} · {item.content_type}
                           </p>
                         </div>
                         <span className="pill">
-                          {item.status === "rejected"
+                          {item.item_type === "session"
+                            ? "Session completed"
+                            : item.status === "rejected"
                             ? "Rejected by admin"
                             : item.status}
                         </span>

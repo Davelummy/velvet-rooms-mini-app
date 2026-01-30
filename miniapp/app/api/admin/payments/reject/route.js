@@ -71,19 +71,30 @@ export async function POST(request) {
     }
   }
   if (metadata.escrow_type === "session" && metadata.session_id) {
+    const sessionRes = await query(
+      "SELECT id, client_id, model_id, session_type, duration_minutes FROM sessions WHERE id = $1",
+      [metadata.session_id]
+    );
     await query("UPDATE sessions SET status = 'rejected' WHERE id = $1", [
       metadata.session_id,
     ]);
-    const sessionRes = await query(
-      "SELECT client_id, model_id FROM sessions WHERE id = $1",
-      [metadata.session_id]
-    );
     if (sessionRes.rowCount) {
+      const session = sessionRes.rows[0];
+      await query(
+        `UPDATE sessions
+         SET status = 'rejected'
+         WHERE status = 'pending_payment'
+           AND client_id = $1
+           AND model_id = $2
+           AND session_type = $3
+           AND duration_minutes = $4`,
+        [session.client_id, session.model_id, session.session_type, session.duration_minutes]
+      );
       const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
-        sessionRes.rows[0].client_id,
+        session.client_id,
       ]);
       const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
-        sessionRes.rows[0].model_id,
+        session.model_id,
       ]);
       if (clientRes.rowCount) {
         await sendMessage(
