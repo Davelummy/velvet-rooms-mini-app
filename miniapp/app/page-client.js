@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 
 const DISCLAIMER_VERSION = "2026-01-31";
 const AGE_GATE_STORAGE_KEY = "vr_age_confirmed";
+const ONBOARDING_VERSION = "2026-02-10";
+const ONBOARDING_STORAGE_KEY = "vr_onboarding_seen";
 
 export default function Home() {
   const cleanTagLabel = (value) => {
@@ -33,6 +35,8 @@ export default function Home() {
   const [ageGateConfirmed, setAgeGateConfirmed] = useState(false);
   const [ageGateStatus, setAgeGateStatus] = useState("");
   const [ageGateTargetRole, setAgeGateTargetRole] = useState(null);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [clientStep, setClientStep] = useState(1);
   const [modelStep, setModelStep] = useState(1);
   const [initData, setInitData] = useState("");
@@ -118,6 +122,56 @@ export default function Home() {
   const [blockedListLoading, setBlockedListLoading] = useState(false);
   const [blockedListStatus, setBlockedListStatus] = useState("");
   const [profileEditOpen, setProfileEditOpen] = useState(false);
+
+  const onboardingSlides = useMemo(
+    () => [
+      {
+        id: "invitation",
+        eyebrow: "The Invitation",
+        title: "Velvet Rooms",
+        body:
+          "A private, members-only space for verified creators and discerning clients. Every interaction is curated.",
+        cta: "Begin",
+        visual: "invitation",
+        image: "/onboarding/invitation.png",
+        points: [
+          "Private, members-only access",
+          "Verified creators only",
+        ],
+      },
+      {
+        id: "trust",
+        eyebrow: "Trust & Discretion",
+        title: "Verified. Private. Secure.",
+        body:
+          "Adult-only access with creator verification, discreet profiles, and protected data practices.",
+        cta: "Continue",
+        visual: "trust",
+        image: "/onboarding/trust.png",
+        points: [
+          "18+ only, consent-first",
+          "Privacy-led profiles",
+        ],
+      },
+      {
+        id: "access",
+        eyebrow: "Access, Made Simple",
+        title: "Unlock the Gallery",
+        body:
+          "One-time access fee in escrow. Payments are held safely until admin approval.",
+        cta: "Get Started",
+        visual: "access",
+        image: "/onboarding/access.png",
+        points: [
+          "Escrow-protected payments",
+          "Admin approval required",
+        ],
+      },
+    ],
+    []
+  );
+  const onboardingTotal = onboardingSlides.length;
+  const onboardingCurrent = onboardingSlides[Math.min(onboardingStep, onboardingTotal - 1)];
   const [profileEditStatus, setProfileEditStatus] = useState("");
   const [profileEditSaving, setProfileEditSaving] = useState(false);
   const [profileEditForm, setProfileEditForm] = useState({
@@ -693,6 +747,16 @@ export default function Home() {
     if (typeof window === "undefined") {
       return;
     }
+    const stored = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
+    if (stored === ONBOARDING_VERSION) {
+      setOnboardingComplete(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
     let attempts = 0;
     let timeoutId;
     const resolveInitData = () => {
@@ -1176,8 +1240,6 @@ export default function Home() {
           if (data.client?.access_fee_paid) {
             setClientStep(3);
             setClientTab("gallery");
-          } else if (data.client) {
-            setClientStep(2);
           }
           if (data.client?.display_name) {
             setClientForm((prev) => ({ ...prev, displayName: data.client.display_name }));
@@ -1220,12 +1282,6 @@ export default function Home() {
       setClientTab("gallery");
     }
   }, [clientAccessPaid]);
-
-  useEffect(() => {
-    if (profile?.client && !clientAccessPaid && clientStep < 2) {
-      setClientStep(2);
-    }
-  }, [profile, clientAccessPaid, clientStep]);
 
   useEffect(() => {
     if (!initData || role !== "client" || clientAccessPaid) {
@@ -1315,7 +1371,6 @@ export default function Home() {
           setClientStatus("Access fee still pending admin approval.");
         }
         setClientAccessPaid(false);
-        setClientStep(2);
         return false;
       }
     } catch {
@@ -1966,6 +2021,26 @@ export default function Home() {
       return;
     }
     proceedRoleSelection(nextRole);
+  };
+
+  const finishOnboarding = () => {
+    setOnboardingComplete(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
+  const advanceOnboarding = () => {
+    if (onboardingStep >= onboardingTotal - 1) {
+      finishOnboarding();
+      return;
+    }
+    setOnboardingStep((prev) => Math.min(prev + 1, onboardingTotal - 1));
+  };
+
+  const retreatOnboarding = () => {
+    setOnboardingStep((prev) => Math.max(prev - 1, 0));
   };
 
   const goToRolePicker = () => {
@@ -2738,6 +2813,8 @@ export default function Home() {
     );
   }
 
+  const showOnboarding = !role && !roleLocked && !onboardingComplete;
+
   return (
     <main className="shell">
       <header className="top">
@@ -2745,7 +2822,7 @@ export default function Home() {
           <span className="brand-dot" />
           <span className="logo-text">Velvet Rooms</span>
         </div>
-        {!roleLocked && (
+        {!roleLocked && !showOnboarding && (
           <div className="top-actions">
             <button className={`ghost ${role === "client" ? "active" : ""}`} onClick={() => handleRole("client")}>
               Client
@@ -2779,7 +2856,73 @@ export default function Home() {
         </section>
       )}
 
-      {!role && !roleLocked && (
+      {showOnboarding && (
+        <section className="onboarding">
+          <div className="onboarding-card">
+            <div className="onboarding-copy">
+              <p className="eyebrow">{onboardingCurrent.eyebrow}</p>
+              <h1>{onboardingCurrent.title}</h1>
+              <p className="lead">{onboardingCurrent.body}</p>
+              <div className="onboarding-meta">
+                <div className="stepper">
+                  {onboardingSlides.map((_, index) => (
+                    <span
+                      key={`onboarding-step-${index}`}
+                      className={onboardingStep >= index ? "step active" : "step"}
+                    >
+                      {index + 1}
+                    </span>
+                  ))}
+                </div>
+                <span className="onboarding-count">
+                  Step {onboardingStep + 1} of {onboardingTotal}
+                </span>
+              </div>
+              <div className="onboarding-points">
+                {onboardingCurrent.points.map((point) => (
+                  <div className="status" key={point}>
+                    <span className="dot" />
+                    {point}
+                  </div>
+                ))}
+              </div>
+              <div className="cta-row">
+                <button
+                  type="button"
+                  className="cta ghost"
+                  onClick={retreatOnboarding}
+                  disabled={onboardingStep === 0}
+                >
+                  Back
+                </button>
+                <button type="button" className="cta primary" onClick={advanceOnboarding}>
+                  {onboardingCurrent.cta}
+                </button>
+              </div>
+            </div>
+            <div className={`onboarding-visual ${onboardingCurrent.visual}`}>
+              <div className="onboarding-image">
+                <img src={onboardingCurrent.image} alt={onboardingCurrent.title} />
+              </div>
+              <div className="onboarding-thumbs">
+                {onboardingSlides.map((slide, index) => (
+                  <button
+                    key={slide.id}
+                    type="button"
+                    className={`onboarding-thumb ${index === onboardingStep ? "active" : ""}`}
+                    style={{ backgroundImage: `url(${slide.image})` }}
+                    onClick={() => setOnboardingStep(index)}
+                    aria-label={`Go to ${slide.title}`}
+                  />
+                ))}
+              </div>
+              <div className="onboarding-glow" />
+            </div>
+          </div>
+        </section>
+      )}
+
+      {!role && !roleLocked && !showOnboarding && (
       <section className="hero">
         <div className="hero-text">
           <p className="eyebrow">Private Creator Marketplace</p>
@@ -2831,7 +2974,7 @@ export default function Home() {
       </section>
       )}
 
-      {!role && !roleLocked && (
+      {!role && !roleLocked && !showOnboarding && (
       <section className="role-grid">
         <article className={`role-card ${role === "client" ? "selected" : ""}`}>
           <h3>Client Flow</h3>
