@@ -67,10 +67,18 @@ export async function GET(request) {
   const contentRes = await query(
     `SELECT
        COUNT(*)::int AS total_content,
-       COUNT(*) FILTER (WHERE is_active = TRUE)::int AS approved_content,
-       COUNT(*) FILTER (WHERE is_active = FALSE)::int AS pending_content
-     FROM digital_content
-     WHERE model_id = $1`,
+       COUNT(*) FILTER (WHERE dc.is_active = TRUE)::int AS approved_content,
+       COUNT(*) FILTER (
+         WHERE dc.is_active = FALSE
+           AND NOT EXISTS (
+             SELECT 1 FROM admin_actions aa
+             WHERE aa.target_type = 'digital_content'
+               AND aa.target_id = dc.id
+               AND aa.action_type = 'reject_content'
+           )
+       )::int AS pending_content
+     FROM digital_content dc
+     WHERE dc.model_id = $1`,
     [userId]
   );
 

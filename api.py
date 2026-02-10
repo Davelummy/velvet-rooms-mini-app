@@ -11,7 +11,6 @@ sys.path.append(str(ROOT))
 
 from shared.config import settings
 from shared.db import AsyncSessionLocal
-from shared.notifications import send_escrow_log
 from shared.payment_processor import process_transaction
 
 app = FastAPI()
@@ -63,16 +62,12 @@ async def paystack_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Missing transaction reference")
 
     async with AsyncSessionLocal() as db:
-        escrow = await process_transaction(
+        await process_transaction(
             db,
             transaction_ref=transaction_ref,
             provider="paystack",
             payload=payload,
         )
-        if escrow:
-            await send_escrow_log(
-                f"Escrow created: {escrow.escrow_ref} ({escrow.escrow_type}) amount {escrow.amount}"
-            )
 
     return {"status": "ok"}
 
@@ -91,15 +86,11 @@ async def flutterwave_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Missing transaction reference")
 
     async with AsyncSessionLocal() as db:
-        escrow = await process_transaction(
+        await process_transaction(
             db,
             transaction_ref=transaction_ref,
             provider="flutterwave",
             payload=payload,
         )
-        if escrow:
-            await send_escrow_log(
-                f"Escrow created: {escrow.escrow_ref} ({escrow.escrow_type}) amount {escrow.amount}"
-            )
 
     return {"status": "ok"}

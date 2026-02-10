@@ -38,6 +38,10 @@ async def main():
             if "public_id" not in columns:
                 statements.append("ALTER TABLE users ADD COLUMN public_id VARCHAR(4)")
                 statements.append("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_public_id ON users(public_id)")
+            if "disclaimer_accepted_at" not in columns:
+                statements.append("ALTER TABLE users ADD COLUMN disclaimer_accepted_at TIMESTAMP")
+            if "disclaimer_version" not in columns:
+                statements.append("ALTER TABLE users ADD COLUMN disclaimer_version TEXT")
 
             if not statements:
                 print("No user column migrations needed.")

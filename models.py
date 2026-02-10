@@ -31,6 +31,8 @@ class User(Base):
     role = Column(String, nullable=False)
     status = Column(String, default="inactive")
     wallet_balance = Column(Float, default=0.0)
+    disclaimer_accepted_at = Column(DateTime)
+    disclaimer_version = Column(String)
     created_at = Column(DateTime, default=utcnow)
 
     model_profile = relationship("ModelProfile", back_populates="user", uselist=False)

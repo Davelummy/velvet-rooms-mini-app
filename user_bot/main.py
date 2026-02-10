@@ -54,6 +54,7 @@ WEBHOOK_PATH = "/webhook"
 PENDING_REGISTRATIONS: dict[int, dict[str, str]] = {}
 PENDING_VERIFICATIONS: set[int] = set()
 PENDING_CRYPTO: dict[int, dict[str, str]] = {}
+DISCLAIMER_VERSION = "2026-01-31"
 
 
 class PendingContentFilter(BaseFilter):
@@ -205,6 +206,35 @@ def _content_type_keyboard() -> InlineKeyboardMarkup:
 def _content_cancel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Cancel", callback_data="content:cancel")]]
+    )
+
+
+def _age_gate_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="I am 18+", callback_data="agegate:yes")],
+            [InlineKeyboardButton(text="No", callback_data="agegate:no")],
+        ]
+    )
+
+
+def _agreement_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="I Agree", callback_data="agreement:accept")],
+            [InlineKeyboardButton(text="Cancel", callback_data="agreement:decline")],
+        ]
+    )
+
+
+def _agreement_text() -> str:
+    return (
+        "Compliance & Data Use Agreement\n"
+        "By continuing, you confirm you are 18+ and will not use Velvet Rooms for illegal "
+        "activity, exploitation, trafficking, or non-consensual content.\n"
+        "We use account, profile, verification media, payment, and usage data to operate the "
+        "platform, prevent abuse, resolve disputes, and comply with law. We only share data with "
+        "required service providers (payments/storage) or when legally required."
     )
 
 
@@ -488,9 +518,14 @@ async def _handle_register_selection(query: CallbackQuery, role: str):
 
 
 async def _start_registration_flow(message: types.Message, user_id: int, role: str):
-    PENDING_REGISTRATIONS[user_id] = {"role": role, "step": "email"}
+    PENDING_REGISTRATIONS[user_id] = {
+        "role": role,
+        "step": "age_gate",
+        "agreement_accepted": False,
+    }
     await message.answer(
-        "Please send your email to complete registration.",
+        "Before we begin, confirm you are 18+.",
+        reply_markup=_age_gate_keyboard(),
     )
 
 
@@ -517,6 +552,9 @@ async def registration_input_handler(message: types.Message):
     text = message.text.strip()
 
     if step == "email":
+        if not state.get("agreement_accepted"):
+            await message.answer("Please accept the agreement to continue.")
+            return
         if not _looks_like_email(text):
             await message.answer("That doesn't look like a valid email. Try again.")
             return
@@ -531,6 +569,8 @@ async def registration_input_handler(message: types.Message):
                 role="unassigned",
             )
             user.email = text
+            user.disclaimer_accepted_at = utcnow()
+            user.disclaimer_version = DISCLAIMER_VERSION
             await db.commit()
             await db.refresh(user)
 
@@ -604,9 +644,13 @@ async def registration_media_handler(message: types.Message):
             await message.answer("Please send a short video for verification.")
             return
 
-        await _submit_verification_video(message, user_id, message.video.file_id)
+        await _submit_verification_video(
+            message,
+            user_id,
+            message.video.file_id,
+            agreement_accepted=state.get("agreement_accepted", False),
+        )
         PENDING_REGISTRATIONS.pop(user_id, None)
-        await message.answer("Verification submitted. Await admin review.")
         return
 
     if user_id in PENDING_VERIFICATIONS:
@@ -618,7 +662,11 @@ async def registration_media_handler(message: types.Message):
 
 
 async def _submit_verification_video(
-    message: types.Message, user_id: int, video_file_id: str
+    message: types.Message,
+    user_id: int,
+    video_file_id: str,
+    *,
+    agreement_accepted: bool = False,
 ) -> None:
     video_url = None
     video_path = None
@@ -637,6 +685,9 @@ async def _submit_verification_video(
             last_name=message.from_user.last_name,
             role="unassigned",
         )
+        if agreement_accepted:
+            user.disclaimer_accepted_at = utcnow()
+            user.disclaimer_version = DISCLAIMER_VERSION
         result = await db.execute(
             select(ModelProfile).where(ModelProfile.user_id == user.id)
         )
@@ -709,6 +760,39 @@ async def callback_handler(query: CallbackQuery):
     if data.startswith("register:"):
         role = data.split(":", 1)[1]
         await _handle_register_selection(query, role)
+        return
+
+    if data.startswith("agegate:"):
+        await query.answer()
+        if not query.from_user:
+            return
+        state = PENDING_REGISTRATIONS.get(query.from_user.id)
+        if not state:
+            await query.message.answer("No active registration. Use /menu to start again.")
+            return
+        if data.endswith("yes"):
+            state["step"] = "agreement"
+            await query.message.answer(_agreement_text(), reply_markup=_agreement_keyboard())
+            return
+        PENDING_REGISTRATIONS.pop(query.from_user.id, None)
+        await query.message.answer("You must be 18+ to use Velvet Rooms.")
+        return
+
+    if data.startswith("agreement:"):
+        await query.answer()
+        if not query.from_user:
+            return
+        state = PENDING_REGISTRATIONS.get(query.from_user.id)
+        if not state:
+            await query.message.answer("No active registration. Use /menu to start again.")
+            return
+        if data.endswith("accept"):
+            state["agreement_accepted"] = True
+            state["step"] = "email"
+            await query.message.answer("Please send your email to complete registration.")
+            return
+        PENDING_REGISTRATIONS.pop(query.from_user.id, None)
+        await query.message.answer("Registration canceled. Use /menu to start again.")
         return
 
     if data == "menu:role_select":
@@ -1446,17 +1530,19 @@ async def _notify_admins_verification(
         logger.warning("ADMIN_BOT_TOKEN not set; cannot notify admins.")
         return
     admin_bot = Bot(token=settings.admin_bot_token)
-    admin_url = f"{settings.webapp_url.rstrip('/')}/admin" if settings.webapp_url else ""
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="Open Admin Console",
-                    web_app=WebAppInfo(url=admin_url),
-                )
+    keyboard = None
+    if settings.webapp_url:
+        admin_url = f"{settings.webapp_url.rstrip('/')}/admin"
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Open Admin Console",
+                        web_app=WebAppInfo(url=admin_url),
+                    )
+                ]
             ]
-        ]
-    )
+        )
     for admin_id in settings.admin_telegram_ids:
         try:
             await admin_bot.send_message(

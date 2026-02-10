@@ -10,6 +10,8 @@ export async function ensureUserColumns() {
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path TEXT");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_hide_email BOOLEAN DEFAULT FALSE");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_hide_location BOOLEAN DEFAULT FALSE");
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS disclaimer_accepted_at TIMESTAMPTZ");
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS disclaimer_version TEXT");
   ensuredColumns = true;
 }
 

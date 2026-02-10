@@ -388,8 +388,20 @@ async def pending_content_handler(message: types.Message):
         return
 
     async with AsyncSessionLocal() as db:
+        rejected = (
+            select(AdminAction.id)
+            .where(
+                AdminAction.target_type == "digital_content",
+                AdminAction.target_id == DigitalContent.id,
+                AdminAction.action_type == "reject_content",
+            )
+            .exists()
+        )
         result = await db.execute(
-            select(DigitalContent).where(DigitalContent.is_active.is_(False))
+            select(DigitalContent).where(
+                DigitalContent.is_active.is_(False),
+                ~rejected,
+            )
         )
         items = list(result.scalars().all())
 
@@ -1023,6 +1035,9 @@ async def _release_escrow_by_ref(
         if not escrow:
             await message.answer("Escrow not found.")
             return
+        if escrow.status not in {"held", "disputed"}:
+            await message.answer(f"Escrow {escrow_ref} already {escrow.status}.")
+            return
         if escrow.escrow_type == "content":
             result = await db.execute(
                 select(ContentPurchase).where(ContentPurchase.escrow_id == escrow.id)
@@ -1046,7 +1061,10 @@ async def _release_escrow_by_ref(
             if client_profile:
                 client_profile.access_fee_paid = True
                 client_profile.access_granted_at = utcnow()
-        await release_escrow(db, escrow, reason="admin_release")
+        escrow, changed = await release_escrow(db, escrow, reason="admin_release")
+        if not changed:
+            await message.answer(f"Escrow {escrow_ref} already {escrow.status}.")
+            return
         db.add(
             AdminAction(
                 admin_id=admin_user.id,
@@ -1103,9 +1121,12 @@ async def _resolve_dispute_by_ref(
             return
 
         if resolution == "release":
-            await release_escrow(db, escrow, reason="dispute_release")
+            escrow, changed = await release_escrow(db, escrow, reason="dispute_release")
         else:
-            await refund_escrow(db, escrow, reason="dispute_refund")
+            escrow, changed = await refund_escrow(db, escrow, reason="dispute_refund")
+        if not changed:
+            await message.answer(f"Escrow {escrow_ref} already {escrow.status}.")
+            return
 
         db.add(
             AdminAction(

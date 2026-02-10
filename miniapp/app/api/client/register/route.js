@@ -39,6 +39,8 @@ export async function POST(request) {
   const location = (body?.location || "").toString().trim();
   const birthMonth = (body?.birth_month || "").toString().trim();
   const birthYear = (body?.birth_year || "").toString().trim();
+  const disclaimerAccepted = Boolean(body?.disclaimer_accepted);
+  const disclaimerVersion = (body?.disclaimer_version || "").toString().trim();
 
   if (!displayName) {
     return NextResponse.json({ error: "missing_display_name" }, { status: 400 });
@@ -49,6 +51,9 @@ export async function POST(request) {
   const ageCheck = isAdult(birthYear, birthMonth);
   if (!ageCheck.ok) {
     return NextResponse.json({ error: "age_restricted" }, { status: 400 });
+  }
+  if (!disclaimerAccepted || !disclaimerVersion) {
+    return NextResponse.json({ error: "disclaimer_required" }, { status: 400 });
   }
 
   const existingUser = await query("SELECT role FROM users WHERE telegram_id = $1", [
@@ -104,6 +109,10 @@ export async function POST(request) {
   await query(
     "UPDATE users SET privacy_hide_email = TRUE, privacy_hide_location = TRUE WHERE id = $1",
     [userId]
+  );
+  await query(
+    "UPDATE users SET disclaimer_accepted_at = NOW(), disclaimer_version = $2 WHERE id = $1",
+    [userId, disclaimerVersion]
   );
 
   await query("UPDATE users SET status = 'active' WHERE id = $1", [userId]);

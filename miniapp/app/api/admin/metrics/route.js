@@ -51,7 +51,17 @@ export async function GET(request) {
     query("SELECT COUNT(*)::int AS count FROM model_profiles WHERE verification_status = 'approved'"),
     query("SELECT COUNT(*)::int AS count FROM model_profiles"),
     query("SELECT COUNT(*)::int AS count FROM model_profiles WHERE is_online = TRUE"),
-    query("SELECT COUNT(*)::int AS count FROM digital_content WHERE is_active = FALSE"),
+    query(
+      `SELECT COUNT(*)::int AS count
+       FROM digital_content dc
+       WHERE dc.is_active = FALSE
+         AND NOT EXISTS (
+           SELECT 1 FROM admin_actions aa
+           WHERE aa.target_type = 'digital_content'
+             AND aa.target_id = dc.id
+             AND aa.action_type = 'reject_content'
+         )`
+    ),
     query("SELECT COUNT(*)::int AS count FROM digital_content WHERE is_active = TRUE"),
     query("SELECT COUNT(*)::int AS count FROM digital_content"),
     query("SELECT COUNT(*)::int AS count FROM escrow_accounts WHERE status = 'held'"),

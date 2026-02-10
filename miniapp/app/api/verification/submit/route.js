@@ -71,6 +71,8 @@ export async function POST(request) {
   const tags = (body?.tags || "").toString().trim();
   const availability = (body?.availability || "").toString().trim();
   const bio = (body?.bio || "").toString().trim();
+  const disclaimerAccepted = Boolean(body?.disclaimer_accepted);
+  const disclaimerVersion = (body?.disclaimer_version || "").toString().trim();
 
   if (!displayName || !email || !videoPath) {
     return NextResponse.json(
@@ -81,6 +83,9 @@ export async function POST(request) {
   const ageCheck = isAdult(birthYear, birthMonth);
   if (!ageCheck.ok) {
     return NextResponse.json({ error: "age_restricted", detail: "18+ only" }, { status: 400 });
+  }
+  if (!disclaimerAccepted || !disclaimerVersion) {
+    return NextResponse.json({ error: "disclaimer_required" }, { status: 400 });
   }
 
   const existingUser = await query("SELECT role FROM users WHERE telegram_id = $1", [
@@ -136,6 +141,10 @@ export async function POST(request) {
   await sendAdminNotification(
     `New model verification submitted: ${displayName} (ID ${publicId}). Review in admin console.`,
     null
+  );
+  await query(
+    "UPDATE users SET disclaimer_accepted_at = NOW(), disclaimer_version = $2 WHERE id = $1",
+    [userId, disclaimerVersion]
   );
 
   return NextResponse.json({ ok: true });

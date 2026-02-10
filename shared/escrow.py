@@ -4,6 +4,7 @@ import secrets
 from datetime import timedelta
 from typing import Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import EscrowAccount, Transaction, User
@@ -59,8 +60,7 @@ async def create_escrow(
         release_condition_met=False,
     )
     db.add(escrow)
-    await db.commit()
-    await db.refresh(escrow)
+    await db.flush()
     return escrow
 
 
@@ -69,24 +69,38 @@ async def release_escrow(
     escrow: EscrowAccount,
     *,
     reason: Optional[str] = None,
-) -> EscrowAccount:
-    escrow.status = "released"
-    escrow.released_at = utcnow()
-    escrow.release_condition_met = True
-    if reason:
-        escrow.dispute_reason = reason
+) -> tuple[EscrowAccount, bool]:
+    result = await db.execute(
+        select(EscrowAccount)
+        .where(EscrowAccount.id == escrow.id)
+        .with_for_update()
+    )
+    locked = result.scalar_one_or_none()
+    if not locked:
+        return escrow, False
+    if locked.status not in {"held", "disputed"}:
+        return locked, False
 
-    if escrow.receiver_id and escrow.receiver_payout:
-        user = await db.get(User, escrow.receiver_id)
+    locked.status = "released"
+    locked.released_at = utcnow()
+    locked.release_condition_met = True
+    if reason:
+        locked.dispute_reason = reason
+
+    if locked.receiver_id and locked.receiver_payout:
+        user = await db.get(User, locked.receiver_id)
         if user:
-            user.wallet_balance = (user.wallet_balance or 0) + escrow.receiver_payout
+            user.wallet_balance = (user.wallet_balance or 0) + locked.receiver_payout
 
     await db.commit()
-    await db.refresh(escrow)
-    await send_escrow_log(
-        f"Escrow released: {escrow.escrow_ref} ({escrow.escrow_type}) amount {escrow.amount}"
+    await db.refresh(locked)
+    message = (
+        f"Escrow released: {locked.escrow_ref} ({locked.escrow_type}) amount {locked.amount}"
     )
-    return escrow
+    if reason:
+        message = f"{message} reason={reason}"
+    await send_escrow_log(message)
+    return locked, True
 
 
 async def refund_escrow(
@@ -94,21 +108,35 @@ async def refund_escrow(
     escrow: EscrowAccount,
     *,
     reason: Optional[str] = None,
-) -> EscrowAccount:
-    escrow.status = "refunded"
-    escrow.released_at = utcnow()
-    escrow.release_condition_met = True
-    if reason:
-        escrow.dispute_reason = reason
+) -> tuple[EscrowAccount, bool]:
+    result = await db.execute(
+        select(EscrowAccount)
+        .where(EscrowAccount.id == escrow.id)
+        .with_for_update()
+    )
+    locked = result.scalar_one_or_none()
+    if not locked:
+        return escrow, False
+    if locked.status not in {"held", "disputed"}:
+        return locked, False
 
-    if escrow.payer_id:
-        user = await db.get(User, escrow.payer_id)
+    locked.status = "refunded"
+    locked.released_at = utcnow()
+    locked.release_condition_met = True
+    if reason:
+        locked.dispute_reason = reason
+
+    if locked.payer_id:
+        user = await db.get(User, locked.payer_id)
         if user:
-            user.wallet_balance = (user.wallet_balance or 0) + (escrow.amount or 0)
+            user.wallet_balance = (user.wallet_balance or 0) + (locked.amount or 0)
 
     await db.commit()
-    await db.refresh(escrow)
-    await send_escrow_log(
-        f"Escrow refunded: {escrow.escrow_ref} ({escrow.escrow_type}) amount {escrow.amount}"
+    await db.refresh(locked)
+    message = (
+        f"Escrow refunded: {locked.escrow_ref} ({locked.escrow_type}) amount {locked.amount}"
     )
-    return escrow
+    if reason:
+        message = f"{message} reason={reason}"
+    await send_escrow_log(message)
+    return locked, True

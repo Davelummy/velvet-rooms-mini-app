@@ -3,6 +3,9 @@
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+const DISCLAIMER_VERSION = "2026-01-31";
+const AGE_GATE_STORAGE_KEY = "vr_age_confirmed";
+
 export default function Home() {
   const cleanTagLabel = (value) => {
     if (!value) {
@@ -26,6 +29,10 @@ export default function Home() {
   const [roleLocked, setRoleLocked] = useState(false);
   const [lockedRole, setLockedRole] = useState(null);
   const [roleStatus, setRoleStatus] = useState("");
+  const [ageGateOpen, setAgeGateOpen] = useState(false);
+  const [ageGateConfirmed, setAgeGateConfirmed] = useState(false);
+  const [ageGateStatus, setAgeGateStatus] = useState("");
+  const [ageGateTargetRole, setAgeGateTargetRole] = useState(null);
   const [clientStep, setClientStep] = useState(1);
   const [modelStep, setModelStep] = useState(1);
   const [initData, setInitData] = useState("");
@@ -43,6 +50,7 @@ export default function Home() {
     location: "",
     birthMonth: "",
     birthYear: "",
+    disclaimerAccepted: false,
   });
   const [modelForm, setModelForm] = useState({
     stageName: "",
@@ -54,6 +62,7 @@ export default function Home() {
     availability: "",
     videoFile: null,
     videoName: "",
+    disclaimerAccepted: false,
   });
   const [clientStatus, setClientStatus] = useState("");
   const [modelStatus, setModelStatus] = useState("");
@@ -647,9 +656,15 @@ export default function Home() {
       return;
     }
     if (contentId || modelId) {
-      setRole("client");
+      if (ageGateConfirmed) {
+        setRole("client");
+      } else if (!ageGateOpen) {
+        setAgeGateTargetRole("client");
+        setAgeGateStatus("");
+        setAgeGateOpen(true);
+      }
     }
-  }, [contentId, modelId, roleLocked]);
+  }, [contentId, modelId, roleLocked, ageGateConfirmed, ageGateOpen]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -661,6 +676,16 @@ export default function Home() {
       setRoleLocked(true);
       setLockedRole(storedRole);
       setRole(storedRole);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const stored = window.localStorage.getItem(AGE_GATE_STORAGE_KEY);
+    if (stored === "1") {
+      setAgeGateConfirmed(true);
     }
   }, []);
 
@@ -1894,7 +1919,7 @@ export default function Home() {
     }
   };
 
-  const handleRole = (nextRole) => {
+  const proceedRoleSelection = (nextRole) => {
     if (roleLocked && lockedRole && nextRole !== lockedRole) {
       setRoleStatus(`This account is locked to the ${lockedRole} dashboard.`);
       return;
@@ -1905,6 +1930,42 @@ export default function Home() {
     if (target) {
       target.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+  };
+
+  const openAgeGate = (nextRole) => {
+    setAgeGateTargetRole(nextRole);
+    setAgeGateStatus("");
+    setAgeGateOpen(true);
+  };
+
+  const closeAgeGate = () => {
+    setAgeGateOpen(false);
+    setAgeGateTargetRole(null);
+  };
+
+  const confirmAgeGate = (confirmed) => {
+    if (!confirmed) {
+      setAgeGateStatus("You must be 18+ to use Velvet Rooms.");
+      return;
+    }
+    setAgeGateConfirmed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(AGE_GATE_STORAGE_KEY, "1");
+    }
+    setAgeGateOpen(false);
+    if (ageGateTargetRole) {
+      const nextRole = ageGateTargetRole;
+      setAgeGateTargetRole(null);
+      proceedRoleSelection(nextRole);
+    }
+  };
+
+  const handleRole = (nextRole) => {
+    if (!ageGateConfirmed) {
+      openAgeGate(nextRole);
+      return;
+    }
+    proceedRoleSelection(nextRole);
   };
 
   const goToRolePicker = () => {
@@ -2335,6 +2396,15 @@ export default function Home() {
       setClientStatus("Add your email to continue.");
       return;
     }
+    if (clientStep === 1 && !ageGateConfirmed) {
+      openAgeGate("client");
+      setClientStatus("Confirm you are 18+ to continue.");
+      return;
+    }
+    if (clientStep === 1 && !clientForm.disclaimerAccepted) {
+      setClientStatus("You must accept the agreement to continue.");
+      return;
+    }
     if (clientStep === 1) {
       const ageCheck = isAdult(clientForm.birthYear, clientForm.birthMonth);
       if (!ageCheck.ok) {
@@ -2357,6 +2427,8 @@ export default function Home() {
             location: clientForm.location,
             birth_month: clientForm.birthMonth,
             birth_year: clientForm.birthYear,
+            disclaimer_accepted: clientForm.disclaimerAccepted,
+            disclaimer_version: DISCLAIMER_VERSION,
           }),
         });
         if (!res.ok) {
@@ -2367,6 +2439,8 @@ export default function Home() {
               errorMsg = "That username is taken. Choose another.";
             } else if (payload?.error === "missing_display_name") {
               errorMsg = "Add a display name to continue.";
+            } else if (payload?.error === "disclaimer_required") {
+              errorMsg = "You must accept the agreement to continue.";
             } else if (payload?.error) {
               errorMsg = `Registration failed: ${payload.error}`;
             }
@@ -2411,6 +2485,15 @@ export default function Home() {
       setModelStatus("Add at least one tag to continue.");
       return;
     }
+    if (modelStep === 1 && !ageGateConfirmed) {
+      openAgeGate("model");
+      setModelStatus("Confirm you are 18+ to continue.");
+      return;
+    }
+    if (modelStep === 1 && !modelForm.disclaimerAccepted) {
+      setModelStatus("You must accept the agreement to continue.");
+      return;
+    }
     if (modelStep === 1) {
       const ageCheck = isAdult(modelForm.birthYear, modelForm.birthMonth);
       if (!ageCheck.ok) {
@@ -2439,6 +2522,10 @@ export default function Home() {
     }
     if (!modelForm.stageName || !modelForm.email || !modelForm.videoFile) {
       setModelStatus("Stage name, email, and verification video are required.");
+      return;
+    }
+    if (!modelForm.disclaimerAccepted) {
+      setModelStatus("You must accept the agreement to submit verification.");
       return;
     }
     if (modelForm.videoFile && modelForm.videoFile.size > 50 * 1024 * 1024) {
@@ -2480,22 +2567,26 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           initData: tgInit,
-        display_name: modelForm.stageName,
-        email: modelForm.email,
-        birth_month: modelForm.birthMonth,
-        birth_year: modelForm.birthYear,
-        bio: modelForm.bio,
-        tags: modelForm.tags,
-        availability: modelForm.availability,
-        video_path: uploadPayload.path,
-      }),
-    });
+          display_name: modelForm.stageName,
+          email: modelForm.email,
+          birth_month: modelForm.birthMonth,
+          birth_year: modelForm.birthYear,
+          bio: modelForm.bio,
+          tags: modelForm.tags,
+          availability: modelForm.availability,
+          video_path: uploadPayload.path,
+          disclaimer_accepted: modelForm.disclaimerAccepted,
+          disclaimer_version: DISCLAIMER_VERSION,
+        }),
+      });
       if (!res.ok) {
         let detail = `Submission failed (HTTP ${res.status}).`;
         try {
           const payload = await res.json();
           if (payload?.detail) {
             detail = `${detail} ${payload.detail}`;
+          } else if (payload?.error === "disclaimer_required") {
+            detail = "You must accept the agreement to continue.";
           } else if (payload?.error) {
             detail = `${detail} ${payload.error}`;
           }
@@ -2875,6 +2966,34 @@ export default function Home() {
                       </label>
                     </div>
                     <p className="helper">18+ only. Your birth date stays private.</p>
+                    <div className="notice-card agreement-box">
+                      <h4>Compliance & Data Use Agreement</h4>
+                      <p className="helper">
+                        By continuing, you confirm you are 18+ and will not use Velvet Rooms for
+                        illegal activity, exploitation, trafficking, or non-consensual content.
+                      </p>
+                      <p className="helper">
+                        We use account, profile, verification media, payment, and usage data to
+                        operate the platform, prevent abuse, resolve disputes, and comply with law.
+                        We only share data with required service providers (payments and storage) or
+                        when legally required.
+                      </p>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={clientForm.disclaimerAccepted}
+                          onChange={(event) =>
+                            setClientForm((prev) => ({
+                              ...prev,
+                              disclaimerAccepted: event.target.checked,
+                            }))
+                          }
+                        />
+                        <span>
+                          I agree to the Compliance & Data Use Agreement (v{DISCLAIMER_VERSION}).
+                        </span>
+                      </label>
+                    </div>
                     {!roleLocked && (
                       <button type="button" className="cta ghost" onClick={goToRolePicker}>
                         Back
@@ -3863,6 +3982,29 @@ export default function Home() {
                   Report
                 </button>
               </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {ageGateOpen && (
+        <section className="modal-backdrop" onClick={closeAgeGate}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <header className="modal-header">
+              <h3>Age confirmation</h3>
+              <button type="button" className="cta ghost" onClick={closeAgeGate}>
+                Close
+              </button>
+            </header>
+            <p className="helper">You must be 18+ to use Velvet Rooms. Are you 18 or older?</p>
+            {ageGateStatus && <p className="helper error">{ageGateStatus}</p>}
+            <div className="modal-actions">
+              <button type="button" className="cta ghost" onClick={() => confirmAgeGate(false)}>
+                No, I am under 18
+              </button>
+              <button type="button" className="cta primary" onClick={() => confirmAgeGate(true)}>
+                Yes, I am 18+
+              </button>
             </div>
           </div>
         </section>
@@ -5087,6 +5229,34 @@ export default function Home() {
                     </label>
                     </div>
                     <p className="helper">18+ only. We verify eligibility and keep this private.</p>
+                    <div className="notice-card agreement-box">
+                      <h4>Compliance & Data Use Agreement</h4>
+                      <p className="helper">
+                        By continuing, you confirm you are 18+ and will not use Velvet Rooms for
+                        illegal activity, exploitation, trafficking, or non-consensual content.
+                      </p>
+                      <p className="helper">
+                        We use account, profile, verification media, payment, and usage data to
+                        operate the platform, prevent abuse, resolve disputes, and comply with law.
+                        We only share data with required service providers (payments and storage) or
+                        when legally required.
+                      </p>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={modelForm.disclaimerAccepted}
+                          onChange={(event) =>
+                            setModelForm((prev) => ({
+                              ...prev,
+                              disclaimerAccepted: event.target.checked,
+                            }))
+                          }
+                        />
+                        <span>
+                          I agree to the Compliance & Data Use Agreement (v{DISCLAIMER_VERSION}).
+                        </span>
+                      </label>
+                    </div>
                     <label className="field">
                       Short bio
                       <textarea

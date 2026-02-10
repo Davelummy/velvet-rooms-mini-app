@@ -15,6 +15,15 @@ export async function GET(request) {
   const url = new URL(request.url);
   const status = (url.searchParams.get("status") || "pending").toLowerCase();
   const isActive = status === "approved";
+  const whereClause = isActive
+    ? "dc.is_active = TRUE"
+    : `dc.is_active = FALSE
+       AND NOT EXISTS (
+         SELECT 1 FROM admin_actions aa
+         WHERE aa.target_type = 'digital_content'
+           AND aa.target_id = dc.id
+           AND aa.action_type = 'reject_content'
+       )`;
 
   const res = await query(
     `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
@@ -24,9 +33,9 @@ export async function GET(request) {
      FROM digital_content dc
      JOIN users u ON u.id = dc.model_id
      LEFT JOIN model_profiles mp ON mp.user_id = dc.model_id
-     WHERE dc.is_active = $1
+     WHERE ${whereClause}
      ORDER BY dc.created_at DESC`,
-    [isActive]
+    []
   );
 
   const bucket =

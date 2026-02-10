@@ -10,7 +10,7 @@ sys.path.append(str(ROOT))
 
 from shared.db import AsyncSessionLocal
 from shared.escrow import release_escrow
-from shared.notifications import send_escrow_log, send_user_message
+from shared.notifications import send_user_message
 from shared.config import settings
 from shared.time_utils import utcnow
 from shared.db import engine
@@ -32,10 +32,9 @@ async def process_auto_release():
             )
             escrows = list(result.scalars().all())
             for escrow in escrows:
-                await release_escrow(db, escrow, reason="auto_release")
-                await send_escrow_log(
-                    f"Auto-released escrow {escrow.escrow_ref} ({escrow.escrow_type})"
-                )
+                _, changed = await release_escrow(db, escrow, reason="auto_release")
+                if not changed:
+                    continue
     except DBAPIError as exc:
         # Connection drops can happen; reset pool and try again next cycle.
         print(f"Worker DB error: {exc}")
