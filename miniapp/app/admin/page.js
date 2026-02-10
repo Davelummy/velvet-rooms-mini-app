@@ -363,7 +363,9 @@ export default function Admin() {
     <main className="admin-shell">
       <header className="admin-top">
         <div className="brand">
-          <span className="brand-dot" />
+          <span className="logo-mark small">
+            <img src="/brand/logo.png" alt="Velvet Rooms logo" />
+          </span>
           <span className="logo-text">Velvet Rooms</span>
           <span className="admin-pill">Admin</span>
         </div>

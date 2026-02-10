@@ -48,7 +48,12 @@ body {
   font-size: 12px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+}
+
+.brand-logo-only {
+  flex-direction: column;
+  gap: 12px;
 }
 
 .logo-text {
@@ -61,12 +66,28 @@ body {
   color: transparent;
 }
 
-.brand-dot {
-  width: 10px;
-  height: 10px;
-  background: var(--accent);
+.logo-mark {
+  width: 120px;
+  height: 120px;
   border-radius: 50%;
-  box-shadow: 0 0 12px rgba(227, 23, 62, 0.8);
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.logo-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.logo-mark.small {
+  width: 40px;
+  height: 40px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
 }
 
 .avatar-row {
@@ -1490,6 +1511,10 @@ h1 {
     flex-direction: column;
     gap: 16px;
     align-items: flex-start;
+  }
+  .logo-mark {
+    width: 96px;
+    height: 96px;
   }
   .onboarding-card {
     padding: 24px;

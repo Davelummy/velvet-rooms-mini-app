@@ -2808,8 +2808,10 @@ export default function Home() {
     return (
       <main className="app-shell">
         <div className="loading-card">
-          <div className="brand">
-            <span className="brand-dot" />
+          <div className="brand brand-logo-only">
+            <span className="logo-mark">
+              <img src="/brand/logo.png" alt="Velvet Rooms logo" />
+            </span>
             <span className="logo-text">Velvet Rooms</span>
           </div>
           <div className="spinner" />
@@ -2825,7 +2827,9 @@ export default function Home() {
     <main className="shell">
       <header className="top">
         <div className="brand">
-          <span className="brand-dot" />
+          <span className="logo-mark small">
+            <img src="/brand/logo.png" alt="Velvet Rooms logo" />
+          </span>
           <span className="logo-text">Velvet Rooms</span>
         </div>
         {!roleLocked && !showOnboarding && (
