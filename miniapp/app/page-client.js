@@ -748,7 +748,8 @@ export default function Home() {
       return;
     }
     const stored = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
-    if (stored === ONBOARDING_VERSION) {
+    const locked = window.localStorage.getItem("vr_role_locked");
+    if (stored === ONBOARDING_VERSION && locked === "1") {
       setOnboardingComplete(true);
     }
   }, []);
@@ -1189,9 +1190,11 @@ export default function Home() {
           setRoleLocked(false);
           setLockedRole(null);
           setRole(null);
+          setOnboardingComplete(false);
           if (typeof window !== "undefined") {
             window.localStorage.removeItem("vr_role");
             window.localStorage.removeItem("vr_role_locked");
+            window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
           }
           return;
         }
@@ -1203,7 +1206,9 @@ export default function Home() {
           if (typeof window !== "undefined") {
             window.localStorage.setItem("vr_role", "model");
             window.localStorage.setItem("vr_role_locked", "1");
+            window.localStorage.setItem(ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION);
           }
+          setOnboardingComplete(true);
           if (data.model?.verification_status === "approved") {
             setModelApproved(true);
             setModelStatus("Verified ✅ Your dashboard is unlocked.");
@@ -1236,7 +1241,9 @@ export default function Home() {
           if (typeof window !== "undefined") {
             window.localStorage.setItem("vr_role", "client");
             window.localStorage.setItem("vr_role_locked", "1");
+            window.localStorage.setItem(ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION);
           }
+          setOnboardingComplete(true);
           if (data.client?.access_fee_paid) {
             setClientStep(3);
             setClientTab("gallery");
@@ -2026,7 +2033,6 @@ export default function Home() {
   const finishOnboarding = () => {
     setOnboardingComplete(true);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, ONBOARDING_VERSION);
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
   };
@@ -2886,23 +2892,23 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              <div className="cta-row">
-                <button
-                  type="button"
-                  className="cta ghost"
-                  onClick={retreatOnboarding}
-                  disabled={onboardingStep === 0}
-                >
-                  Back
-                </button>
-                <button type="button" className="cta primary" onClick={advanceOnboarding}>
-                  {onboardingCurrent.cta}
-                </button>
-              </div>
             </div>
             <div className={`onboarding-visual ${onboardingCurrent.visual}`}>
               <div className="onboarding-image">
                 <img src={onboardingCurrent.image} alt={onboardingCurrent.title} />
+                <div className="onboarding-cta">
+                  <button
+                    type="button"
+                    className="cta ghost"
+                    onClick={retreatOnboarding}
+                    disabled={onboardingStep === 0}
+                  >
+                    Back
+                  </button>
+                  <button type="button" className="cta primary" onClick={advanceOnboarding}>
+                    {onboardingCurrent.cta}
+                  </button>
+                </div>
               </div>
               <div className="onboarding-thumbs">
                 {onboardingSlides.map((slide, index) => (
