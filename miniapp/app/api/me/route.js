@@ -36,7 +36,7 @@ export async function GET(request) {
   const user = userRes.rows[0];
 
   const modelRes = await query(
-    `SELECT display_name, verification_status, is_online, last_seen_at, tags, availability, bio
+    `SELECT display_name, verification_status, is_online, last_seen_at, tags, availability, bio, location
      FROM model_profiles WHERE user_id = $1`,
     [user.id]
   );

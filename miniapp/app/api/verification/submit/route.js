@@ -3,6 +3,7 @@ import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureUser } from "../../_lib/users";
 import { ensureSessionColumns } from "../../_lib/sessions";
+import { ensureModelProfileColumns } from "../../_lib/models";
 
 export const runtime = "nodejs";
 
@@ -65,6 +66,7 @@ export async function POST(request) {
 
   const displayName = (body?.display_name || "").toString().trim();
   const email = (body?.email || "").toString().trim();
+  const location = (body?.location || "").toString().trim();
   const birthMonth = (body?.birth_month || "").toString().trim();
   const birthYear = (body?.birth_year || "").toString().trim();
   const videoPath = (body?.video_path || "").toString().trim();
@@ -79,6 +81,9 @@ export async function POST(request) {
       { error: "missing_fields", detail: "display_name, email, and video are required" },
       { status: 400 }
     );
+  }
+  if (!location) {
+    return NextResponse.json({ error: "missing_location" }, { status: 400 });
   }
   const ageCheck = isAdult(birthYear, birthMonth);
   if (!ageCheck.ok) {
@@ -100,6 +105,7 @@ export async function POST(request) {
 
   const now = new Date();
   await ensureSessionColumns();
+  await ensureModelProfileColumns();
   const userId = await ensureUser({
     telegramId: tgUser.id,
     username: tgUser.username || null,
@@ -124,15 +130,16 @@ export async function POST(request) {
            verification_video_path = $5,
            tags = COALESCE(NULLIF($6,''), tags),
            availability = COALESCE(NULLIF($7,''), availability),
-           bio = COALESCE(NULLIF($8,''), bio)
-       WHERE user_id = $9`,
-      [displayName, "submitted", now, null, videoPath, tags, availability, bio, userId]
+           bio = COALESCE(NULLIF($8,''), bio),
+           location = COALESCE(NULLIF($9,''), location)
+       WHERE user_id = $10`,
+      [displayName, "submitted", now, null, videoPath, tags, availability, bio, location, userId]
     );
   } else {
     await query(
-      `INSERT INTO model_profiles (user_id, display_name, verification_status, verification_submitted_at, verification_video_url, verification_video_path, tags, availability, bio, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [userId, displayName, "submitted", now, null, videoPath, tags, availability, bio, now]
+      `INSERT INTO model_profiles (user_id, display_name, verification_status, verification_submitted_at, verification_video_url, verification_video_path, tags, availability, bio, location, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [userId, displayName, "submitted", now, null, videoPath, tags, availability, bio, location, now]
     );
   }
 

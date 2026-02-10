@@ -3,6 +3,7 @@ import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureUserColumns } from "../../_lib/users";
 import { ensureClientProfileColumns } from "../../_lib/clients";
+import { ensureModelProfileColumns } from "../../_lib/models";
 
 export const runtime = "nodejs";
 
@@ -53,12 +54,6 @@ function isAdult(year, month) {
   const cutoff = new Date(now.getFullYear() - 18, now.getMonth(), 1);
   const dob = new Date(y, m - 1, 1);
   return dob <= cutoff;
-}
-
-async function ensureModelProfileColumns() {
-  await query("ALTER TABLE model_profiles ADD COLUMN IF NOT EXISTS bio TEXT");
-  await query("ALTER TABLE model_profiles ADD COLUMN IF NOT EXISTS tags JSONB");
-  await query("ALTER TABLE model_profiles ADD COLUMN IF NOT EXISTS availability TEXT");
 }
 
 export async function POST(request) {
@@ -160,6 +155,10 @@ export async function POST(request) {
       fields.push(`bio = $${idx++}`);
       params.push(bio);
     }
+    if (location) {
+      fields.push(`location = $${idx++}`);
+      params.push(location);
+    }
     if (availability) {
       fields.push(`availability = $${idx++}`);
       params.push(availability);
@@ -189,4 +188,3 @@ export async function POST(request) {
   }
   return NextResponse.json({ ok: true });
 }
-

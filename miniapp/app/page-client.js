@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { Country, State, City } from "country-state-city";
 
 const DISCLAIMER_VERSION = "2026-01-31";
 const AGE_GATE_STORAGE_KEY = "vr_age_confirmed";
@@ -22,6 +23,76 @@ export default function Home() {
     // Guard against people pasting JSON arrays into tags fields.
     out = out.replace(/^\[/, "").replace(/\]$/, "").trim();
     return out.slice(0, 24);
+  };
+
+  const countries = useMemo(() => {
+    const list = Country.getAllCountries() || [];
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
+
+  const countriesByIso = useMemo(() => {
+    const map = new Map();
+    for (const country of countries) {
+      map.set(country.isoCode, country);
+    }
+    return map;
+  }, [countries]);
+
+  const countriesByName = useMemo(() => {
+    const map = new Map();
+    for (const country of countries) {
+      map.set(country.name.toLowerCase(), country);
+    }
+    return map;
+  }, [countries]);
+
+  const getRegionOptions = (countryIso) => {
+    if (!countryIso) {
+      return { kind: "region", items: [] };
+    }
+    const states = State.getStatesOfCountry(countryIso) || [];
+    if (states.length) {
+      return {
+        kind: "state",
+        items: states.map((state) => state.name).sort((a, b) => a.localeCompare(b)),
+      };
+    }
+    const cities = City.getCitiesOfCountry(countryIso) || [];
+    const names = Array.from(new Set(cities.map((city) => city.name))).sort((a, b) =>
+      a.localeCompare(b)
+    );
+    return { kind: "city", items: names };
+  };
+
+  const buildLocationValue = (countryIso, regionName) => {
+    const countryName = countriesByIso.get(countryIso)?.name || "";
+    if (!countryName) {
+      return "";
+    }
+    if (!regionName) {
+      return countryName;
+    }
+    return `${regionName}, ${countryName}`;
+  };
+
+  const parseLocation = (value) => {
+    const raw = (value || "").toString().trim();
+    if (!raw) {
+      return { countryIso: "", regionName: "" };
+    }
+    const parts = raw.split(",").map((part) => part.trim()).filter(Boolean);
+    if (!parts.length) {
+      return { countryIso: "", regionName: "" };
+    }
+    const countryName = parts[parts.length - 1];
+    const isoGuess = countryName.toUpperCase();
+    const country =
+      countriesByIso.get(isoGuess) || countriesByName.get(countryName.toLowerCase());
+    if (!country) {
+      return { countryIso: "", regionName: "" };
+    }
+    const regionName = parts.slice(0, -1).join(", ");
+    return { countryIso: country.isoCode, regionName };
   };
 
   const searchParams = useSearchParams();
@@ -56,10 +127,14 @@ export default function Home() {
     birthYear: "",
     disclaimerAccepted: false,
   });
+  const [clientCountryIso, setClientCountryIso] = useState("");
+  const [clientRegionName, setClientRegionName] = useState("");
+  const [clientLocationDirty, setClientLocationDirty] = useState(false);
   const [modelForm, setModelForm] = useState({
     stageName: "",
     bio: "",
     email: "",
+    location: "",
     birthMonth: "",
     birthYear: "",
     tags: "",
@@ -68,6 +143,9 @@ export default function Home() {
     videoName: "",
     disclaimerAccepted: false,
   });
+  const [modelCountryIso, setModelCountryIso] = useState("");
+  const [modelRegionName, setModelRegionName] = useState("");
+  const [modelLocationDirty, setModelLocationDirty] = useState(false);
   const [clientStatus, setClientStatus] = useState("");
   const [modelStatus, setModelStatus] = useState("");
   const [profile, setProfile] = useState(null);
@@ -185,6 +263,9 @@ export default function Home() {
     tags: "",
     availability: "",
   });
+  const [profileCountryIso, setProfileCountryIso] = useState("");
+  const [profileRegionName, setProfileRegionName] = useState("");
+  const [profileLocationDirty, setProfileLocationDirty] = useState(false);
   const [visibleTeasers, setVisibleTeasers] = useState({});
   const [consumedTeasers, setConsumedTeasers] = useState({});
   const [previewOverlay, setPreviewOverlay] = useState({
@@ -285,6 +366,21 @@ export default function Home() {
     loading: false,
   });
   const avatarUrl = profile?.user?.avatar_url || "";
+  const clientLocationValue = buildLocationValue(clientCountryIso, clientRegionName);
+  const modelLocationValue = buildLocationValue(modelCountryIso, modelRegionName);
+  const profileLocationValue = buildLocationValue(profileCountryIso, profileRegionName);
+  const clientRegionData = useMemo(
+    () => getRegionOptions(clientCountryIso),
+    [clientCountryIso]
+  );
+  const modelRegionData = useMemo(
+    () => getRegionOptions(modelCountryIso),
+    [modelCountryIso]
+  );
+  const profileRegionData = useMemo(
+    () => getRegionOptions(profileCountryIso),
+    [profileCountryIso]
+  );
   const blockedIds = profile?.blocked_ids || [];
   const isBlocked = (targetId) => blockedIds.includes(targetId);
 
@@ -309,11 +405,12 @@ export default function Home() {
     const missing = [];
     if (!profile.user.avatar_url) missing.push("Add a profile photo");
     if (!model.display_name) missing.push("Add a stage name");
+    if (!model.location) missing.push("Add a location");
     if (!model.bio) missing.push("Add a short bio");
     if (!model.tags) missing.push("Add creator tags");
     if (!model.availability) missing.push("Set availability");
     if (model.verification_status !== "approved") missing.push("Complete verification");
-    const total = 6;
+    const total = 7;
     const completed = total - missing.length;
     const percent = total ? Math.round((completed / total) * 100) : 0;
     return { percent, total, completed, missing };
@@ -753,6 +850,59 @@ export default function Home() {
       setOnboardingComplete(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!clientLocationDirty && clientForm.location) {
+      return;
+    }
+    setClientForm((prev) =>
+      prev.location === clientLocationValue ? prev : { ...prev, location: clientLocationValue }
+    );
+  }, [clientLocationValue, clientLocationDirty, clientForm.location]);
+
+  useEffect(() => {
+    if (!clientForm.location) {
+      return;
+    }
+    const parsed = parseLocation(clientForm.location);
+    if (parsed.countryIso && parsed.countryIso !== clientCountryIso) {
+      setClientCountryIso(parsed.countryIso);
+    }
+    if (parsed.regionName !== clientRegionName) {
+      setClientRegionName(parsed.regionName);
+    }
+  }, [clientForm.location, clientCountryIso, clientRegionName]);
+
+  useEffect(() => {
+    if (!modelLocationDirty && modelForm.location) {
+      return;
+    }
+    setModelForm((prev) =>
+      prev.location === modelLocationValue ? prev : { ...prev, location: modelLocationValue }
+    );
+  }, [modelLocationValue, modelLocationDirty, modelForm.location]);
+
+  useEffect(() => {
+    if (!modelForm.location) {
+      return;
+    }
+    const parsed = parseLocation(modelForm.location);
+    if (parsed.countryIso && parsed.countryIso !== modelCountryIso) {
+      setModelCountryIso(parsed.countryIso);
+    }
+    if (parsed.regionName !== modelRegionName) {
+      setModelRegionName(parsed.regionName);
+    }
+  }, [modelForm.location, modelCountryIso, modelRegionName]);
+
+  useEffect(() => {
+    if (!profileLocationDirty && profileEditForm.location) {
+      return;
+    }
+    setProfileEditForm((prev) =>
+      prev.location === profileLocationValue ? prev : { ...prev, location: profileLocationValue }
+    );
+  }, [profileLocationValue, profileLocationDirty, profileEditForm.location]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1225,6 +1375,10 @@ export default function Home() {
           if (data.model?.bio) {
             setModelForm((prev) => ({ ...prev, bio: data.model.bio }));
           }
+          if (data.model?.location) {
+            setModelForm((prev) => ({ ...prev, location: data.model.location }));
+            setModelLocationDirty(false);
+          }
           if (data.model?.tags) {
             setModelForm((prev) => ({ ...prev, tags: data.model.tags }));
           }
@@ -1253,6 +1407,7 @@ export default function Home() {
           }
           if (data.client?.location) {
             setClientForm((prev) => ({ ...prev, location: data.client.location }));
+            setClientLocationDirty(false);
           }
           if (data.client?.birth_month) {
             setClientForm((prev) => ({ ...prev, birthMonth: String(data.client.birth_month) }));
@@ -1906,10 +2061,12 @@ export default function Home() {
     const user = profile?.user || {};
     const client = profile?.client || {};
     const model = profile?.model || {};
+    const locationValue = role === "model" ? model.location || "" : client.location || "";
+    const parsedLocation = parseLocation(locationValue);
     setProfileEditForm({
       username: user.username || client.display_name || "",
       email: user.email || "",
-      location: client.location || "",
+      location: locationValue,
       birthMonth: client.birth_month ? String(client.birth_month) : "",
       birthYear: client.birth_year ? String(client.birth_year) : "",
       stageName: model.display_name || "",
@@ -1917,6 +2074,9 @@ export default function Home() {
       tags: Array.isArray(model.tags) ? model.tags.join(", ") : (model.tags || ""),
       availability: model.availability || "",
     });
+    setProfileCountryIso(parsedLocation.countryIso || "");
+    setProfileRegionName(parsedLocation.regionName || "");
+    setProfileLocationDirty(false);
     setProfileEditStatus("");
     setProfileEditOpen(true);
   };
@@ -1925,6 +2085,7 @@ export default function Home() {
     setProfileEditOpen(false);
     setProfileEditStatus("");
     setProfileEditSaving(false);
+    setProfileLocationDirty(false);
   };
 
   const saveProfileEdit = async () => {
@@ -1935,16 +2096,18 @@ export default function Home() {
     setProfileEditSaving(true);
     setProfileEditStatus("");
     try {
+      const resolvedLocation = profileLocationValue || profileEditForm.location;
       const payload = { initData };
       if (role === "client") {
         payload.username = profileEditForm.username;
         payload.email = profileEditForm.email;
-        payload.location = profileEditForm.location;
+        payload.location = resolvedLocation;
         payload.birth_month = profileEditForm.birthMonth;
         payload.birth_year = profileEditForm.birthYear;
       } else if (role === "model") {
         payload.display_name = profileEditForm.stageName;
         payload.email = profileEditForm.email;
+        payload.location = resolvedLocation;
         payload.bio = profileEditForm.bio;
         payload.availability = profileEditForm.availability;
         payload.tags = profileEditForm.tags
@@ -2078,6 +2241,58 @@ export default function Home() {
       scheduledFor: defaultSchedule,
       loading: false,
     });
+  };
+
+  const renderLocationFields = ({
+    countryIso,
+    regionName,
+    regionData,
+    onCountryChange,
+    onRegionChange,
+    idPrefix,
+  }) => {
+    const regionLabel = regionData.kind === "state" ? "State / Region" : "City / Region";
+    const regionPlaceholder = regionData.items.length
+      ? `Select ${regionData.kind === "state" ? "state/region" : "city/region"}`
+      : "Select country first";
+    return (
+      <div className="field-row">
+        <label className="field" htmlFor={`${idPrefix}-country`}>
+          Country
+          <select
+            id={`${idPrefix}-country`}
+            value={countryIso}
+            onChange={(event) => {
+              onCountryChange(event.target.value);
+              onRegionChange("");
+            }}
+          >
+            <option value="">Select country</option>
+            {countries.map((country) => (
+              <option key={`${idPrefix}-country-${country.isoCode}`} value={country.isoCode}>
+                {country.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field" htmlFor={`${idPrefix}-region`}>
+          {regionLabel}
+          <select
+            id={`${idPrefix}-region`}
+            value={regionName}
+            onChange={(event) => onRegionChange(event.target.value)}
+            disabled={!countryIso || regionData.items.length === 0}
+          >
+            <option value="">{regionPlaceholder}</option>
+            {regionData.items.map((region) => (
+              <option key={`${idPrefix}-region-${region}`} value={region}>
+                {region}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+    );
   };
 
   const openExtension = (session) => {
@@ -2477,6 +2692,14 @@ export default function Home() {
       setClientStatus("Add your email to continue.");
       return;
     }
+    if (clientStep === 1 && !clientCountryIso) {
+      setClientStatus("Select your country to continue.");
+      return;
+    }
+    if (clientStep === 1 && clientRegionData.items.length && !clientRegionName) {
+      setClientStatus("Select your city/region to continue.");
+      return;
+    }
     if (clientStep === 1 && !ageGateConfirmed) {
       openAgeGate("client");
       setClientStatus("Confirm you are 18+ to continue.");
@@ -2505,7 +2728,7 @@ export default function Home() {
             initData,
             display_name: clientForm.displayName,
             email: clientForm.email,
-            location: clientForm.location,
+            location: clientLocationValue,
             birth_month: clientForm.birthMonth,
             birth_year: clientForm.birthYear,
             disclaimer_accepted: clientForm.disclaimerAccepted,
@@ -2520,6 +2743,8 @@ export default function Home() {
               errorMsg = "That username is taken. Choose another.";
             } else if (payload?.error === "missing_display_name") {
               errorMsg = "Add a display name to continue.";
+            } else if (payload?.error === "missing_location") {
+              errorMsg = "Add your location to continue.";
             } else if (payload?.error === "disclaimer_required") {
               errorMsg = "You must accept the agreement to continue.";
             } else if (payload?.error) {
@@ -2552,6 +2777,14 @@ export default function Home() {
   const handleModelNext = () => {
     if (modelStep === 1 && !modelForm.stageName) {
       setModelStatus("Add a stage name to continue.");
+      return;
+    }
+    if (modelStep === 1 && !modelCountryIso) {
+      setModelStatus("Select your country to continue.");
+      return;
+    }
+    if (modelStep === 1 && modelRegionData.items.length && !modelRegionName) {
+      setModelStatus("Select your city/region to continue.");
       return;
     }
     if (modelStep === 1 && !modelForm.availability) {
@@ -2605,6 +2838,10 @@ export default function Home() {
       setModelStatus("Stage name, email, and verification video are required.");
       return;
     }
+    if (!modelLocationValue) {
+      setModelStatus("Location is required to submit verification.");
+      return;
+    }
     if (!modelForm.disclaimerAccepted) {
       setModelStatus("You must accept the agreement to submit verification.");
       return;
@@ -2650,6 +2887,7 @@ export default function Home() {
           initData: tgInit,
           display_name: modelForm.stageName,
           email: modelForm.email,
+          location: modelLocationValue,
           birth_month: modelForm.birthMonth,
           birth_year: modelForm.birthYear,
           bio: modelForm.bio,
@@ -2666,6 +2904,8 @@ export default function Home() {
           const payload = await res.json();
           if (payload?.detail) {
             detail = `${detail} ${payload.detail}`;
+          } else if (payload?.error === "missing_location") {
+            detail = "Add your location to continue.";
           } else if (payload?.error === "disclaimer_required") {
             detail = "You must accept the agreement to continue.";
           } else if (payload?.error) {
@@ -3079,17 +3319,20 @@ export default function Home() {
                         placeholder="you@email.com"
                       />
                     </label>
-                    <label className="field">
-                      Location
-                      <input
-                        type="text"
-                        value={clientForm.location}
-                        onChange={(event) =>
-                          setClientForm((prev) => ({ ...prev, location: event.target.value }))
-                        }
-                        placeholder="Lagos, NG"
-                      />
-                    </label>
+                    {renderLocationFields({
+                      countryIso: clientCountryIso,
+                      regionName: clientRegionName,
+                      regionData: clientRegionData,
+                      onCountryChange: (value) => {
+                        setClientCountryIso(value);
+                        setClientLocationDirty(true);
+                      },
+                      onRegionChange: (value) => {
+                        setClientRegionName(value);
+                        setClientLocationDirty(true);
+                      },
+                      idPrefix: "client-onboarding",
+                    })}
                     <div className="field-row">
                       <label className="field">
                         Birth month
@@ -4304,19 +4547,20 @@ export default function Home() {
                     placeholder="you@email.com"
                   />
                 </label>
-                <label className="field">
-                  Location (optional)
-                  <input
-                    value={profileEditForm.location}
-                    onChange={(event) =>
-                      setProfileEditForm((prev) => ({
-                        ...prev,
-                        location: event.target.value,
-                      }))
-                    }
-                    placeholder="City, Country"
-                  />
-                </label>
+                {renderLocationFields({
+                  countryIso: profileCountryIso,
+                  regionName: profileRegionName,
+                  regionData: profileRegionData,
+                  onCountryChange: (value) => {
+                    setProfileCountryIso(value);
+                    setProfileLocationDirty(true);
+                  },
+                  onRegionChange: (value) => {
+                    setProfileRegionName(value);
+                    setProfileLocationDirty(true);
+                  },
+                  idPrefix: "profile-client",
+                })}
                 <div className="field-row">
                   <label className="field">
                     Birth month
@@ -4376,6 +4620,20 @@ export default function Home() {
                     placeholder="you@email.com"
                   />
                 </label>
+                {renderLocationFields({
+                  countryIso: profileCountryIso,
+                  regionName: profileRegionName,
+                  regionData: profileRegionData,
+                  onCountryChange: (value) => {
+                    setProfileCountryIso(value);
+                    setProfileLocationDirty(true);
+                  },
+                  onRegionChange: (value) => {
+                    setProfileRegionName(value);
+                    setProfileLocationDirty(true);
+                  },
+                  idPrefix: "profile-model",
+                })}
                 <label className="field">
                   Bio
                   <textarea
@@ -5339,6 +5597,20 @@ export default function Home() {
                       placeholder="you@email.com"
                     />
                     </label>
+                    {renderLocationFields({
+                      countryIso: modelCountryIso,
+                      regionName: modelRegionName,
+                      regionData: modelRegionData,
+                      onCountryChange: (value) => {
+                        setModelCountryIso(value);
+                        setModelLocationDirty(true);
+                      },
+                      onRegionChange: (value) => {
+                        setModelRegionName(value);
+                        setModelLocationDirty(true);
+                      },
+                      idPrefix: "model-onboarding",
+                    })}
                     <label className="field">
                       Availability
                       <input

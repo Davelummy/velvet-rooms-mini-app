@@ -53,6 +53,7 @@ class ModelProfile(Base):
     verification_video_file_id = Column(String)
     verification_video_url = Column(String)
     verification_video_path = Column(String)
+    location = Column(String)
     is_online = Column(Boolean, default=False)
     last_seen_at = Column(DateTime)
     total_earnings = Column(Float, default=0.0)

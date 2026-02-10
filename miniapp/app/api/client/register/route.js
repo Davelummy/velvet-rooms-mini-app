@@ -48,6 +48,9 @@ export async function POST(request) {
   if (!email) {
     return NextResponse.json({ error: "missing_email" }, { status: 400 });
   }
+  if (!location) {
+    return NextResponse.json({ error: "missing_location" }, { status: 400 });
+  }
   const ageCheck = isAdult(birthYear, birthMonth);
   if (!ageCheck.ok) {
     return NextResponse.json({ error: "age_restricted" }, { status: 400 });

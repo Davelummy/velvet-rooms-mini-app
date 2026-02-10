@@ -1516,6 +1516,9 @@ h1 {
     width: 96px;
     height: 96px;
   }
+  .field-row {
+    grid-template-columns: 1fr;
+  }
   .onboarding-card {
     padding: 24px;
   }
