@@ -47,47 +47,74 @@ export async function GET(request) {
     [user.id]
   );
   let client = clientRes.rowCount ? clientRes.rows[0] : null;
-  if (!client || !client.access_fee_paid) {
-    const accessEscrowRes = await query(
-      `SELECT id FROM escrow_accounts
-       WHERE payer_id = $1
-         AND status = 'released'
-         AND escrow_type IN ('access_fee', 'access')
-       ORDER BY released_at DESC NULLS LAST
+  const accessEscrowRes = await query(
+    `SELECT id, status FROM escrow_accounts
+     WHERE payer_id = $1
+       AND escrow_type IN ('access_fee', 'access')
+     ORDER BY released_at DESC NULLS LAST, held_at DESC NULLS LAST
+     LIMIT 1`,
+    [user.id]
+  );
+  const accessEscrow = accessEscrowRes.rowCount ? accessEscrowRes.rows[0] : null;
+  if (!client && accessEscrow?.status !== "released") {
+    const txRes = await query(
+      `SELECT id FROM transactions
+       WHERE user_id = $1
+         AND status IN ('pending','submitted','completed')
+         AND metadata_json->>'escrow_type' = 'access_fee'
+       ORDER BY created_at DESC
        LIMIT 1`,
       [user.id]
     );
-    if (accessEscrowRes.rowCount) {
-      const escrowId = accessEscrowRes.rows[0].id;
-      if (!client) {
-        await query(
-          `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
-           VALUES ($1, TRUE, NOW(), $2)`,
-          [user.id, escrowId]
-        );
-        client = {
-          access_fee_paid: true,
-          access_granted_at: new Date().toISOString(),
-          display_name: null,
-          location: null,
-          birth_month: null,
-          birth_year: null,
-        };
-      } else {
-        await query(
-          `UPDATE client_profiles
-           SET access_fee_paid = TRUE,
-               access_granted_at = COALESCE(access_granted_at, NOW()),
-               access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
-           WHERE user_id = $2`,
-          [escrowId, user.id]
-        );
-        client = {
-          ...client,
-          access_fee_paid: true,
-          access_granted_at: client.access_granted_at || new Date().toISOString(),
-        };
-      }
+    if (txRes.rowCount || accessEscrow) {
+      await query(
+        `INSERT INTO client_profiles (user_id, access_fee_paid, access_fee_escrow_id)
+         VALUES ($1, FALSE, $2)`,
+        [user.id, accessEscrow?.id || null]
+      );
+      client = {
+        access_fee_paid: false,
+        access_granted_at: null,
+        access_fee_escrow_id: accessEscrow?.id || null,
+        display_name: null,
+        location: null,
+        birth_month: null,
+        birth_year: null,
+      };
+    }
+  }
+  if ((!client || !client.access_fee_paid) && accessEscrow?.status === "released") {
+    const escrowId = accessEscrow.id;
+    if (!client) {
+      await query(
+        `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
+         VALUES ($1, TRUE, NOW(), $2)`,
+        [user.id, escrowId]
+      );
+      client = {
+        access_fee_paid: true,
+        access_granted_at: new Date().toISOString(),
+        access_fee_escrow_id: escrowId,
+        display_name: null,
+        location: null,
+        birth_month: null,
+        birth_year: null,
+      };
+    } else {
+      await query(
+        `UPDATE client_profiles
+         SET access_fee_paid = TRUE,
+             access_granted_at = COALESCE(access_granted_at, NOW()),
+             access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
+         WHERE user_id = $2`,
+        [escrowId, user.id]
+      );
+      client = {
+        ...client,
+        access_fee_paid: true,
+        access_granted_at: client.access_granted_at || new Date().toISOString(),
+        access_fee_escrow_id: client.access_fee_escrow_id || escrowId,
+      };
     }
   }
   const followCountsRes = await query(

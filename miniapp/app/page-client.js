@@ -1456,6 +1456,11 @@ export default function Home() {
         const data = await res.json();
         setGalleryItems(data.items || []);
         setGalleryStatus("");
+        if (!clientAccessPaid) {
+          setClientAccessPaid(true);
+          setClientStep(3);
+          setClientTab("gallery");
+        }
         setGalleryLoading(false);
       } catch {
         setGalleryStatus("Gallery unavailable.");
