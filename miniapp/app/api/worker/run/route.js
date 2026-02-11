@@ -117,7 +117,7 @@ export async function POST(request) {
           [escrow.id]
         );
         if (!updated.rowCount && escrow.payer_id) {
-          await query(
+          const byUser = await query(
             `UPDATE client_profiles
              SET access_fee_paid = TRUE,
                  access_granted_at = COALESCE(access_granted_at, NOW()),
@@ -125,6 +125,16 @@ export async function POST(request) {
              WHERE user_id = $2`,
             [escrow.id, escrow.payer_id]
           );
+          if (!byUser.rowCount) {
+            await query(
+              `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
+               SELECT $2, TRUE, NOW(), $1
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM client_profiles WHERE user_id = $2
+               )`,
+              [escrow.id, escrow.payer_id]
+            );
+          }
         }
       }
 

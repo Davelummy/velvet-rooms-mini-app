@@ -27,23 +27,34 @@ async function createInviteLink() {
   if (!BOT_TOKEN || !channelId) {
     return null;
   }
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: channelId,
-        name: "Velvet Rooms Gallery",
-      }),
-    });
-    const data = await res.json();
-    if (!data?.ok) {
-      return null;
+  const payloads = [
+    {
+      chat_id: channelId,
+      name: "Velvet Rooms Gallery",
+      creates_join_request: true,
+    },
+    {
+      chat_id: channelId,
+      name: "Velvet Rooms Gallery",
+    },
+  ];
+  for (const payload of payloads) {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data?.ok) {
+        continue;
+      }
+      return data?.result?.invite_link || null;
+    } catch {
+      // try next payload
     }
-    return data?.result?.invite_link || null;
-  } catch {
-    return null;
   }
+  return null;
 }
 
 async function sendContent(buyerTelegramId, content) {

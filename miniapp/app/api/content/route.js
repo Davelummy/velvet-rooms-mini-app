@@ -209,7 +209,35 @@ export async function GET(request) {
       [userRes.rows[0].id]
     );
     if (!profileRes.rowCount || !profileRes.rows[0].access_fee_paid) {
-      return NextResponse.json({ error: "access_fee_required" }, { status: 403 });
+      const accessEscrowRes = await query(
+        `SELECT id FROM escrow_accounts
+         WHERE payer_id = $1
+           AND status = 'released'
+           AND escrow_type IN ('access_fee','access')
+         ORDER BY released_at DESC NULLS LAST
+         LIMIT 1`,
+        [userRes.rows[0].id]
+      );
+      if (!accessEscrowRes.rowCount) {
+        return NextResponse.json({ error: "access_fee_required" }, { status: 403 });
+      }
+      const escrowId = accessEscrowRes.rows[0].id;
+      if (!profileRes.rowCount) {
+        await query(
+          `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
+           VALUES ($1, TRUE, NOW(), $2)`,
+          [userRes.rows[0].id, escrowId]
+        );
+      } else {
+        await query(
+          `UPDATE client_profiles
+           SET access_fee_paid = TRUE,
+               access_granted_at = COALESCE(access_granted_at, NOW()),
+               access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
+           WHERE user_id = $2`,
+          [escrowId, userRes.rows[0].id]
+        );
+      }
     }
     res = await query(
       `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,

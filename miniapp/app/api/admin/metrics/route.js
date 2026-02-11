@@ -83,11 +83,13 @@ export async function GET(request) {
     query(
       "SELECT COUNT(*)::int AS count FROM users"
     ),
+    query("SELECT COUNT(*)::int AS count FROM client_profiles"),
     query(
-      "SELECT COUNT(*)::int AS count FROM users WHERE role = 'client'"
+      "SELECT COUNT(*)::int AS count FROM client_profiles WHERE COALESCE(access_fee_paid, FALSE) = TRUE"
     ),
-    query("SELECT COUNT(*)::int AS count FROM client_profiles WHERE access_fee_paid = TRUE"),
-    query("SELECT COUNT(*)::int AS count FROM client_profiles WHERE access_fee_paid = FALSE"),
+    query(
+      "SELECT COUNT(*)::int AS count FROM client_profiles WHERE COALESCE(access_fee_paid, FALSE) = FALSE"
+    ),
     query("SELECT COUNT(*)::int AS count FROM sessions WHERE status IN ('pending','pending_payment')"),
     query("SELECT COUNT(*)::int AS count FROM sessions WHERE status = 'active'"),
     query("SELECT COUNT(*)::int AS count FROM sessions WHERE status = 'completed'"),
