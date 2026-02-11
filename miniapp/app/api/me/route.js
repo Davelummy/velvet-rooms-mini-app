@@ -173,6 +173,14 @@ export async function GET(request) {
       }
     : null;
 
+  if (clientProfile && !clientProfile.display_name && user.username) {
+    await query(
+      "UPDATE client_profiles SET display_name = $1 WHERE user_id = $2",
+      [user.username, user.id]
+    );
+    clientProfile.display_name = user.username;
+  }
+
   return NextResponse.json({
     ok: true,
     user: {

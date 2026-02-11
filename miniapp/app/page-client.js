@@ -272,7 +272,8 @@ export default function Home() {
           "Adult-only access with creator verification, discreet profiles, and protected data practices.",
         cta: "Continue",
         visual: "trust",
-        image: "/onboarding/trust.png",
+        image:
+          "https://images.pexels.com/photos/29771553/pexels-photo-29771553.jpeg?cs=srgb&dl=pexels-pedrofurtadoo-29771553.jpg&fm=jpg",
         points: [
           "18+ only, consent-first",
           "Privacy-led profiles",
@@ -286,7 +287,8 @@ export default function Home() {
           "One-time access fee in escrow. Payments are held safely until admin approval.",
         cta: "Get Started",
         visual: "access",
-        image: "/onboarding/access.png",
+        image:
+          "https://images.pexels.com/photos/5645105/pexels-photo-5645105.jpeg?cs=srgb&dl=pexels-cottonbro-5645105.jpg&fm=jpg",
         points: [
           "Escrow-protected payments",
           "Admin approval required",
@@ -2431,6 +2433,18 @@ export default function Home() {
     if (!initData) {
       return;
     }
+    setProfile((prev) =>
+      prev
+        ? {
+            ...prev,
+            user: {
+              ...prev.user,
+              privacy_hide_email: next.hideEmail,
+              privacy_hide_location: next.hideLocation,
+            },
+          }
+        : prev
+    );
     try {
       const res = await fetch("/api/profile/privacy", {
         method: "POST",
@@ -3187,6 +3201,7 @@ export default function Home() {
           window.localStorage.setItem("vr_role", "client");
           window.localStorage.setItem("vr_role_locked", "1");
         }
+        await refreshProfile();
       } catch {
         setClientStatus("Registration failed. Please try again.");
         return;
@@ -4175,7 +4190,12 @@ export default function Home() {
                     </div>
                     <div className="line">
                       <span>Username</span>
-                      <strong>{profile?.user?.username || "-"}</strong>
+                      <strong>
+                        {profile?.client?.display_name ||
+                          profile?.user?.username ||
+                          profile?.user?.first_name ||
+                          "-"}
+                      </strong>
                     </div>
                     <div className="line">
                       <span>Email</span>

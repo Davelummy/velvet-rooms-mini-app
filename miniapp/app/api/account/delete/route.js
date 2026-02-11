@@ -35,9 +35,9 @@ export async function POST(request) {
   // Clean up client-linked records
   await query("DELETE FROM content_purchases WHERE client_id = $1", [userId]);
   await query("DELETE FROM sessions WHERE client_id = $1", [userId]);
+  await query("DELETE FROM client_profiles WHERE user_id = $1", [userId]);
   await query("DELETE FROM escrow_accounts WHERE payer_id = $1", [userId]);
   await query("DELETE FROM transactions WHERE user_id = $1", [userId]);
-  await query("DELETE FROM client_profiles WHERE user_id = $1", [userId]);
   await query("DELETE FROM users WHERE id = $1", [userId]);
 
   return NextResponse.json({ ok: true });
