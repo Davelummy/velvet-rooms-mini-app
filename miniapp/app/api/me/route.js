@@ -158,6 +158,14 @@ export async function GET(request) {
     user.status = "active";
   }
 
+  if (client && user.role !== "model" && user.role !== "admin" && user.role !== "client") {
+    await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [
+      user.id,
+    ]);
+    user.role = "client";
+    user.status = "active";
+  }
+
   const clientProfile = client
     ? {
         ...client,

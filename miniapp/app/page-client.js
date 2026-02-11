@@ -1749,6 +1749,11 @@ export default function Home() {
           headers: { "x-telegram-init": initData },
         });
         if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            setClientStatus(
+              "Unable to verify Telegram session. Check BOT_TOKEN in your server env."
+            );
+          }
           return;
         }
         const data = await res.json();
