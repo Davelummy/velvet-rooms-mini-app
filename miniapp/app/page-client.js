@@ -1813,6 +1813,8 @@ export default function Home() {
           if (data.client?.access_fee_paid) {
             setClientStep(3);
             setClientTab("gallery");
+          } else if (data.client) {
+            setClientStep(2);
           }
           if (data.client?.display_name) {
             setClientForm((prev) => ({ ...prev, displayName: data.client.display_name }));
