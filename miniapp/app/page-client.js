@@ -9,6 +9,9 @@ const DISCLAIMER_VERSION = "2026-01-31";
 const AGE_GATE_STORAGE_KEY = "vr_age_confirmed";
 const ONBOARDING_VERSION = "2026-02-10";
 const ONBOARDING_STORAGE_KEY = "vr_onboarding_seen";
+const CLIENT_DRAFT_KEY = "vr_client_draft_v1";
+const MODEL_DRAFT_KEY = "vr_model_draft_v1";
+const AVATAR_CROP_SIZE = 220;
 
 export default function Home() {
   const cleanTagLabel = (value) => {
@@ -150,6 +153,7 @@ export default function Home() {
     birthYear: "",
     disclaimerAccepted: false,
   });
+  const [clientErrors, setClientErrors] = useState({});
   const [clientCountryIso, setClientCountryIso] = useState("");
   const [clientRegionName, setClientRegionName] = useState("");
   const [clientLocationDirty, setClientLocationDirty] = useState(false);
@@ -166,6 +170,7 @@ export default function Home() {
     videoName: "",
     disclaimerAccepted: false,
   });
+  const [modelErrors, setModelErrors] = useState({});
   const [modelCountryIso, setModelCountryIso] = useState("");
   const [modelRegionName, setModelRegionName] = useState("");
   const [modelLocationDirty, setModelLocationDirty] = useState(false);
@@ -177,6 +182,8 @@ export default function Home() {
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryStatus, setGalleryStatus] = useState("");
   const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryFilter, setGalleryFilter] = useState("all");
+  const [savedGalleryIds, setSavedGalleryIds] = useState([]);
   const [galleryJoinStatus, setGalleryJoinStatus] = useState({
     joined: false,
     status: "",
@@ -199,7 +206,17 @@ export default function Home() {
     micMuted: false,
     cameraOff: false,
     peerReady: false,
+    audioOnly: false,
   });
+  const [callPreflight, setCallPreflight] = useState({
+    open: false,
+    mic: "unknown",
+    cam: "unknown",
+    audioOnly: false,
+    checking: false,
+  });
+  const [callConnectionStatus, setCallConnectionStatus] = useState("idle");
+  const [callNetworkStatus, setCallNetworkStatus] = useState("online");
   const [callMessages, setCallMessages] = useState([]);
   const [callInput, setCallInput] = useState("");
   const localVideoRef = useRef(null);
@@ -214,12 +231,24 @@ export default function Home() {
   const callRemoteIdRef = useRef(null);
   const callReadyTimerRef = useRef(null);
   const callSessionRef = useRef({ id: null, type: null });
+  const clientDraftTimerRef = useRef(null);
+  const modelDraftTimerRef = useRef(null);
   const [clientDeleteStatus, setClientDeleteStatus] = useState("");
   const [avatarState, setAvatarState] = useState({
     file: null,
     name: "",
     status: "",
     uploading: false,
+  });
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState("");
+  const [avatarImageMeta, setAvatarImageMeta] = useState({ width: 0, height: 0 });
+  const [avatarCrop, setAvatarCrop] = useState({ scale: 1, x: 0, y: 0 });
+  const avatarDragRef = useRef({
+    dragging: false,
+    startX: 0,
+    startY: 0,
+    originX: 0,
+    originY: 0,
   });
   const [followState, setFollowState] = useState({});
   const [blockState, setBlockState] = useState({});
@@ -247,6 +276,81 @@ export default function Home() {
   const [blockedListLoading, setBlockedListLoading] = useState(false);
   const [blockedListStatus, setBlockedListStatus] = useState("");
   const [profileEditOpen, setProfileEditOpen] = useState(false);
+
+  const availabilityOptions = useMemo(
+    () => [
+      { value: "", label: "Select availability" },
+      { value: "Anytime", label: "Anytime" },
+      { value: "Always available", label: "Always available" },
+      { value: "Flexible / Varies", label: "Flexible / Varies" },
+      { value: "By appointment", label: "By appointment" },
+      { value: "Custom schedule", label: "Custom schedule" },
+      { value: "Weekdays", label: "Weekdays" },
+      { value: "Weeknights", label: "Weeknights" },
+      { value: "Weekends", label: "Weekends" },
+      { value: "Mornings", label: "Mornings" },
+      { value: "Afternoons", label: "Afternoons" },
+      { value: "Evenings", label: "Evenings" },
+      { value: "Late nights", label: "Late nights" },
+      { value: "Night owl", label: "Night owl" },
+      { value: "On request", label: "On request" },
+    ],
+    []
+  );
+  const birthMonthOptions = useMemo(
+    () => [
+      { value: "", label: "Select month" },
+      { value: "1", label: "January" },
+      { value: "2", label: "February" },
+      { value: "3", label: "March" },
+      { value: "4", label: "April" },
+      { value: "5", label: "May" },
+      { value: "6", label: "June" },
+      { value: "7", label: "July" },
+      { value: "8", label: "August" },
+      { value: "9", label: "September" },
+      { value: "10", label: "October" },
+      { value: "11", label: "November" },
+      { value: "12", label: "December" },
+    ],
+    []
+  );
+  const birthYearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const years = [{ value: "", label: "Select year" }];
+    for (let year = currentYear - 18; year >= 1900; year -= 1) {
+      years.push({ value: String(year), label: String(year) });
+    }
+    return years;
+  }, []);
+  const savedGallerySet = useMemo(() => new Set(savedGalleryIds), [savedGalleryIds]);
+  const avatarMinScale = useMemo(() => {
+    if (!avatarImageMeta.width || !avatarImageMeta.height) {
+      return 1;
+    }
+    return Math.max(
+      AVATAR_CROP_SIZE / avatarImageMeta.width,
+      AVATAR_CROP_SIZE / avatarImageMeta.height
+    );
+  }, [avatarImageMeta]);
+  const callStatusChip = useMemo(() => {
+    if (callNetworkStatus === "offline") {
+      return { label: "Offline", tone: "danger" };
+    }
+    if (callConnectionStatus === "reconnecting") {
+      return { label: "Reconnecting", tone: "warn" };
+    }
+    if (callConnectionStatus === "failed") {
+      return { label: "Connection issue", tone: "danger" };
+    }
+    if (callConnectionStatus === "connected") {
+      return { label: "Connected", tone: "success" };
+    }
+    if (callState.connecting) {
+      return { label: "Connecting", tone: "warn" };
+    }
+    return { label: "Ready", tone: "neutral" };
+  }, [callNetworkStatus, callConnectionStatus, callState.connecting]);
 
   const onboardingSlides = useMemo(
     () => [
@@ -301,6 +405,7 @@ export default function Home() {
   const onboardingCurrent = onboardingSlides[Math.min(onboardingStep, onboardingTotal - 1)];
   const [profileEditStatus, setProfileEditStatus] = useState("");
   const [profileEditSaving, setProfileEditSaving] = useState(false);
+  const [profileSavedStatus, setProfileSavedStatus] = useState("");
   const [profileEditForm, setProfileEditForm] = useState({
     username: "",
     email: "",
@@ -351,6 +456,159 @@ export default function Home() {
   });
   const [modelEarnings, setModelEarnings] = useState(null);
   const [modelEarningsStatus, setModelEarningsStatus] = useState("");
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const rawClient = window.localStorage.getItem(CLIENT_DRAFT_KEY);
+    if (rawClient) {
+      try {
+        const draft = JSON.parse(rawClient);
+        if (draft?.form) {
+          setClientForm((prev) => ({ ...prev, ...draft.form }));
+        }
+        if (draft?.countryIso) {
+          setClientCountryIso(draft.countryIso);
+        }
+        if (draft?.regionName) {
+          setClientRegionName(draft.regionName);
+        }
+        if (draft?.step) {
+          setClientStep(draft.step);
+        }
+      } catch {
+        // ignore draft parse errors
+      }
+    }
+    const rawModel = window.localStorage.getItem(MODEL_DRAFT_KEY);
+    if (rawModel) {
+      try {
+        const draft = JSON.parse(rawModel);
+        if (draft?.form) {
+          setModelForm((prev) => ({ ...prev, ...draft.form }));
+        }
+        if (draft?.countryIso) {
+          setModelCountryIso(draft.countryIso);
+        }
+        if (draft?.regionName) {
+          setModelRegionName(draft.regionName);
+        }
+        if (draft?.step) {
+          setModelStep(draft.step);
+        }
+      } catch {
+        // ignore draft parse errors
+      }
+    }
+    const rawSaved = window.localStorage.getItem("vr_saved_gallery");
+    if (rawSaved) {
+      try {
+        const parsed = JSON.parse(rawSaved);
+        if (Array.isArray(parsed)) {
+          setSavedGalleryIds(parsed);
+        }
+      } catch {
+        // ignore parse errors
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (clientAccessPaid || role !== "client") {
+      return;
+    }
+    if (clientDraftTimerRef.current) {
+      clearTimeout(clientDraftTimerRef.current);
+    }
+    clientDraftTimerRef.current = setTimeout(() => {
+      window.localStorage.setItem(
+        CLIENT_DRAFT_KEY,
+        JSON.stringify({
+          form: clientForm,
+          countryIso: clientCountryIso,
+          regionName: clientRegionName,
+          step: clientStep,
+        })
+      );
+    }, 400);
+    return () => {
+      if (clientDraftTimerRef.current) {
+        clearTimeout(clientDraftTimerRef.current);
+      }
+    };
+  }, [clientForm, clientCountryIso, clientRegionName, clientStep, clientAccessPaid, role]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (modelApproved || role !== "model") {
+      return;
+    }
+    if (modelDraftTimerRef.current) {
+      clearTimeout(modelDraftTimerRef.current);
+    }
+    modelDraftTimerRef.current = setTimeout(() => {
+      const form = { ...modelForm, videoFile: null };
+      window.localStorage.setItem(
+        MODEL_DRAFT_KEY,
+        JSON.stringify({
+          form,
+          countryIso: modelCountryIso,
+          regionName: modelRegionName,
+          step: modelStep,
+        })
+      );
+    }, 400);
+    return () => {
+      if (modelDraftTimerRef.current) {
+        clearTimeout(modelDraftTimerRef.current);
+      }
+    };
+  }, [modelForm, modelCountryIso, modelRegionName, modelStep, modelApproved, role]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem("vr_saved_gallery", JSON.stringify(savedGalleryIds));
+  }, [savedGalleryIds]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (clientAccessPaid) {
+      window.localStorage.removeItem(CLIENT_DRAFT_KEY);
+    }
+  }, [clientAccessPaid]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (modelApproved) {
+      window.localStorage.removeItem(MODEL_DRAFT_KEY);
+    }
+  }, [modelApproved]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const handleOnline = () => setCallNetworkStatus("online");
+    const handleOffline = () => setCallNetworkStatus("offline");
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    setCallNetworkStatus(navigator.onLine ? "online" : "offline");
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
   const modelEngagementTotals = useMemo(() => {
     if (!Array.isArray(modelItems) || modelItems.length === 0) {
       return { likes: 0, views: 0 };
@@ -432,6 +690,10 @@ export default function Home() {
   );
   const blockedIds = profile?.blocked_ids || [];
   const isBlocked = (targetId) => blockedIds.includes(targetId);
+  const showVideoTiles = callState.sessionType === "video" && !callState.audioOnly;
+  const showAudioTiles =
+    callState.sessionType === "voice" ||
+    (callState.sessionType === "video" && callState.audioOnly);
 
   const profileChecklist = useMemo(() => {
     if (!profile?.user || !role) {
@@ -464,6 +726,16 @@ export default function Home() {
     const percent = total ? Math.round((completed / total) * 100) : 0;
     return { percent, total, completed, missing };
   }, [profile, role]);
+
+  const visibleGalleryItems = useMemo(() => {
+    if (galleryFilter === "liked") {
+      return galleryItems.filter((item) => item.has_liked);
+    }
+    if (galleryFilter === "saved") {
+      return galleryItems.filter((item) => savedGallerySet.has(item.id));
+    }
+    return galleryItems;
+  }, [galleryFilter, galleryItems, savedGallerySet]);
 
   const filteredFollowers = followers.filter((item) => {
     if (followersFilter === "online") {
@@ -713,7 +985,16 @@ export default function Home() {
         micMuted: false,
         cameraOff: false,
         peerReady: false,
+        audioOnly: false,
       }));
+      setCallPreflight({
+        open: false,
+        mic: "unknown",
+        cam: "unknown",
+        audioOnly: false,
+        checking: false,
+      });
+      setCallConnectionStatus("idle");
     }
   };
 
@@ -777,7 +1058,45 @@ export default function Home() {
     }
   };
 
-  const startCall = async (sessionId, sessionType) => {
+  const checkCallDevices = async (sessionType, audioOnly) => {
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      setCallPreflight((prev) => ({
+        ...prev,
+        mic: "blocked",
+        cam: sessionType === "video" && !audioOnly ? "blocked" : "na",
+        checking: false,
+      }));
+      return;
+    }
+    setCallPreflight((prev) => ({ ...prev, checking: true }));
+    try {
+      const constraints = {
+        audio: true,
+        video: sessionType === "video" && !audioOnly,
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const micOk = stream.getAudioTracks().length > 0;
+      const camOk =
+        sessionType === "video" && !audioOnly ? stream.getVideoTracks().length > 0 : true;
+      stream.getTracks().forEach((track) => track.stop());
+      setCallPreflight((prev) => ({
+        ...prev,
+        mic: micOk ? "ok" : "blocked",
+        cam: sessionType === "video" && !audioOnly ? (camOk ? "ok" : "blocked") : "na",
+        checking: false,
+      }));
+    } catch {
+      setCallPreflight((prev) => ({
+        ...prev,
+        mic: "blocked",
+        cam: sessionType === "video" && !audioOnly ? "blocked" : "na",
+        checking: false,
+      }));
+    }
+  };
+
+  const startCall = async (sessionId, sessionType, options = {}) => {
+    const audioOnly = Boolean(options.audioOnly);
     if (!supabaseClient) {
       setCallState((prev) => ({
         ...prev,
@@ -805,7 +1124,14 @@ export default function Home() {
     }
     callUserIdRef.current = userId;
     callSessionRef.current = { id: sessionId, type: sessionType };
-    setCallState((prev) => ({ ...prev, connecting: true, status: "Connecting…" }));
+    setCallState((prev) => ({
+      ...prev,
+      connecting: true,
+      status: "Connecting…",
+      audioOnly,
+      cameraOff: audioOnly ? true : prev.cameraOff,
+    }));
+    setCallConnectionStatus("connecting");
 
     const channel = supabaseClient.channel(`vr-call-${sessionId}`, {
       config: { broadcast: { self: false } },
@@ -845,6 +1171,7 @@ export default function Home() {
             connecting: false,
             status: "Chat ready.",
           }));
+          setCallConnectionStatus("connected");
         }
       }
     });
@@ -893,6 +1220,18 @@ export default function Home() {
         sendCallSignal({ type: "ice", candidate: event.candidate }).catch(() => null);
       }
     };
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      if (state === "connected" || state === "completed") {
+        setCallConnectionStatus("connected");
+      } else if (state === "checking") {
+        setCallConnectionStatus("connecting");
+      } else if (state === "disconnected") {
+        setCallConnectionStatus("reconnecting");
+      } else if (state === "failed") {
+        setCallConnectionStatus("failed");
+      }
+    };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
         setCallState((prev) => ({
@@ -900,6 +1239,7 @@ export default function Home() {
           connecting: false,
           status: "Connected.",
         }));
+        setCallConnectionStatus("connected");
       }
       if (pc.connectionState === "failed") {
         setCallState((prev) => ({
@@ -907,6 +1247,7 @@ export default function Home() {
           connecting: false,
           status: "Connection failed. Try again.",
         }));
+        setCallConnectionStatus("failed");
       }
       if (pc.connectionState === "disconnected") {
         setCallState((prev) => ({
@@ -914,13 +1255,14 @@ export default function Home() {
           connecting: false,
           status: "Disconnected.",
         }));
+        setCallConnectionStatus("reconnecting");
       }
     };
 
     try {
       const constraints = {
         audio: true,
-        video: sessionType === "video",
+        video: sessionType === "video" && !audioOnly,
       };
       const localStream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = localStream;
@@ -952,14 +1294,37 @@ export default function Home() {
       sessionId,
       sessionType: resolvedType,
       status: "",
-      connecting: true,
+      connecting: resolvedType === "chat",
       micMuted: false,
       cameraOff: false,
       peerReady: false,
+      audioOnly: false,
     });
     setCallMessages([]);
     setCallInput("");
-    await startCall(sessionId, resolvedType);
+    if (resolvedType === "chat") {
+      await startCall(sessionId, resolvedType);
+      return;
+    }
+    setCallPreflight({
+      open: true,
+      mic: "unknown",
+      cam: resolvedType === "video" ? "unknown" : "na",
+      audioOnly: false,
+      checking: false,
+    });
+    setCallConnectionStatus("idle");
+  };
+
+  const beginCallFromPreflight = async () => {
+    if (!callState.sessionId || !callState.sessionType) {
+      return;
+    }
+    setCallPreflight((prev) => ({ ...prev, open: false }));
+    setCallState((prev) => ({ ...prev, connecting: true, status: "Connecting…" }));
+    await startCall(callState.sessionId, callState.sessionType, {
+      audioOnly: callPreflight.audioOnly,
+    });
   };
 
   const toggleMute = () => {
@@ -1311,6 +1676,29 @@ export default function Home() {
       prev.location === profileLocationValue ? prev : { ...prev, location: profileLocationValue }
     );
   }, [profileLocationValue, profileLocationDirty, profileEditForm.location]);
+
+  useEffect(() => {
+    if (!avatarState.file) {
+      setAvatarPreviewUrl("");
+      setAvatarImageMeta({ width: 0, height: 0 });
+      setAvatarCrop({ scale: 1, x: 0, y: 0 });
+      return;
+    }
+    const url = URL.createObjectURL(avatarState.file);
+    setAvatarPreviewUrl(url);
+    const img = new Image();
+    img.onload = () => {
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
+      setAvatarImageMeta({ width, height });
+      const scale = Math.max(AVATAR_CROP_SIZE / width, AVATAR_CROP_SIZE / height);
+      const x = (AVATAR_CROP_SIZE - width * scale) / 2;
+      const y = (AVATAR_CROP_SIZE - height * scale) / 2;
+      setAvatarCrop({ scale, x, y });
+    };
+    img.src = url;
+    return () => URL.revokeObjectURL(url);
+  }, [avatarState.file]);
 
   useEffect(() => {
     return () => {
@@ -2043,6 +2431,105 @@ export default function Home() {
     }
   };
 
+  const clampAvatarCrop = (next) => {
+    if (!avatarImageMeta.width || !avatarImageMeta.height) {
+      return next;
+    }
+    const scaledW = avatarImageMeta.width * next.scale;
+    const scaledH = avatarImageMeta.height * next.scale;
+    const minX = AVATAR_CROP_SIZE - scaledW;
+    const minY = AVATAR_CROP_SIZE - scaledH;
+    return {
+      ...next,
+      x: Math.min(0, Math.max(minX, next.x)),
+      y: Math.min(0, Math.max(minY, next.y)),
+    };
+  };
+
+  const handleAvatarDragStart = (event) => {
+    if (!avatarPreviewUrl) {
+      return;
+    }
+    event.preventDefault();
+    avatarDragRef.current.dragging = true;
+    avatarDragRef.current.startX = event.clientX;
+    avatarDragRef.current.startY = event.clientY;
+    avatarDragRef.current.originX = avatarCrop.x;
+    avatarDragRef.current.originY = avatarCrop.y;
+  };
+
+  const handleAvatarDragMove = (event) => {
+    if (!avatarDragRef.current.dragging) {
+      return;
+    }
+    event.preventDefault();
+    const deltaX = event.clientX - avatarDragRef.current.startX;
+    const deltaY = event.clientY - avatarDragRef.current.startY;
+    setAvatarCrop((prev) =>
+      clampAvatarCrop({
+        ...prev,
+        x: avatarDragRef.current.originX + deltaX,
+        y: avatarDragRef.current.originY + deltaY,
+      })
+    );
+  };
+
+  const handleAvatarDragEnd = () => {
+    avatarDragRef.current.dragging = false;
+  };
+
+  const handleAvatarZoomChange = (value) => {
+    const nextScale = Number(value);
+    setAvatarCrop((prev) => {
+      if (!avatarImageMeta.width || !avatarImageMeta.height) {
+        return prev;
+      }
+      const centerX = prev.x + (avatarImageMeta.width * prev.scale) / 2;
+      const centerY = prev.y + (avatarImageMeta.height * prev.scale) / 2;
+      const nextX = centerX - (avatarImageMeta.width * nextScale) / 2;
+      const nextY = centerY - (avatarImageMeta.height * nextScale) / 2;
+      return clampAvatarCrop({ scale: nextScale, x: nextX, y: nextY });
+    });
+  };
+
+  const createCroppedAvatarFile = async () => {
+    if (!avatarPreviewUrl || !avatarImageMeta.width || !avatarImageMeta.height) {
+      return avatarState.file;
+    }
+    const img = new Image();
+    img.src = avatarPreviewUrl;
+    await new Promise((resolve) => {
+      img.onload = resolve;
+      img.onerror = resolve;
+    });
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return avatarState.file;
+    }
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const scaleFactor = canvas.width / AVATAR_CROP_SIZE;
+    ctx.drawImage(
+      img,
+      avatarCrop.x * scaleFactor,
+      avatarCrop.y * scaleFactor,
+      avatarImageMeta.width * avatarCrop.scale * scaleFactor,
+      avatarImageMeta.height * avatarCrop.scale * scaleFactor
+    );
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/png", 0.92)
+    );
+    if (!blob) {
+      return avatarState.file;
+    }
+    return new File([blob], avatarState.file?.name || "avatar.png", {
+      type: "image/png",
+    });
+  };
+
   const deleteClientAccount = async () => {
     if (!initData) {
       setClientDeleteStatus("Open this mini app inside Telegram to continue.");
@@ -2095,12 +2582,13 @@ export default function Home() {
     }
     setAvatarState((prev) => ({ ...prev, uploading: true, status: "Uploading…" }));
     try {
+      const fileToUpload = await createCroppedAvatarFile();
       const uploadInit = await fetch("/api/profile/avatar/upload-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           initData,
-          filename: avatarState.file.name,
+          filename: fileToUpload?.name || avatarState.file.name,
         }),
       });
       if (!uploadInit.ok) {
@@ -2120,7 +2608,10 @@ export default function Home() {
         }));
         return;
       }
-      const uploadRes = await uploadToSignedUrl(payload.signed_url, avatarState.file);
+      const uploadRes = await uploadToSignedUrl(
+        payload.signed_url,
+        fileToUpload || avatarState.file
+      );
       if (!uploadRes || !uploadRes.ok) {
         const status = uploadRes?.status || "network";
         setAvatarState((prev) => ({
@@ -2259,6 +2750,18 @@ export default function Home() {
     } catch {
       // ignore
     }
+  };
+
+  const toggleSaved = (contentId) => {
+    if (!contentId) {
+      return;
+    }
+    setSavedGalleryIds((prev) => {
+      if (prev.includes(contentId)) {
+        return prev.filter((id) => id !== contentId);
+      }
+      return [...prev, contentId];
+    });
   };
 
   const performBlockToggle = async (targetId) => {
@@ -2574,8 +3077,10 @@ export default function Home() {
       }
       await refreshProfile();
       setProfileEditSaving(false);
-      setProfileEditStatus("Saved ✅");
-      setTimeout(() => closeProfileEdit(), 600);
+      setProfileEditStatus("Saved ✓");
+      setProfileSavedStatus("Profile saved ✓");
+      setTimeout(() => setProfileSavedStatus(""), 2500);
+      setTimeout(() => closeProfileEdit(), 700);
     } catch {
       setProfileEditSaving(false);
       setProfileEditStatus("Save failed. Try again.");
@@ -2612,6 +3117,8 @@ export default function Home() {
       return;
     }
     setAgeGateConfirmed(true);
+    setClientErrors((prev) => ({ ...prev, ageGate: "" }));
+    setModelErrors((prev) => ({ ...prev, ageGate: "" }));
     if (typeof window !== "undefined") {
       window.localStorage.setItem(AGE_GATE_STORAGE_KEY, "1");
     }
@@ -3121,38 +3628,60 @@ export default function Home() {
     }
   };
 
+  const updateClientField = (field, value) => {
+    setClientForm((prev) => ({ ...prev, [field]: value }));
+    setClientErrors((prev) => ({ ...prev, [field]: "" }));
+  };
+
+  const updateModelField = (field, value) => {
+    setModelForm((prev) => ({ ...prev, [field]: value }));
+    setModelErrors((prev) => ({ ...prev, [field]: "" }));
+  };
+
   const handleClientNext = async () => {
-    if (clientStep === 1 && !clientForm.displayName) {
-      setClientStatus("Add a display name to continue.");
-      return;
-    }
-    if (clientStep === 1 && !clientForm.email) {
-      setClientStatus("Add your email to continue.");
-      return;
-    }
-    if (clientStep === 1 && !clientCountryIso) {
-      setClientStatus("Select your country to continue.");
-      return;
-    }
-    if (clientStep === 1 && clientRegionData.items.length && !clientRegionName) {
-      setClientStatus("Select your city/region to continue.");
-      return;
-    }
-    if (clientStep === 1 && !ageGateConfirmed) {
-      openAgeGate("client");
-      setClientStatus("Confirm you are 18+ to continue.");
-      return;
-    }
-    if (clientStep === 1 && !clientForm.disclaimerAccepted) {
-      setClientStatus("You must accept the agreement to continue.");
-      return;
-    }
     if (clientStep === 1) {
+      const errors = {};
+      if (!clientForm.displayName) {
+        errors.displayName = "Display name is required.";
+      }
+      if (!clientForm.email) {
+        errors.email = "Email is required.";
+      }
+      if (!clientCountryIso) {
+        errors.country = "Select your country.";
+      }
+      if (clientRegionData.items.length && !clientRegionName) {
+        errors.region = "Select your city/region.";
+      }
+      if (!clientForm.birthMonth) {
+        errors.birthMonth = "Select your birth month.";
+      }
+      if (!clientForm.birthYear) {
+        errors.birthYear = "Select your birth year.";
+      }
+      if (!ageGateConfirmed) {
+        errors.ageGate = "Confirm you are 18+ to continue.";
+      }
+      if (!clientForm.disclaimerAccepted) {
+        errors.disclaimer = "You must accept the agreement.";
+      }
+      if (Object.keys(errors).length > 0) {
+        setClientErrors(errors);
+        if (!ageGateConfirmed) {
+          openAgeGate("client");
+        }
+        setClientStatus("Please fix the highlighted fields.");
+        return;
+      }
       const ageCheck = isAdult(clientForm.birthYear, clientForm.birthMonth);
       if (!ageCheck.ok) {
+        setClientErrors({ birthYear: ageCheck.message });
         setClientStatus(ageCheck.message);
         return;
       }
+      setClientErrors({});
+    }
+    if (clientStep === 1) {
       if (!initData) {
         setClientStatus("Open this mini app inside Telegram to continue.");
         return;
@@ -3214,45 +3743,53 @@ export default function Home() {
   };
 
   const handleModelNext = () => {
-    if (modelStep === 1 && !modelForm.stageName) {
-      setModelStatus("Add a stage name to continue.");
-      return;
-    }
-    if (modelStep === 1 && !modelCountryIso) {
-      setModelStatus("Select your country to continue.");
-      return;
-    }
-    if (modelStep === 1 && modelRegionData.items.length && !modelRegionName) {
-      setModelStatus("Select your city/region to continue.");
-      return;
-    }
-    if (modelStep === 1 && !modelForm.availability) {
-      setModelStatus("Add your availability to continue.");
-      return;
-    }
-    if (modelStep === 1 && !modelForm.bio) {
-      setModelStatus("Add a short bio to continue.");
-      return;
-    }
-    if (modelStep === 1 && !modelForm.tags) {
-      setModelStatus("Add at least one tag to continue.");
-      return;
-    }
-    if (modelStep === 1 && !ageGateConfirmed) {
-      openAgeGate("model");
-      setModelStatus("Confirm you are 18+ to continue.");
-      return;
-    }
-    if (modelStep === 1 && !modelForm.disclaimerAccepted) {
-      setModelStatus("You must accept the agreement to continue.");
-      return;
-    }
     if (modelStep === 1) {
+      const errors = {};
+      if (!modelForm.stageName) {
+        errors.stageName = "Stage name is required.";
+      }
+      if (!modelCountryIso) {
+        errors.country = "Select your country.";
+      }
+      if (modelRegionData.items.length && !modelRegionName) {
+        errors.region = "Select your city/region.";
+      }
+      if (!modelForm.availability) {
+        errors.availability = "Select your availability.";
+      }
+      if (!modelForm.birthMonth) {
+        errors.birthMonth = "Select your birth month.";
+      }
+      if (!modelForm.birthYear) {
+        errors.birthYear = "Select your birth year.";
+      }
+      if (!modelForm.bio) {
+        errors.bio = "Short bio is required.";
+      }
+      if (!modelForm.tags) {
+        errors.tags = "Add at least one tag.";
+      }
+      if (!ageGateConfirmed) {
+        errors.ageGate = "Confirm you are 18+ to continue.";
+      }
+      if (!modelForm.disclaimerAccepted) {
+        errors.disclaimer = "You must accept the agreement.";
+      }
+      if (Object.keys(errors).length > 0) {
+        setModelErrors(errors);
+        if (!ageGateConfirmed) {
+          openAgeGate("model");
+        }
+        setModelStatus("Please fix the highlighted fields.");
+        return;
+      }
       const ageCheck = isAdult(modelForm.birthYear, modelForm.birthMonth);
       if (!ageCheck.ok) {
+        setModelErrors({ birthYear: ageCheck.message });
         setModelStatus(ageCheck.message);
         return;
       }
+      setModelErrors({});
     }
     if (modelStep === 2 && !modelForm.videoName) {
       setModelStatus("Upload a short verification video to continue.");
@@ -3718,6 +4255,25 @@ export default function Home() {
             )}
           </header>
           <div className="flow-body">
+            {!clientAccessPaid && (
+              <div className="step-header">
+                <div>
+                  <p className="eyebrow">Step {clientStep} of 3</p>
+                  <strong>
+                    {clientStep === 1
+                      ? "Profile details"
+                      : clientStep === 2
+                      ? "Access fee"
+                      : "Gallery"}
+                  </strong>
+                </div>
+                <div className="stepper">
+                  <span className={clientStep >= 1 ? "step active" : "step"}>1</span>
+                  <span className={clientStep >= 2 ? "step active" : "step"}>2</span>
+                  <span className={clientStep >= 3 ? "step active" : "step"}>3</span>
+                </div>
+              </div>
+            )}
             {profile?.user && (
               <div className="flow-card">
                 <h3>Welcome, {profile.user.username || profile.user.public_id || "Client"}</h3>
@@ -3741,22 +4297,25 @@ export default function Home() {
                       <input
                         type="text"
                         value={clientForm.displayName}
-                        onChange={(event) =>
-                          setClientForm((prev) => ({ ...prev, displayName: event.target.value }))
-                        }
+                        onChange={(event) => updateClientField("displayName", event.target.value)}
                         placeholder="VelvetClient"
                       />
+                      {clientErrors.displayName && (
+                        <p className="field-error">{clientErrors.displayName}</p>
+                      )}
                     </label>
                     <label className="field">
                       Email
                       <input
                         type="email"
                         value={clientForm.email}
-                        onChange={(event) =>
-                          setClientForm((prev) => ({ ...prev, email: event.target.value }))
-                        }
+                        onChange={(event) => updateClientField("email", event.target.value)}
                         placeholder="you@email.com"
                       />
+                      <p className="field-hint">Why we ask: receipts and account recovery.</p>
+                      {clientErrors.email && (
+                        <p className="field-error">{clientErrors.email}</p>
+                      )}
                     </label>
                     {renderLocationFields({
                       countryIso: clientCountryIso,
@@ -3765,42 +4324,68 @@ export default function Home() {
                       onCountryChange: (value) => {
                         setClientCountryIso(value);
                         setClientLocationDirty(true);
+                        setClientErrors((prev) => ({ ...prev, country: "", region: "" }));
                       },
                       onRegionChange: (value) => {
                         setClientRegionName(value);
                         setClientLocationDirty(true);
+                        setClientErrors((prev) => ({ ...prev, region: "" }));
                       },
                       idPrefix: "client-onboarding",
                     })}
+                    <p className="field-hint">
+                      Why we ask: to localize discovery and enforce regional rules.
+                    </p>
+                    {clientErrors.country && (
+                      <p className="field-error">{clientErrors.country}</p>
+                    )}
+                    {clientErrors.region && (
+                      <p className="field-error">{clientErrors.region}</p>
+                    )}
                     <div className="field-row">
                       <label className="field">
                         Birth month
-                        <input
-                          type="number"
-                          min="1"
-                          max="12"
+                        <select
                           value={clientForm.birthMonth}
                           onChange={(event) =>
-                            setClientForm((prev) => ({ ...prev, birthMonth: event.target.value }))
+                            updateClientField("birthMonth", event.target.value)
                           }
-                          placeholder="MM"
-                        />
+                        >
+                          {birthMonthOptions.map((option) => (
+                            <option key={option.value || "month"} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {clientErrors.birthMonth && (
+                          <p className="field-error">{clientErrors.birthMonth}</p>
+                        )}
                       </label>
                       <label className="field">
                         Birth year
-                        <input
-                          type="number"
-                          min="1900"
-                          max="2100"
+                        <select
                           value={clientForm.birthYear}
                           onChange={(event) =>
-                            setClientForm((prev) => ({ ...prev, birthYear: event.target.value }))
+                            updateClientField("birthYear", event.target.value)
                           }
-                          placeholder="YYYY"
-                        />
+                        >
+                          {birthYearOptions.map((option) => (
+                            <option key={option.value || "year"} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {clientErrors.birthYear && (
+                          <p className="field-error">{clientErrors.birthYear}</p>
+                        )}
                       </label>
                     </div>
-                    <p className="helper">18+ only. Your birth date stays private.</p>
+                    <p className="field-hint">
+                      Why we ask: to verify you are 18+. This stays private.
+                    </p>
+                    {clientErrors.ageGate && (
+                      <p className="field-error">{clientErrors.ageGate}</p>
+                    )}
                     <div className="notice-card agreement-box">
                       <h4>Compliance & Data Use Agreement</h4>
                       <p className="helper">
@@ -3818,16 +4403,16 @@ export default function Home() {
                           type="checkbox"
                           checked={clientForm.disclaimerAccepted}
                           onChange={(event) =>
-                            setClientForm((prev) => ({
-                              ...prev,
-                              disclaimerAccepted: event.target.checked,
-                            }))
+                            updateClientField("disclaimerAccepted", event.target.checked)
                           }
                         />
                         <span>
                           I agree to the Compliance & Data Use Agreement (v{DISCLAIMER_VERSION}).
                         </span>
                       </label>
+                      {clientErrors.disclaimer && (
+                        <p className="field-error">{clientErrors.disclaimer}</p>
+                      )}
                     </div>
                     {!roleLocked && (
                       <button type="button" className="cta ghost" onClick={goToRolePicker}>
@@ -3838,12 +4423,12 @@ export default function Home() {
                 )}
                 {clientStep === 2 && (
                   <div className="flow-card">
-                    <h3>Access Fee (Escrow)</h3>
+                    <h3>Access Fee</h3>
                     <p>
                         Pay once to unlock verified creator content. Admin approval unlocks access.
                     </p>
                     <div className="price-tag">
-                      ₦5,000 <span>Escrow Held</span>
+                      ₦5,000 <span>Admin approval</span>
                     </div>
                     <label className="field">
                       Payment method
@@ -3943,6 +4528,29 @@ export default function Home() {
                         Refresh gallery
                       </button>
                     </div>
+                    <div className="gallery-filters">
+                      <button
+                        type="button"
+                        className={`pill ${galleryFilter === "all" ? "active" : ""}`}
+                        onClick={() => setGalleryFilter("all")}
+                      >
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        className={`pill ${galleryFilter === "liked" ? "active" : ""}`}
+                        onClick={() => setGalleryFilter("liked")}
+                      >
+                        Liked
+                      </button>
+                      <button
+                        type="button"
+                        className={`pill ${galleryFilter === "saved" ? "active" : ""}`}
+                        onClick={() => setGalleryFilter("saved")}
+                      >
+                        Saved
+                      </button>
+                    </div>
                     {galleryJoinStatus.checked && !galleryJoinStatus.joined && (
                       <div className="notice-card">
                         <p className="helper">
@@ -3973,7 +4581,24 @@ export default function Home() {
                       <p className="helper">Gallery channel connected ✅</p>
                     )}
                     {galleryJoinError && <p className="helper error">{galleryJoinError}</p>}
-                    {galleryLoading && <p className="helper">Loading gallery…</p>}
+                    {galleryLoading && (
+                      <div className="gallery-grid">
+                        {Array.from({ length: 4 }).map((_, index) => (
+                          <div key={`gallery-skeleton-${index}`} className="gallery-card skeleton">
+                            <div className="gallery-media skeleton-block" />
+                            <div className="gallery-body">
+                              <div className="skeleton-line wide" />
+                              <div className="skeleton-line" />
+                              <div className="skeleton-line short" />
+                              <div className="skeleton-row">
+                                <div className="skeleton-pill" />
+                                <div className="skeleton-pill" />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {galleryStatus && <p className="helper error">{galleryStatus}</p>}
                     {galleryStatus && (
                       <button
@@ -3984,12 +4609,16 @@ export default function Home() {
                         Refresh access
                       </button>
                     )}
-                    {!galleryStatus && !galleryLoading && galleryItems.length === 0 && (
-                      <p className="helper">No approved teasers yet.</p>
+                    {!galleryStatus && !galleryLoading && visibleGalleryItems.length === 0 && (
+                      <p className="helper">
+                        {galleryItems.length === 0
+                          ? "No approved teasers yet."
+                          : "No items match this filter yet."}
+                      </p>
                     )}
-                    {!galleryStatus && !galleryLoading && galleryItems.length > 0 && (
+                    {!galleryStatus && !galleryLoading && visibleGalleryItems.length > 0 && (
                       <div className="gallery-grid" id="client-gallery">
-                        {galleryItems.map((item) => (
+                        {visibleGalleryItems.map((item) => (
                           <div key={`gallery-${item.id}`} className="gallery-card">
                             <div className="gallery-media">
                               <div className="media-fallback">Tap to view</div>
@@ -4005,7 +4634,7 @@ export default function Home() {
                                     <span className="pill success">Verified</span>
                                   )}
                                   {item.is_spotlight && (
-                                    <span className="pill spotlight">Spotlight</span>
+                                    <span className="pill featured">Featured</span>
                                   )}
                                   {item.is_new_from_followed && (
                                     <span className="pill">New</span>
@@ -4036,6 +4665,15 @@ export default function Home() {
                                   onClick={() => toggleLike(item.id)}
                                 >
                                   {Number(item.likes_count || 0)} likes
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`pill ghost ${
+                                    savedGallerySet.has(item.id) ? "active" : ""
+                                  }`}
+                                  onClick={() => toggleSaved(item.id)}
+                                >
+                                  {savedGallerySet.has(item.id) ? "Saved" : "Save"}
                                 </button>
                               </div>
                               <div className="gallery-actions">
@@ -4132,6 +4770,9 @@ export default function Home() {
                 {clientTab === "profile" && (
                   <div className="flow-card">
                     <h3>Your Profile</h3>
+                    {profileSavedStatus && (
+                      <p className="helper success">{profileSavedStatus}</p>
+                    )}
                     <div className="profile-progress">
                       <div className="line">
                         <span>Profile completion</span>
@@ -4188,8 +4829,53 @@ export default function Home() {
                         {avatarState.status && <p className="helper">{avatarState.status}</p>}
                       </div>
                     </div>
+                    {avatarPreviewUrl && (
+                      <div className="avatar-cropper">
+                        <div
+                          className="avatar-crop-frame"
+                          onPointerDown={handleAvatarDragStart}
+                          onPointerMove={handleAvatarDragMove}
+                          onPointerUp={handleAvatarDragEnd}
+                          onPointerLeave={handleAvatarDragEnd}
+                          onPointerCancel={handleAvatarDragEnd}
+                        >
+                          <img
+                            src={avatarPreviewUrl}
+                            alt="Crop preview"
+                            style={{
+                              transform: `translate(${avatarCrop.x}px, ${avatarCrop.y}px) scale(${avatarCrop.scale})`,
+                            }}
+                          />
+                        </div>
+                        <label className="field">
+                          Zoom
+                          <input
+                            type="range"
+                            min={avatarMinScale}
+                            max={avatarMinScale * 3}
+                            step="0.01"
+                            value={avatarCrop.scale}
+                            onChange={(event) => handleAvatarZoomChange(event.target.value)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="cta ghost"
+                          onClick={() =>
+                            setAvatarCrop({
+                              scale: avatarMinScale,
+                              x: (AVATAR_CROP_SIZE - avatarImageMeta.width * avatarMinScale) / 2,
+                              y: (AVATAR_CROP_SIZE - avatarImageMeta.height * avatarMinScale) / 2,
+                            })
+                          }
+                          disabled={!avatarImageMeta.width}
+                        >
+                          Reset crop
+                        </button>
+                      </div>
+                    )}
                     <div className="line">
-                      <span>Username</span>
+                      <span>Display name</span>
                       <strong>
                         {profile?.client?.display_name ||
                           profile?.user?.username ||
@@ -4693,97 +5379,185 @@ export default function Home() {
                     ? "Voice session"
                     : "Chat session"}
                 </h3>
+                {callState.sessionType === "video" && callState.audioOnly && (
+                  <span className="pill ghost">Audio-only</span>
+                )}
                 {callState.status && <p className="helper">{callState.status}</p>}
               </div>
-              <button type="button" className="cta ghost" onClick={() => cleanupCall(true)}>
-                End
-              </button>
+              <div className="call-head-actions">
+                <span className={`status-chip ${callStatusChip.tone}`}>
+                  {callStatusChip.label}
+                </span>
+                <button type="button" className="cta ghost" onClick={() => cleanupCall(true)}>
+                  End
+                </button>
+              </div>
             </header>
-            <div
-              className={`call-body ${
-                callState.sessionType === "chat" ? "chat-only" : ""
-              }`}
-            >
-              {callState.sessionType !== "chat" && (
-                <div className="call-media">
+            {callConnectionStatus === "reconnecting" && callState.sessionType !== "chat" && (
+              <div className="call-banner warn">
+                Reconnecting… We’ll restore the call once the network stabilizes.
+              </div>
+            )}
+            {callPreflight.open && callState.sessionType !== "chat" ? (
+              <div className="call-preflight">
+                <h4>Before you start</h4>
+                <p className="helper">Check your microphone and camera permissions.</p>
+                <div className="preflight-list">
+                  <div className={`preflight-item ${callPreflight.mic}`}>
+                    <span>Microphone</span>
+                    <strong>
+                      {callPreflight.mic === "ok"
+                        ? "Allowed"
+                        : callPreflight.mic === "blocked"
+                        ? "Blocked"
+                        : "Not checked"}
+                    </strong>
+                  </div>
                   {callState.sessionType === "video" && (
-                    <div className="call-video-grid">
-                      <div className="call-video remote">
-                        <video ref={remoteVideoRef} autoPlay playsInline />
-                        <span className="call-label">Partner</span>
-                      </div>
-                      <div className="call-video local">
-                        <video ref={localVideoRef} autoPlay muted playsInline />
-                        <span className="call-label">You</span>
-                      </div>
+                    <div className={`preflight-item ${callPreflight.cam}`}>
+                      <span>Camera</span>
+                      <strong>
+                        {callPreflight.audioOnly
+                          ? "Audio-only"
+                          : callPreflight.cam === "ok"
+                          ? "Allowed"
+                          : callPreflight.cam === "blocked"
+                          ? "Blocked"
+                          : "Not checked"}
+                      </strong>
                     </div>
                   )}
-                  {callState.sessionType === "voice" && (
-                    <div className="call-audio-grid">
-                      <div className="call-audio-tile">
-                        <span className="eyebrow">Partner</span>
-                        <p className="muted">
-                          {callState.peerReady ? "Connected" : "Waiting"}
-                        </p>
-                      </div>
-                      <div className="call-audio-tile">
-                        <span className="eyebrow">You</span>
-                        <p className="muted">{callState.micMuted ? "Muted" : "Mic on"}</p>
-                      </div>
-                    </div>
-                  )}
-                  {callState.sessionType === "voice" && (
-                    <audio ref={remoteAudioRef} autoPlay />
-                  )}
+                  <div className={`preflight-item ${callNetworkStatus}`}>
+                    <span>Network</span>
+                    <strong>{callNetworkStatus === "offline" ? "Offline" : "Online"}</strong>
+                  </div>
                 </div>
-              )}
-              <div className="call-chat">
-                <div className="chat-log">
-                  {callMessages.length === 0 && (
-                    <p className="helper">Say hello. Messages are not saved.</p>
-                  )}
-                  {callMessages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`chat-bubble ${message.self ? "self" : ""}`}
-                    >
-                      <span className="chat-name">
-                        {message.self ? "You" : message.senderLabel || "Partner"}
-                      </span>
-                      <p>{message.text}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="chat-input">
-                  <input
-                    type="text"
-                    value={callInput}
-                    onChange={(event) => setCallInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        sendChatMessage();
+                {callState.sessionType === "video" && (
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={callPreflight.audioOnly}
+                      onChange={(event) =>
+                        setCallPreflight((prev) => ({
+                          ...prev,
+                          audioOnly: event.target.checked,
+                          cam: event.target.checked ? "na" : "unknown",
+                        }))
                       }
-                    }}
-                    placeholder="Type a message"
-                  />
+                    />
+                    <span>Join audio-only</span>
+                  </label>
+                )}
+                <div className="dash-actions">
                   <button
                     type="button"
-                    className="cta primary"
-                    onClick={sendChatMessage}
-                    disabled={!callInput.trim()}
+                    className={`cta ghost ${callPreflight.checking ? "loading" : ""}`}
+                    onClick={() => checkCallDevices(callState.sessionType, callPreflight.audioOnly)}
+                    disabled={callPreflight.checking}
                   >
-                    Send
+                    Check devices
                   </button>
+                    <button
+                      type="button"
+                      className="cta primary"
+                      onClick={beginCallFromPreflight}
+                      disabled={
+                        callPreflight.mic !== "ok" ||
+                        (callState.sessionType === "video" &&
+                          !callPreflight.audioOnly &&
+                          callPreflight.cam !== "ok") ||
+                        callNetworkStatus === "offline"
+                      }
+                    >
+                      Start call
+                    </button>
                 </div>
               </div>
-            </div>
-            {callState.sessionType !== "chat" && (
+            ) : (
+              <div
+                className={`call-body ${
+                  callState.sessionType === "chat" ? "chat-only" : ""
+                }`}
+              >
+                {callState.sessionType !== "chat" && (
+                  <div className="call-media">
+                    {showVideoTiles && (
+                      <div className="call-video-grid">
+                        <div className="call-video remote">
+                          <video ref={remoteVideoRef} autoPlay playsInline />
+                          <span className="call-label">Partner</span>
+                        </div>
+                        <div className="call-video local">
+                          <video ref={localVideoRef} autoPlay muted playsInline />
+                          <span className="call-label">You</span>
+                        </div>
+                      </div>
+                    )}
+                    {showAudioTiles && (
+                      <div className="call-audio-grid">
+                        <div className="call-audio-tile">
+                          <span className="eyebrow">Partner</span>
+                          <p className="muted">
+                            {callState.peerReady ? "Connected" : "Waiting"}
+                          </p>
+                        </div>
+                        <div className="call-audio-tile">
+                          <span className="eyebrow">You</span>
+                          <p className="muted">{callState.micMuted ? "Muted" : "Mic on"}</p>
+                        </div>
+                      </div>
+                    )}
+                    {showAudioTiles && <audio ref={remoteAudioRef} autoPlay />}
+                  </div>
+                )}
+                <div className="call-chat">
+                  <div className="chat-log">
+                    {callMessages.length === 0 && (
+                      <p className="helper">Say hello. Messages are not saved.</p>
+                    )}
+                    {callMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`chat-bubble ${message.self ? "self" : ""}`}
+                      >
+                        <span className="chat-name">
+                          {message.self ? "You" : message.senderLabel || "Partner"}
+                        </span>
+                        <p>{message.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="chat-input">
+                    <input
+                      type="text"
+                      value={callInput}
+                      onChange={(event) => setCallInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          sendChatMessage();
+                        }
+                      }}
+                      placeholder="Type a message"
+                    />
+                    <button
+                      type="button"
+                      className="cta primary"
+                      onClick={sendChatMessage}
+                      disabled={!callInput.trim()}
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {callState.sessionType !== "chat" && !callPreflight.open && (
               <div className="call-controls">
                 <button type="button" className="cta ghost" onClick={toggleMute}>
                   {callState.micMuted ? "Unmute" : "Mute"}
                 </button>
-                {callState.sessionType === "video" && (
+                {callState.sessionType === "video" && !callState.audioOnly && (
                   <button type="button" className="cta ghost" onClick={toggleCamera}>
                     {callState.cameraOff ? "Camera on" : "Camera off"}
                   </button>
@@ -5076,8 +5850,11 @@ export default function Home() {
       )}
 
       {profileEditOpen && (
-        <section className="modal-backdrop" onClick={closeProfileEdit}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <section className="modal-backdrop drawer-backdrop" onClick={closeProfileEdit}>
+          <div
+            className="modal profile-drawer"
+            onClick={(event) => event.stopPropagation()}
+          >
             <header className="modal-header">
               <h3>Edit profile</h3>
               <button type="button" className="cta ghost" onClick={closeProfileEdit}>
@@ -5087,7 +5864,7 @@ export default function Home() {
             {role === "client" && (
               <>
                 <label className="field">
-                  Username
+                  Display name
                   <input
                     value={profileEditForm.username}
                     onChange={(event) =>
@@ -5129,7 +5906,7 @@ export default function Home() {
                 <div className="field-row">
                   <label className="field">
                     Birth month
-                    <input
+                    <select
                       value={profileEditForm.birthMonth}
                       onChange={(event) =>
                         setProfileEditForm((prev) => ({
@@ -5137,12 +5914,17 @@ export default function Home() {
                           birthMonth: event.target.value,
                         }))
                       }
-                      placeholder="MM"
-                    />
+                    >
+                      {birthMonthOptions.map((option) => (
+                        <option key={option.value || "month"} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="field">
                     Birth year
-                    <input
+                    <select
                       value={profileEditForm.birthYear}
                       onChange={(event) =>
                         setProfileEditForm((prev) => ({
@@ -5150,8 +5932,13 @@ export default function Home() {
                           birthYear: event.target.value,
                         }))
                       }
-                      placeholder="YYYY"
-                    />
+                    >
+                      {birthYearOptions.map((option) => (
+                        <option key={option.value || "year"} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                 </div>
                 <p className="helper">18+ only. Birth details stay private.</p>
@@ -5160,7 +5947,7 @@ export default function Home() {
             {role === "model" && (
               <>
                 <label className="field">
-                  Stage name
+                  Display name
                   <input
                     value={profileEditForm.stageName}
                     onChange={(event) =>
@@ -5200,7 +5987,7 @@ export default function Home() {
                   idPrefix: "profile-model",
                 })}
                 <label className="field">
-                  Bio
+                  Short bio
                   <textarea
                     value={profileEditForm.bio}
                     onChange={(event) =>
@@ -5227,7 +6014,7 @@ export default function Home() {
                 </label>
                 <label className="field">
                   Availability
-                  <input
+                  <select
                     value={profileEditForm.availability}
                     onChange={(event) =>
                       setProfileEditForm((prev) => ({
@@ -5235,13 +6022,32 @@ export default function Home() {
                         availability: event.target.value,
                       }))
                     }
-                    placeholder="e.g. nights, weekends, by request"
-                  />
+                  >
+                    {profileEditForm.availability &&
+                      !availabilityOptions.some(
+                        (option) => option.value === profileEditForm.availability
+                      ) && (
+                        <option value={profileEditForm.availability}>
+                          {profileEditForm.availability}
+                        </option>
+                      )}
+                    {availabilityOptions.map((option) => (
+                      <option key={option.value || "availability"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </>
             )}
             {profileEditStatus && (
-              <p className={`helper ${profileEditStatus.includes("✅") ? "" : "error"}`}>
+              <p
+                className={`helper ${
+                  profileEditStatus.includes("Saved") || profileEditStatus.includes("✓")
+                    ? ""
+                    : "error"
+                }`}
+              >
                 {profileEditStatus}
               </p>
             )}
@@ -5431,6 +6237,25 @@ export default function Home() {
             )}
           </header>
           <div className="flow-body">
+            {!modelApproved && (
+              <div className="step-header">
+                <div>
+                  <p className="eyebrow">Step {modelStep} of 3</p>
+                  <strong>
+                    {modelStep === 1
+                      ? "Profile setup"
+                      : modelStep === 2
+                      ? "Verification media"
+                      : "Awaiting approval"}
+                  </strong>
+                </div>
+                <div className="stepper">
+                  <span className={modelStep >= 1 ? "step active" : "step"}>1</span>
+                  <span className={modelStep >= 2 ? "step active" : "step"}>2</span>
+                  <span className={modelStep >= 3 ? "step active" : "step"}>3</span>
+                </div>
+              </div>
+            )}
             {modelApproved ? (
               <>
                 <div className="dash-actions">
@@ -5474,6 +6299,9 @@ export default function Home() {
                 {modelTab === "profile" && (
                   <div className="flow-card">
                     <h3>Profile</h3>
+                    {profileSavedStatus && (
+                      <p className="helper success">{profileSavedStatus}</p>
+                    )}
                     <div className="profile-progress">
                       <div className="line">
                         <span>Profile completion</span>
@@ -5530,6 +6358,51 @@ export default function Home() {
                         {avatarState.status && <p className="helper">{avatarState.status}</p>}
                       </div>
                     </div>
+                    {avatarPreviewUrl && (
+                      <div className="avatar-cropper">
+                        <div
+                          className="avatar-crop-frame"
+                          onPointerDown={handleAvatarDragStart}
+                          onPointerMove={handleAvatarDragMove}
+                          onPointerUp={handleAvatarDragEnd}
+                          onPointerLeave={handleAvatarDragEnd}
+                          onPointerCancel={handleAvatarDragEnd}
+                        >
+                          <img
+                            src={avatarPreviewUrl}
+                            alt="Crop preview"
+                            style={{
+                              transform: `translate(${avatarCrop.x}px, ${avatarCrop.y}px) scale(${avatarCrop.scale})`,
+                            }}
+                          />
+                        </div>
+                        <label className="field">
+                          Zoom
+                          <input
+                            type="range"
+                            min={avatarMinScale}
+                            max={avatarMinScale * 3}
+                            step="0.01"
+                            value={avatarCrop.scale}
+                            onChange={(event) => handleAvatarZoomChange(event.target.value)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="cta ghost"
+                          onClick={() =>
+                            setAvatarCrop({
+                              scale: avatarMinScale,
+                              x: (AVATAR_CROP_SIZE - avatarImageMeta.width * avatarMinScale) / 2,
+                              y: (AVATAR_CROP_SIZE - avatarImageMeta.height * avatarMinScale) / 2,
+                            })
+                          }
+                          disabled={!avatarImageMeta.width}
+                        >
+                          Reset crop
+                        </button>
+                      </div>
+                    )}
                     <div className="line">
                       <span>Display name</span>
                       <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
@@ -6145,22 +7018,25 @@ export default function Home() {
                       <input
                         type="text"
                         value={modelForm.stageName}
-                        onChange={(event) =>
-                          setModelForm((prev) => ({ ...prev, stageName: event.target.value }))
-                        }
+                        onChange={(event) => updateModelField("stageName", event.target.value)}
                         placeholder="Jesse Belle"
                       />
+                      {modelErrors.stageName && (
+                        <p className="field-error">{modelErrors.stageName}</p>
+                      )}
                     </label>
                     <label className="field">
                       Email
                       <input
                         type="email"
                         value={modelForm.email}
-                        onChange={(event) =>
-                          setModelForm((prev) => ({ ...prev, email: event.target.value }))
-                        }
+                        onChange={(event) => updateModelField("email", event.target.value)}
                       placeholder="you@email.com"
                     />
+                      <p className="field-hint">Why we ask: payouts and verification updates.</p>
+                      {modelErrors.email && (
+                        <p className="field-error">{modelErrors.email}</p>
+                      )}
                     </label>
                     {renderLocationFields({
                       countryIso: modelCountryIso,
@@ -6169,56 +7045,106 @@ export default function Home() {
                       onCountryChange: (value) => {
                         setModelCountryIso(value);
                         setModelLocationDirty(true);
+                        setModelErrors((prev) => ({ ...prev, country: "", region: "" }));
                       },
                       onRegionChange: (value) => {
                         setModelRegionName(value);
                         setModelLocationDirty(true);
+                        setModelErrors((prev) => ({ ...prev, region: "" }));
                       },
                       idPrefix: "model-onboarding",
                     })}
+                    <p className="field-hint">
+                      Why we ask: to show clients your region and comply with local rules.
+                    </p>
+                    {modelErrors.country && (
+                      <p className="field-error">{modelErrors.country}</p>
+                    )}
+                    {modelErrors.region && (
+                      <p className="field-error">{modelErrors.region}</p>
+                    )}
                     <label className="field">
                       Availability
-                      <input
-                        type="text"
+                      <select
                         value={modelForm.availability}
                         onChange={(event) =>
-                          setModelForm((prev) => ({
-                            ...prev,
-                            availability: event.target.value,
-                          }))
+                          updateModelField("availability", event.target.value)
                         }
-                        placeholder="Weeknights · 8pm-12am"
-                      />
+                      >
+                        {availabilityOptions.map((option) => (
+                          <option key={option.value || "availability"} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      {modelErrors.availability && (
+                        <p className="field-error">{modelErrors.availability}</p>
+                      )}
                     </label>
                     <div className="field-row">
                       <label className="field">
                         Birth month
-                        <input
-                          type="number"
-                          min="1"
-                          max="12"
+                        <select
                           value={modelForm.birthMonth}
                           onChange={(event) =>
-                            setModelForm((prev) => ({ ...prev, birthMonth: event.target.value }))
+                            updateModelField("birthMonth", event.target.value)
                           }
-                          placeholder="MM"
-                        />
+                        >
+                          {birthMonthOptions.map((option) => (
+                            <option key={option.value || "month"} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {modelErrors.birthMonth && (
+                          <p className="field-error">{modelErrors.birthMonth}</p>
+                        )}
                       </label>
                       <label className="field">
                         Birth year
-                        <input
-                          type="number"
-                          min="1900"
-                          max="2100"
+                        <select
                           value={modelForm.birthYear}
                           onChange={(event) =>
-                            setModelForm((prev) => ({ ...prev, birthYear: event.target.value }))
+                            updateModelField("birthYear", event.target.value)
                           }
-                        placeholder="YYYY"
-                      />
-                    </label>
+                        >
+                          {birthYearOptions.map((option) => (
+                            <option key={option.value || "year"} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {modelErrors.birthYear && (
+                          <p className="field-error">{modelErrors.birthYear}</p>
+                        )}
+                      </label>
                     </div>
-                    <p className="helper">18+ only. We verify eligibility and keep this private.</p>
+                    <p className="field-hint">
+                      Why we ask: to confirm you are 18+. This stays private.
+                    </p>
+                    {modelErrors.ageGate && (
+                      <p className="field-error">{modelErrors.ageGate}</p>
+                    )}
+                    <label className="field">
+                      Short bio
+                      <textarea
+                        rows="3"
+                        value={modelForm.bio}
+                        onChange={(event) => updateModelField("bio", event.target.value)}
+                        placeholder="Describe your vibe, services, and boundaries."
+                      />
+                      {modelErrors.bio && <p className="field-error">{modelErrors.bio}</p>}
+                    </label>
+                    <label className="field">
+                      Tags
+                      <input
+                        type="text"
+                        value={modelForm.tags}
+                        onChange={(event) => updateModelField("tags", event.target.value)}
+                        placeholder="Roleplay, Girlfriend, Voice, Video"
+                      />
+                      {modelErrors.tags && <p className="field-error">{modelErrors.tags}</p>}
+                    </label>
                     <div className="notice-card agreement-box">
                       <h4>Compliance & Data Use Agreement</h4>
                       <p className="helper">
@@ -6236,39 +7162,17 @@ export default function Home() {
                           type="checkbox"
                           checked={modelForm.disclaimerAccepted}
                           onChange={(event) =>
-                            setModelForm((prev) => ({
-                              ...prev,
-                              disclaimerAccepted: event.target.checked,
-                            }))
+                            updateModelField("disclaimerAccepted", event.target.checked)
                           }
                         />
                         <span>
                           I agree to the Compliance & Data Use Agreement (v{DISCLAIMER_VERSION}).
                         </span>
                       </label>
+                      {modelErrors.disclaimer && (
+                        <p className="field-error">{modelErrors.disclaimer}</p>
+                      )}
                     </div>
-                    <label className="field">
-                      Short bio
-                      <textarea
-                        rows="3"
-                        value={modelForm.bio}
-                        onChange={(event) =>
-                          setModelForm((prev) => ({ ...prev, bio: event.target.value }))
-                        }
-                        placeholder="Describe your vibe, services, and boundaries."
-                      />
-                    </label>
-                    <label className="field">
-                      Tags
-                      <input
-                        type="text"
-                        value={modelForm.tags}
-                        onChange={(event) =>
-                          setModelForm((prev) => ({ ...prev, tags: event.target.value }))
-                        }
-                        placeholder="Roleplay, Girlfriend, Voice, Video"
-                      />
-                    </label>
                   </div>
                 )}
                 {modelStep === 2 && (

@@ -14,6 +14,7 @@ export async function GET(request) {
   const url = new URL(request.url);
   const status = (url.searchParams.get("status") || "pending").toLowerCase();
   const provider = (url.searchParams.get("provider") || "all").toLowerCase();
+  const range = (url.searchParams.get("range") || "all").toLowerCase();
   const statusList =
     status === "approved"
       ? ["completed"]
@@ -21,8 +22,18 @@ export async function GET(request) {
       ? ["rejected"]
       : ["pending", "submitted"];
 
-  const providerClause =
-    provider === "all" ? "" : "AND t.payment_provider = $2";
+  const params = [statusList];
+  let providerClause = "";
+  if (provider !== "all") {
+    providerClause = "AND t.payment_provider = $2";
+    params.push(provider);
+  }
+  let rangeClause = "";
+  if (range === "today") {
+    rangeClause = "AND t.created_at >= CURRENT_DATE";
+  } else if (range === "7d") {
+    rangeClause = "AND t.created_at >= NOW() - INTERVAL '7 days'";
+  }
 
   const res = await query(
     `SELECT t.transaction_ref, t.amount, t.status, t.metadata_json, t.created_at,
@@ -31,8 +42,9 @@ export async function GET(request) {
      JOIN users u ON u.id = t.user_id
      WHERE t.status = ANY($1)
        ${providerClause}
+       ${rangeClause}
      ORDER BY t.created_at DESC`,
-    provider === "all" ? [statusList] : [statusList, provider]
+    params
   );
 
   const filtered = res.rows.filter((row) => {
