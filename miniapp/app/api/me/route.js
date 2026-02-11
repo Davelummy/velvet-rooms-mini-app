@@ -169,7 +169,7 @@ export async function GET(request) {
   const clientProfile = client
     ? {
         ...client,
-        location: user.privacy_hide_location ? null : client.location,
+        location: client.location,
       }
     : null;
 
@@ -180,7 +180,7 @@ export async function GET(request) {
       telegram_id: user.telegram_id,
       public_id: user.public_id,
       username: user.username,
-      email: user.privacy_hide_email ? null : user.email,
+      email: user.email,
       created_at: user.created_at,
       wallet_balance: user.wallet_balance,
       first_name: user.first_name,
