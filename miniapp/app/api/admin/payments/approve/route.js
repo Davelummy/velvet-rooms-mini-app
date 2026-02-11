@@ -83,7 +83,8 @@ export async function POST(request) {
       metadata = {};
     }
   }
-  const escrowType = metadata.escrow_type;
+  const rawEscrowType = metadata.escrow_type;
+  const escrowType = rawEscrowType === "access" ? "access_fee" : rawEscrowType;
   if (!escrowType) {
     return NextResponse.json({ error: "missing_escrow_type" }, { status: 400 });
   }

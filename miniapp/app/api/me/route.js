@@ -46,7 +46,34 @@ export async function GET(request) {
      FROM client_profiles WHERE user_id = $1`,
     [user.id]
   );
-  const client = clientRes.rowCount ? clientRes.rows[0] : null;
+  let client = clientRes.rowCount ? clientRes.rows[0] : null;
+  if (client && !client.access_fee_paid) {
+    const accessEscrowRes = await query(
+      `SELECT id FROM escrow_accounts
+       WHERE payer_id = $1
+         AND status = 'released'
+         AND escrow_type IN ('access_fee', 'access')
+       ORDER BY released_at DESC NULLS LAST
+       LIMIT 1`,
+      [user.id]
+    );
+    if (accessEscrowRes.rowCount) {
+      const escrowId = accessEscrowRes.rows[0].id;
+      await query(
+        `UPDATE client_profiles
+         SET access_fee_paid = TRUE,
+             access_granted_at = COALESCE(access_granted_at, NOW()),
+             access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
+         WHERE user_id = $2`,
+        [escrowId, user.id]
+      );
+      client = {
+        ...client,
+        access_fee_paid: true,
+        access_granted_at: client.access_granted_at || new Date().toISOString(),
+      };
+    }
+  }
   const followCountsRes = await query(
     `SELECT
         (SELECT COUNT(*) FROM follows WHERE followee_id = $1) AS followers,
@@ -88,10 +115,10 @@ export async function GET(request) {
     user.status = "active";
   }
 
-  const clientProfile = clientRes.rowCount
+  const clientProfile = client
     ? {
-        ...clientRes.rows[0],
-        location: user.privacy_hide_location ? null : clientRes.rows[0].location,
+        ...client,
+        location: user.privacy_hide_location ? null : client.location,
       }
     : null;
 

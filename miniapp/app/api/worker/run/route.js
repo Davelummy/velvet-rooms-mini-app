@@ -109,13 +109,23 @@ export async function POST(request) {
     );
 
     for (const escrow of escrowRes.rows) {
-      if (escrow.escrow_type === "access_fee") {
-        await query(
+      if (escrow.escrow_type === "access_fee" || escrow.escrow_type === "access") {
+        const updated = await query(
           `UPDATE client_profiles
            SET access_fee_paid = TRUE, access_granted_at = NOW()
            WHERE access_fee_escrow_id = $1`,
           [escrow.id]
         );
+        if (!updated.rowCount && escrow.payer_id) {
+          await query(
+            `UPDATE client_profiles
+             SET access_fee_paid = TRUE,
+                 access_granted_at = COALESCE(access_granted_at, NOW()),
+                 access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
+             WHERE user_id = $2`,
+            [escrow.id, escrow.payer_id]
+          );
+        }
       }
 
       if (escrow.escrow_type === "content") {

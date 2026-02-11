@@ -119,8 +119,9 @@ export async function POST(request) {
     return NextResponse.json({ error: "escrow_missing" }, { status: 404 });
   }
   const escrow = escrowRes.rows[0];
+  const escrowType = escrow.escrow_type === "access" ? "access_fee" : escrow.escrow_type;
 
-  if (escrow.escrow_type === "content") {
+  if (escrowType === "content") {
     const purchaseRes = await query(
       "SELECT id FROM content_purchases WHERE escrow_id = $1",
       [escrow.id]
@@ -144,7 +145,7 @@ export async function POST(request) {
     ]);
   }
 
-  if (escrow.escrow_type === "access_fee") {
+  if (escrowType === "access_fee") {
     const profileRes = await query(
       "SELECT id FROM client_profiles WHERE user_id = $1",
       [escrow.payer_id]
@@ -165,7 +166,7 @@ export async function POST(request) {
     }
   }
 
-  if (escrow.escrow_type === "session" && escrow.related_id) {
+  if (escrowType === "session" && escrow.related_id) {
     await query(
       `UPDATE sessions SET status = 'completed', completed_at = NOW() WHERE id = $1`,
       [escrow.related_id]
@@ -196,7 +197,7 @@ export async function POST(request) {
     escrow.payer_id,
   ]);
   if (payerRes.rowCount) {
-    if (escrow.escrow_type === "access_fee") {
+    if (escrowType === "access_fee") {
       const inviteLink = await createInviteLink();
       const message = inviteLink
         ? `Access granted ✅ Join the gallery: ${inviteLink}`
@@ -204,7 +205,7 @@ export async function POST(request) {
       await sendMessage(payerRes.rows[0].telegram_id, message);
     } else {
       const message =
-        escrow.escrow_type === "session"
+        escrowType === "session"
           ? `Session completed ✅ Escrow ${escrowRef} released.`
           : `Escrow ${escrowRef} has been released.`;
       await sendMessage(payerRes.rows[0].telegram_id, message);
