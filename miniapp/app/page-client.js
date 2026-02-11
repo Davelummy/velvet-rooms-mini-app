@@ -284,14 +284,14 @@ export default function Home() {
         eyebrow: "Access, Made Simple",
         title: "Unlock the Gallery",
         body:
-          "One-time access fee in escrow. Payments are held safely until admin approval.",
+          "One-time access fee. Admin approval unlocks the gallery.",
         cta: "Get Started",
         visual: "access",
         image:
           "https://images.pexels.com/photos/5645105/pexels-photo-5645105.jpeg?cs=srgb&dl=pexels-cottonbro-5645105.jpg&fm=jpg",
         points: [
-          "Escrow-protected payments",
           "Admin approval required",
+          "Instant access after approval",
         ],
       },
     ],
@@ -3618,7 +3618,7 @@ export default function Home() {
           <h1>Premium content. Private sessions. Escrow‑protected.</h1>
           <p className="lead">
             Velvet Rooms is a verified, members‑only platform for premium content and live sessions.
-            Every payment is held in escrow, every creator is approved, every action logged.
+            Content and session payments are held in escrow, every creator is approved, every action logged.
           </p>
           <div className="cta-row">
           <button type="button" className="cta primary" onClick={() => handleRole("client")}>
@@ -3668,7 +3668,7 @@ export default function Home() {
         <article className={`role-card ${role === "client" ? "selected" : ""}`}>
           <h3>Client Flow</h3>
           <ol>
-            <li>Register → pay access fee (escrow)</li>
+            <li>Register → pay access fee</li>
             <li>Browse gallery teasers</li>
             <li>Book sessions or buy content</li>
             <li>Confirm completion to release</li>
@@ -3840,7 +3840,7 @@ export default function Home() {
                   <div className="flow-card">
                     <h3>Access Fee (Escrow)</h3>
                     <p>
-                      Pay once to unlock verified creator content. Funds stay in escrow until admin approval.
+                        Pay once to unlock verified creator content. Admin approval unlocks access.
                     </p>
                     <div className="price-tag">
                       ₦5,000 <span>Escrow Held</span>

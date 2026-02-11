@@ -8,6 +8,7 @@ export default function Admin() {
   const [contentView, setContentView] = useState("pending");
   const [paymentView, setPaymentView] = useState("pending");
   const [escrowView, setEscrowView] = useState("pending");
+  const [clientView, setClientView] = useState("pending");
   const [userQuery, setUserQuery] = useState("");
   const [userRole, setUserRole] = useState("all");
   const [userStatus, setUserStatus] = useState("all");
@@ -15,6 +16,7 @@ export default function Admin() {
   const [error, setError] = useState("");
   const [initData, setInitData] = useState("");
   const [liveQueue, setLiveQueue] = useState(false);
+  const [liveCountdown, setLiveCountdown] = useState(15);
   const [lastRefreshAt, setLastRefreshAt] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [preview, setPreview] = useState({ open: false, url: "", type: "video" });
@@ -67,6 +69,7 @@ export default function Admin() {
     1,
     ...approvalsSeries.map((entry) => Number(entry.count || 0))
   );
+  const livePaused = Boolean(selectedItem) || preview.open;
 
   const detailTitle = useMemo(() => {
     if (!selectedItem) {
@@ -86,6 +89,9 @@ export default function Admin() {
     }
     if (section === "users") {
       return selectedItem.username || selectedItem.public_id || "User";
+    }
+    if (section === "clients") {
+      return selectedItem.display_name || selectedItem.username || selectedItem.public_id || "Client";
     }
     if (section === "activity") {
       return selectedItem.action_type || "Activity";
@@ -150,6 +156,28 @@ export default function Admin() {
         { label: "Email", value: selectedItem.email || "-" },
         { label: "Followers", value: selectedItem.followers || 0 },
         { label: "Following", value: selectedItem.following || 0 },
+        { label: "Joined", value: selectedItem.created_at || "-" },
+      ];
+    }
+    if (section === "clients") {
+      return [
+        { label: "Display name", value: selectedItem.display_name || "-" },
+        { label: "Username", value: selectedItem.username || "-" },
+        { label: "Public ID", value: selectedItem.public_id || "-" },
+        { label: "Email", value: selectedItem.email || "-" },
+        { label: "Location", value: selectedItem.location || "-" },
+        {
+          label: "Birth month/year",
+          value:
+            selectedItem.birth_month && selectedItem.birth_year
+              ? `${selectedItem.birth_month}/${selectedItem.birth_year}`
+              : "-",
+        },
+        {
+          label: "Access status",
+          value: selectedItem.access_fee_paid ? "Unlocked" : "Pending",
+        },
+        { label: "Access granted", value: selectedItem.access_granted_at || "-" },
         { label: "Joined", value: selectedItem.created_at || "-" },
       ];
     }
@@ -230,6 +258,7 @@ export default function Admin() {
     if (section === "payments") endpoint = "/api/admin/payments";
     if (section === "disputes") endpoint = "/api/admin/escrows";
     if (section === "activity") endpoint = "/api/admin/activity";
+    if (section === "clients") endpoint = "/api/admin/clients";
     if (section === "users") {
       const params = new URLSearchParams();
       if (userQuery) params.set("q", userQuery);
@@ -252,6 +281,12 @@ export default function Admin() {
     if (section === "disputes") {
       endpoint = "/api/admin/escrows?status=disputed";
     }
+    if (section === "clients" && clientView === "approved") {
+      endpoint = "/api/admin/clients?status=approved";
+    }
+    if (section === "clients" && clientView === "pending") {
+      endpoint = "/api/admin/clients?status=pending";
+    }
     const res = await fetch(endpoint, {
       headers: { "x-telegram-init": initData },
     });
@@ -270,6 +305,7 @@ export default function Admin() {
     contentView,
     paymentView,
     escrowView,
+    clientView,
     userQuery,
     userRole,
     userStatus,
@@ -300,17 +336,27 @@ export default function Admin() {
     if (!liveQueue) {
       return;
     }
+    setLiveCountdown(15);
     const interval = setInterval(() => {
-      loadQueue();
-      loadMetrics();
-    }, 15000);
+      if (livePaused) {
+        return;
+      }
+      setLiveCountdown((prev) => {
+        if (prev <= 1) {
+          loadQueue();
+          loadMetrics();
+          return 15;
+        }
+        return prev - 1;
+      });
+    }, 1000);
     return () => clearInterval(interval);
-  }, [liveQueue, loadQueue, loadMetrics]);
+  }, [liveQueue, livePaused, loadQueue, loadMetrics]);
 
   useEffect(() => {
     setSelectedItem(null);
     setPreview({ open: false, url: "", type: "video" });
-  }, [section, modelView, contentView, paymentView, escrowView, userQuery, userRole, userStatus]);
+  }, [section, modelView, contentView, paymentView, escrowView, clientView, userQuery, userRole, userStatus]);
 
   const handleAction = async (action, payload) => {
     if (!initData) {
@@ -390,6 +436,13 @@ export default function Admin() {
             onClick={() => setSection("payments")}
           >
             Payments
+          </button>
+          <button
+            type="button"
+            className={`ghost ${section === "clients" ? "active" : ""}`}
+            onClick={() => setSection("clients")}
+          >
+            Client Queue
           </button>
           <button
             type="button"
@@ -603,6 +656,8 @@ export default function Admin() {
               ? "Content Moderation"
               : section === "payments"
               ? "Crypto Payment Review"
+              : section === "clients"
+              ? "Client Access Queue"
               : section === "escrows"
               ? "Manual Releases"
               : section === "activity"
@@ -618,6 +673,8 @@ export default function Admin() {
               ? "Approve teasers before they appear in the gallery."
               : section === "payments"
               ? "Approve payments before escrows are created."
+              : section === "clients"
+              ? "Track client onboarding, access fees, and unlock status."
               : section === "escrows"
               ? "Release or refund escrow funds manually."
               : section === "activity"
@@ -677,6 +734,24 @@ export default function Admin() {
                 onClick={() => setPaymentView("approved")}
               >
                 Approved payments
+              </button>
+            </div>
+          )}
+          {section === "clients" && (
+            <div className="panel-actions">
+              <button
+                type="button"
+                className={`cta ${clientView === "pending" ? "primary" : "ghost"}`}
+                onClick={() => setClientView("pending")}
+              >
+                Pending access
+              </button>
+              <button
+                type="button"
+                className={`cta ${clientView === "approved" ? "primary" : "ghost"}`}
+                onClick={() => setClientView("approved")}
+              >
+                Unlocked clients
               </button>
             </div>
           )}
@@ -743,10 +818,20 @@ export default function Admin() {
             >
               {liveQueue ? "Live queue on" : "Open live queue"}
             </button>
+            <button type="button" className="cta ghost" onClick={loadQueue}>
+              Refresh now
+            </button>
             <button type="button" className="cta ghost" onClick={exportAuditLog}>
               Export audit log
             </button>
           </div>
+          {liveQueue && (
+            <p className="helper">
+              {livePaused
+                ? "Live queue paused while viewing details."
+                : `Next refresh in ${liveCountdown}s.`}
+            </p>
+          )}
           {lastRefreshAt && (
             <p className="helper">Last refresh: {new Date(lastRefreshAt).toLocaleString()}</p>
           )}
@@ -1003,6 +1088,8 @@ export default function Admin() {
                   <h3>
                     {section === "users"
                       ? item.username || item.public_id || "User"
+                      : section === "clients"
+                      ? item.display_name || item.username || item.public_id || "Client"
                       : section === "activity"
                       ? item.action_type || "Activity"
                       : item.display_name || item.title || item.escrow_type || "Payment"}
@@ -1023,6 +1110,10 @@ export default function Admin() {
                     {section === "escrows" &&
                       `${escrowView === "released" ? "Released" : "Held"} escrow · ${
                         item.amount
+                      }`}
+                    {section === "clients" &&
+                      `${item.access_fee_paid ? "Unlocked" : "Pending"} · ${
+                        item.email || "no email"
                       }`}
                     {section === "users" &&
                       `${item.role || "user"} · ${item.status || "status"}`}
@@ -1234,6 +1325,13 @@ export default function Admin() {
                     <>
                       <div className={`status-pill ${item.status === "active" ? "live" : "idle"}`}>
                         {item.status || "status"}
+                      </div>
+                    </>
+                  )}
+                  {section === "clients" && (
+                    <>
+                      <div className={`status-pill ${item.access_fee_paid ? "live" : "idle"}`}>
+                        {item.access_fee_paid ? "Unlocked" : "Pending"}
                       </div>
                     </>
                   )}

@@ -209,6 +209,15 @@ export async function GET(request) {
       [userRes.rows[0].id]
     );
     if (!profileRes.rowCount || !profileRes.rows[0].access_fee_paid) {
+      const accessTxRes = await query(
+        `SELECT id FROM transactions
+         WHERE user_id = $1
+           AND status = 'completed'
+           AND metadata_json->>'escrow_type' IN ('access_fee','access')
+         ORDER BY completed_at DESC NULLS LAST, created_at DESC
+         LIMIT 1`,
+        [userRes.rows[0].id]
+      );
       const accessEscrowRes = await query(
         `SELECT id FROM escrow_accounts
          WHERE payer_id = $1
@@ -218,10 +227,10 @@ export async function GET(request) {
          LIMIT 1`,
         [userRes.rows[0].id]
       );
-      if (!accessEscrowRes.rowCount) {
+      if (!accessTxRes.rowCount && !accessEscrowRes.rowCount) {
         return NextResponse.json({ error: "access_fee_required" }, { status: 403 });
       }
-      const escrowId = accessEscrowRes.rows[0].id;
+      const escrowId = accessEscrowRes.rowCount ? accessEscrowRes.rows[0].id : null;
       if (!profileRes.rowCount) {
         await query(
           `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)

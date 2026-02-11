@@ -8,6 +8,74 @@ export const runtime = "nodejs";
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 const WEBAPP_URL = process.env.WEBAPP_URL || "";
 
+function normalizeChannelId(rawId) {
+  if (!rawId) {
+    return null;
+  }
+  const asString = String(rawId);
+  if (asString.startsWith("-")) {
+    return asString;
+  }
+  if (asString.startsWith("100")) {
+    return `-${asString}`;
+  }
+  return `-100${asString}`;
+}
+
+async function createInviteLink() {
+  const channelId = normalizeChannelId(process.env.MAIN_GALLERY_CHANNEL_ID || "");
+  if (!BOT_TOKEN || !channelId) {
+    return null;
+  }
+  const payloads = [
+    {
+      chat_id: channelId,
+      name: "Velvet Rooms Gallery",
+      creates_join_request: true,
+    },
+    {
+      chat_id: channelId,
+      name: "Velvet Rooms Gallery",
+    },
+  ];
+  for (const payload of payloads) {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!data?.ok) {
+        continue;
+      }
+      return data?.result?.invite_link || null;
+    } catch {
+      // try next payload
+    }
+  }
+  return null;
+}
+
+async function grantClientAccess(userId) {
+  const profileRes = await query("SELECT id FROM client_profiles WHERE user_id = $1", [userId]);
+  if (!profileRes.rowCount) {
+    await query(
+      `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at)
+       VALUES ($1, TRUE, NOW())`,
+      [userId]
+    );
+  } else {
+    await query(
+      `UPDATE client_profiles
+       SET access_fee_paid = TRUE, access_granted_at = NOW()
+       WHERE user_id = $1`,
+      [userId]
+    );
+  }
+  await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [userId]);
+}
+
 async function sendMessage(chatId, text) {
   if (!BOT_TOKEN || !chatId) {
     return;
@@ -68,13 +136,6 @@ export async function POST(request) {
     return NextResponse.json({ error: "transaction_missing" }, { status: 404 });
   }
   const transaction = txRes.rows[0];
-  if (transaction.status === "completed") {
-    return NextResponse.json({ ok: true, status: "already_completed" });
-  }
-  if (!["pending", "submitted"].includes(transaction.status)) {
-    return NextResponse.json({ error: "invalid_status" }, { status: 409 });
-  }
-
   let metadata = transaction.metadata_json || {};
   if (typeof metadata === "string") {
     try {
@@ -88,6 +149,15 @@ export async function POST(request) {
   if (!escrowType) {
     return NextResponse.json({ error: "missing_escrow_type" }, { status: 400 });
   }
+  if (transaction.status === "completed") {
+    if (escrowType === "access_fee") {
+      await grantClientAccess(transaction.user_id);
+    }
+    return NextResponse.json({ ok: true, status: "already_completed" });
+  }
+  if (!["pending", "submitted"].includes(transaction.status)) {
+    return NextResponse.json({ error: "invalid_status" }, { status: 409 });
+  }
 
   let escrowId = null;
   let relatedId = null;
@@ -96,22 +166,30 @@ export async function POST(request) {
   let autoReleaseAt = null;
 
   if (escrowType === "access_fee") {
-    const profileRes = await query(
-      "SELECT id FROM client_profiles WHERE user_id = $1",
-      [transaction.user_id]
+    await grantClientAccess(transaction.user_id);
+    await query(
+      `UPDATE transactions
+       SET status = 'completed', completed_at = NOW()
+       WHERE id = $1`,
+      [transaction.id]
     );
-    if (profileRes.rowCount) {
-      relatedId = profileRes.rows[0].id;
-    } else {
-      const insertRes = await query(
-        `INSERT INTO client_profiles (user_id, access_fee_paid)
-         VALUES ($1, FALSE)
-         RETURNING id`,
-        [transaction.user_id]
+    await query(
+      `INSERT INTO admin_actions (admin_id, action_type, target_type, target_id, details, created_at)
+       VALUES ($1, 'approve_access_fee', 'transaction', $2, $3, NOW())`,
+      [adminUserId, transaction.id, JSON.stringify({ access_fee: true })]
+    );
+    const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+      transaction.user_id,
+    ]);
+    if (clientRes.rowCount) {
+      const inviteLink = await createInviteLink();
+      const link = inviteLink ? `\nJoin gallery: ${inviteLink}` : "";
+      await sendMessage(
+        clientRes.rows[0].telegram_id,
+        `Access granted ✅ Your gallery is unlocked.${link}`
       );
-      relatedId = insertRes.rows[0].id;
     }
-    releaseCondition = "access_granted";
+    return NextResponse.json({ ok: true, access_granted: true });
   }
 
   if (escrowType === "content") {

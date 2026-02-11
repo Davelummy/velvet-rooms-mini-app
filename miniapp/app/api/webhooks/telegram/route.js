@@ -49,6 +49,15 @@ async function ensureAccess(userId) {
   if (profileRes.rowCount && profileRes.rows[0].access_fee_paid) {
     return true;
   }
+  const accessTxRes = await query(
+    `SELECT id FROM transactions
+     WHERE user_id = $1
+       AND status = 'completed'
+       AND metadata_json->>'escrow_type' IN ('access_fee','access')
+     ORDER BY completed_at DESC NULLS LAST, created_at DESC
+     LIMIT 1`,
+    [userId]
+  );
   const escrowRes = await query(
     `SELECT id FROM escrow_accounts
      WHERE payer_id = $1
@@ -58,10 +67,10 @@ async function ensureAccess(userId) {
      LIMIT 1`,
     [userId]
   );
-  if (!escrowRes.rowCount) {
+  if (!accessTxRes.rowCount && !escrowRes.rowCount) {
     return false;
   }
-  const escrowId = escrowRes.rows[0].id;
+  const escrowId = escrowRes.rowCount ? escrowRes.rows[0].id : null;
   if (!profileRes.rowCount) {
     await query(
       `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
