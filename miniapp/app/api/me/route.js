@@ -47,7 +47,7 @@ export async function GET(request) {
     [user.id]
   );
   let client = clientRes.rowCount ? clientRes.rows[0] : null;
-  if (client && !client.access_fee_paid) {
+  if (!client || !client.access_fee_paid) {
     const accessEscrowRes = await query(
       `SELECT id FROM escrow_accounts
        WHERE payer_id = $1
@@ -59,19 +59,35 @@ export async function GET(request) {
     );
     if (accessEscrowRes.rowCount) {
       const escrowId = accessEscrowRes.rows[0].id;
-      await query(
-        `UPDATE client_profiles
-         SET access_fee_paid = TRUE,
-             access_granted_at = COALESCE(access_granted_at, NOW()),
-             access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
-         WHERE user_id = $2`,
-        [escrowId, user.id]
-      );
-      client = {
-        ...client,
-        access_fee_paid: true,
-        access_granted_at: client.access_granted_at || new Date().toISOString(),
-      };
+      if (!client) {
+        await query(
+          `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
+           VALUES ($1, TRUE, NOW(), $2)`,
+          [user.id, escrowId]
+        );
+        client = {
+          access_fee_paid: true,
+          access_granted_at: new Date().toISOString(),
+          display_name: null,
+          location: null,
+          birth_month: null,
+          birth_year: null,
+        };
+      } else {
+        await query(
+          `UPDATE client_profiles
+           SET access_fee_paid = TRUE,
+               access_granted_at = COALESCE(access_granted_at, NOW()),
+               access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
+           WHERE user_id = $2`,
+          [escrowId, user.id]
+        );
+        client = {
+          ...client,
+          access_fee_paid: true,
+          access_granted_at: client.access_granted_at || new Date().toISOString(),
+        };
+      }
     }
   }
   const followCountsRes = await query(

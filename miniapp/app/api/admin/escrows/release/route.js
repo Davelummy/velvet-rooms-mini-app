@@ -175,6 +175,9 @@ export async function POST(request) {
         [escrow.id, escrow.payer_id]
       );
     }
+    await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [
+      escrow.payer_id,
+    ]);
   }
 
   if (escrowType === "session" && escrow.related_id) {
