@@ -1,7 +1,8 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { Country, State, City } from "country-state-city";
 
 const DISCLAIMER_VERSION = "2026-01-31";
@@ -95,6 +96,24 @@ export default function Home() {
     return { countryIso: country.isoCode, regionName };
   };
 
+  const supabaseClient = useMemo(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) {
+      return null;
+    }
+    return createClient(url, key, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10,
+        },
+      },
+    });
+  }, []);
+
   const searchParams = useSearchParams();
   const contentId = searchParams.get("content");
   const modelId = searchParams.get("model_id") || searchParams.get("model");
@@ -167,6 +186,30 @@ export default function Home() {
   const [clientSessions, setClientSessions] = useState([]);
   const [clientSessionsStatus, setClientSessionsStatus] = useState("");
   const [clientSessionsLoading, setClientSessionsLoading] = useState(false);
+  const [callState, setCallState] = useState({
+    open: false,
+    sessionId: null,
+    sessionType: "",
+    status: "",
+    connecting: false,
+    micMuted: false,
+    cameraOff: false,
+    peerReady: false,
+  });
+  const [callMessages, setCallMessages] = useState([]);
+  const [callInput, setCallInput] = useState("");
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const callPcRef = useRef(null);
+  const callChannelRef = useRef(null);
+  const offerSentRef = useRef(false);
+  const callUserIdRef = useRef(null);
+  const callRemoteIdRef = useRef(null);
+  const callReadyTimerRef = useRef(null);
+  const callSessionRef = useRef({ id: null, type: null });
   const [clientDeleteStatus, setClientDeleteStatus] = useState("");
   const [avatarState, setAvatarState] = useState({
     file: null,
@@ -573,9 +616,6 @@ export default function Home() {
         }));
         return;
       }
-      if (data?.invite_link && window?.Telegram?.WebApp?.openTelegramLink) {
-        window.Telegram.WebApp.openTelegramLink(data.invite_link);
-      }
       setBookingActionStatus((prev) => ({
         ...prev,
         [sessionId]: {
@@ -583,7 +623,7 @@ export default function Home() {
           error: "",
           info:
             action === "accept"
-              ? "Session accepted. Invite link sent."
+              ? "Session accepted. Open the session to start."
               : action === "cancel"
               ? "Session cancelled. Client refunded."
               : "Session declined.",
@@ -602,7 +642,367 @@ export default function Home() {
     }
   };
 
-  const handleSessionJoin = async (sessionId) => {
+  const appendCallMessage = (message) => {
+    setCallMessages((prev) => {
+      const next = [...prev, message];
+      return next.length > 100 ? next.slice(next.length - 100) : next;
+    });
+  };
+
+  const sendCallSignal = async (payload) => {
+    const channel = callChannelRef.current;
+    if (!channel) {
+      return;
+    }
+    const userId = callUserIdRef.current;
+    await channel.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { ...payload, userId },
+    });
+  };
+
+  const cleanupCall = (notifyRemote = true, resetState = true) => {
+    if (notifyRemote) {
+      sendCallSignal({ type: "hangup" }).catch(() => null);
+    }
+    const channel = callChannelRef.current;
+    if (channel) {
+      channel.unsubscribe().catch(() => null);
+    }
+    callChannelRef.current = null;
+    callRemoteIdRef.current = null;
+    callUserIdRef.current = null;
+    callSessionRef.current = { id: null, type: null };
+    if (callReadyTimerRef.current) {
+      clearInterval(callReadyTimerRef.current);
+      callReadyTimerRef.current = null;
+    }
+    offerSentRef.current = false;
+    if (callPcRef.current) {
+      callPcRef.current.ontrack = null;
+      callPcRef.current.onicecandidate = null;
+      callPcRef.current.onconnectionstatechange = null;
+      callPcRef.current.close();
+    }
+    callPcRef.current = null;
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    localStreamRef.current = null;
+    remoteStreamRef.current = null;
+    if (resetState) {
+      setCallMessages([]);
+      setCallInput("");
+      setCallState((prev) => ({
+        ...prev,
+        open: false,
+        sessionId: null,
+        sessionType: "",
+        status: "",
+        connecting: false,
+        micMuted: false,
+        cameraOff: false,
+        peerReady: false,
+      }));
+    }
+  };
+
+  const handleCallSignal = async (payload) => {
+    if (!payload) {
+      return;
+    }
+    const localUserId = callUserIdRef.current;
+    if (payload.userId && payload.userId === localUserId) {
+      return;
+    }
+    if (payload.type === "ready") {
+      callRemoteIdRef.current = payload.userId || null;
+      if (callReadyTimerRef.current) {
+        clearInterval(callReadyTimerRef.current);
+        callReadyTimerRef.current = null;
+      }
+      setCallState((prev) => ({
+        ...prev,
+        peerReady: true,
+        status: prev.status || "Partner connected.",
+      }));
+      const pc = callPcRef.current;
+      if (pc && localUserId && payload.userId && localUserId < payload.userId) {
+        if (!offerSentRef.current) {
+          offerSentRef.current = true;
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await sendCallSignal({ type: "offer", sdp: pc.localDescription });
+        }
+      }
+      return;
+    }
+    if (payload.type === "hangup") {
+      cleanupCall(false);
+      return;
+    }
+    const pc = callPcRef.current;
+    if (!pc) {
+      return;
+    }
+    if (payload.type === "offer" && payload.sdp) {
+      await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await sendCallSignal({ type: "answer", sdp: pc.localDescription });
+      return;
+    }
+    if (payload.type === "answer" && payload.sdp) {
+      if (pc.signalingState === "have-local-offer") {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+      }
+      return;
+    }
+    if (payload.type === "ice" && payload.candidate) {
+      try {
+        await pc.addIceCandidate(payload.candidate);
+      } catch {
+        // ignore candidate errors during renegotiation
+      }
+    }
+  };
+
+  const startCall = async (sessionId, sessionType) => {
+    if (!supabaseClient) {
+      setCallState((prev) => ({
+        ...prev,
+        connecting: false,
+        status: "Realtime is not configured.",
+      }));
+      return;
+    }
+    if (!initData) {
+      setCallState((prev) => ({
+        ...prev,
+        connecting: false,
+        status: "Telegram init data missing.",
+      }));
+      return;
+    }
+    const userId = profile?.user?.id;
+    if (!userId) {
+      setCallState((prev) => ({
+        ...prev,
+        connecting: false,
+        status: "Profile not ready. Try again.",
+      }));
+      return;
+    }
+    callUserIdRef.current = userId;
+    callSessionRef.current = { id: sessionId, type: sessionType };
+    setCallState((prev) => ({ ...prev, connecting: true, status: "Connecting…" }));
+
+    const channel = supabaseClient.channel(`vr-call-${sessionId}`, {
+      config: { broadcast: { self: false } },
+    });
+    callChannelRef.current = channel;
+
+    channel.on("broadcast", { event: "signal" }, ({ payload }) => {
+      handleCallSignal(payload).catch(() => null);
+    });
+
+    channel.on("broadcast", { event: "chat" }, ({ payload }) => {
+      if (!payload || payload.senderId === userId) {
+        return;
+      }
+      appendCallMessage({
+        id: payload.id || `${payload.senderId}-${payload.sentAt || Date.now()}`,
+        senderId: payload.senderId,
+        senderLabel: payload.senderLabel || "Partner",
+        text: payload.text || "",
+        sentAt: payload.sentAt || new Date().toISOString(),
+        self: false,
+      });
+    });
+
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        sendCallSignal({ type: "ready" }).catch(() => null);
+        if (callReadyTimerRef.current) {
+          clearInterval(callReadyTimerRef.current);
+        }
+        callReadyTimerRef.current = setInterval(() => {
+          sendCallSignal({ type: "ready" }).catch(() => null);
+        }, 3000);
+        if (sessionType === "chat") {
+          setCallState((prev) => ({
+            ...prev,
+            connecting: false,
+            status: "Chat ready.",
+          }));
+        }
+      }
+    });
+
+    if (sessionType === "chat") {
+      return;
+    }
+
+    setCallState((prev) => ({ ...prev, status: "Requesting microphone/camera…" }));
+    const iceRes = await fetch("/api/calls/ice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData }),
+    });
+    if (!iceRes.ok) {
+      setCallState((prev) => ({
+        ...prev,
+        connecting: false,
+        status: "Unable to get TURN credentials.",
+      }));
+      return;
+    }
+    const icePayload = await iceRes.json();
+    const iceServers = icePayload?.iceServers || [];
+
+    const pc = new RTCPeerConnection({ iceServers });
+    callPcRef.current = pc;
+    offerSentRef.current = false;
+
+    const remoteStream = new MediaStream();
+    remoteStreamRef.current = remoteStream;
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream;
+    }
+
+    pc.ontrack = (event) => {
+      event.streams[0]?.getTracks().forEach((track) => {
+        remoteStream.addTrack(track);
+      });
+    };
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendCallSignal({ type: "ice", candidate: event.candidate }).catch(() => null);
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") {
+        setCallState((prev) => ({
+          ...prev,
+          connecting: false,
+          status: "Connected.",
+        }));
+      }
+      if (pc.connectionState === "failed") {
+        setCallState((prev) => ({
+          ...prev,
+          connecting: false,
+          status: "Connection failed. Try again.",
+        }));
+      }
+      if (pc.connectionState === "disconnected") {
+        setCallState((prev) => ({
+          ...prev,
+          connecting: false,
+          status: "Disconnected.",
+        }));
+      }
+    };
+
+    try {
+      const constraints = {
+        audio: true,
+        video: sessionType === "video",
+      };
+      const localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      localStreamRef.current = localStream;
+      localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+      if (sessionType === "video" && localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+      }
+      setCallState((prev) => ({
+        ...prev,
+        connecting: true,
+        status: "Waiting for partner…",
+      }));
+    } catch {
+      setCallState((prev) => ({
+        ...prev,
+        connecting: false,
+        status: "Microphone/camera permission denied.",
+      }));
+    }
+  };
+
+  const startSessionCall = async (sessionId, sessionType) => {
+    if (!initData || !sessionId) {
+      return;
+    }
+    const resolvedType = sessionType || "video";
+    setCallState({
+      open: true,
+      sessionId,
+      sessionType: resolvedType,
+      status: "",
+      connecting: true,
+      micMuted: false,
+      cameraOff: false,
+      peerReady: false,
+    });
+    setCallMessages([]);
+    setCallInput("");
+    await startCall(sessionId, resolvedType);
+  };
+
+  const toggleMute = () => {
+    const stream = localStreamRef.current;
+    if (!stream) {
+      return;
+    }
+    const nextMuted = !callState.micMuted;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !nextMuted;
+    });
+    setCallState((prev) => ({ ...prev, micMuted: nextMuted }));
+  };
+
+  const toggleCamera = () => {
+    const stream = localStreamRef.current;
+    if (!stream) {
+      return;
+    }
+    const nextOff = !callState.cameraOff;
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = !nextOff;
+    });
+    setCallState((prev) => ({ ...prev, cameraOff: nextOff }));
+  };
+
+  const sendChatMessage = async () => {
+    const message = callInput.trim();
+    if (!message || !callChannelRef.current) {
+      return;
+    }
+    const senderId = callUserIdRef.current;
+    const payload = {
+      id: `${senderId || "me"}-${Date.now()}`,
+      senderId,
+      senderLabel: profile?.user?.public_id || profile?.user?.username || "You",
+      text: message,
+      sentAt: new Date().toISOString(),
+    };
+    await callChannelRef.current.send({
+      type: "broadcast",
+      event: "chat",
+      payload,
+    });
+    appendCallMessage({ ...payload, self: true });
+    setCallInput("");
+  };
+
+  const handleSessionJoin = async (sessionId, sessionType) => {
     if (!initData || !sessionId) {
       return;
     }
@@ -628,30 +1028,26 @@ export default function Home() {
         return;
       }
       const data = await res.json();
-      if (!data?.invite_link) {
+      if (!data?.ok) {
         setSessionActionStatus((prev) => ({
           ...prev,
           [sessionId]: {
             loading: false,
-            error: "Unable to create invite.",
+            error: "Unable to start session.",
             info: "",
           },
         }));
         return;
-      }
-      if (window?.Telegram?.WebApp?.openTelegramLink) {
-        window.Telegram.WebApp.openTelegramLink(data.invite_link);
-      } else {
-        window.open(data.invite_link, "_blank");
       }
       setSessionActionStatus((prev) => ({
         ...prev,
         [sessionId]: {
           loading: false,
           error: "",
-          info: "Session link opened.",
+          info: "Opening session…",
         },
       }));
+      await startSessionCall(sessionId, sessionType);
     } catch {
       setSessionActionStatus((prev) => ({
         ...prev,
@@ -903,6 +1299,12 @@ export default function Home() {
       prev.location === profileLocationValue ? prev : { ...prev, location: profileLocationValue }
     );
   }, [profileLocationValue, profileLocationDirty, profileEditForm.location]);
+
+  useEffect(() => {
+    return () => {
+      cleanupCall(false, false);
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -3982,7 +4384,7 @@ export default function Home() {
                               className={`cta ghost ${
                                 sessionActionStatus[item.id]?.loading ? "loading" : ""
                               }`}
-                              onClick={() => handleSessionJoin(item.id)}
+                              onClick={() => handleSessionJoin(item.id, item.session_type)}
                               disabled={sessionActionStatus[item.id]?.loading}
                             >
                               Start session
@@ -4228,6 +4630,127 @@ export default function Home() {
             >
               Submit dispute
             </button>
+          </div>
+        </section>
+      )}
+
+      {callState.open && (
+        <section className="call-overlay">
+          <div className="call-card">
+            <header>
+              <div>
+                <p className="eyebrow">
+                  {callState.sessionType === "chat"
+                    ? "Private chat"
+                    : `${callState.sessionType || "session"} call`}
+                </p>
+                <h3>
+                  {callState.sessionType === "video"
+                    ? "Video session"
+                    : callState.sessionType === "voice"
+                    ? "Voice session"
+                    : "Chat session"}
+                </h3>
+                {callState.status && <p className="helper">{callState.status}</p>}
+              </div>
+              <button type="button" className="cta ghost" onClick={() => cleanupCall(true)}>
+                End
+              </button>
+            </header>
+            <div
+              className={`call-body ${
+                callState.sessionType === "chat" ? "chat-only" : ""
+              }`}
+            >
+              {callState.sessionType !== "chat" && (
+                <div className="call-media">
+                  {callState.sessionType === "video" && (
+                    <div className="call-video-grid">
+                      <div className="call-video remote">
+                        <video ref={remoteVideoRef} autoPlay playsInline />
+                        <span className="call-label">Partner</span>
+                      </div>
+                      <div className="call-video local">
+                        <video ref={localVideoRef} autoPlay muted playsInline />
+                        <span className="call-label">You</span>
+                      </div>
+                    </div>
+                  )}
+                  {callState.sessionType === "voice" && (
+                    <div className="call-audio-grid">
+                      <div className="call-audio-tile">
+                        <span className="eyebrow">Partner</span>
+                        <p className="muted">
+                          {callState.peerReady ? "Connected" : "Waiting"}
+                        </p>
+                      </div>
+                      <div className="call-audio-tile">
+                        <span className="eyebrow">You</span>
+                        <p className="muted">{callState.micMuted ? "Muted" : "Mic on"}</p>
+                      </div>
+                    </div>
+                  )}
+                  {callState.sessionType === "voice" && (
+                    <audio ref={remoteAudioRef} autoPlay />
+                  )}
+                </div>
+              )}
+              <div className="call-chat">
+                <div className="chat-log">
+                  {callMessages.length === 0 && (
+                    <p className="helper">Say hello. Messages are not saved.</p>
+                  )}
+                  {callMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`chat-bubble ${message.self ? "self" : ""}`}
+                    >
+                      <span className="chat-name">
+                        {message.self ? "You" : message.senderLabel || "Partner"}
+                      </span>
+                      <p>{message.text}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="chat-input">
+                  <input
+                    type="text"
+                    value={callInput}
+                    onChange={(event) => setCallInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        sendChatMessage();
+                      }
+                    }}
+                    placeholder="Type a message"
+                  />
+                  <button
+                    type="button"
+                    className="cta primary"
+                    onClick={sendChatMessage}
+                    disabled={!callInput.trim()}
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </div>
+            {callState.sessionType !== "chat" && (
+              <div className="call-controls">
+                <button type="button" className="cta ghost" onClick={toggleMute}>
+                  {callState.micMuted ? "Unmute" : "Mute"}
+                </button>
+                {callState.sessionType === "video" && (
+                  <button type="button" className="cta ghost" onClick={toggleCamera}>
+                    {callState.cameraOff ? "Camera on" : "Camera off"}
+                  </button>
+                )}
+                <button type="button" className="cta danger" onClick={() => cleanupCall(true)}>
+                  End call
+                </button>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -5356,7 +5879,7 @@ export default function Home() {
                                     className={`cta ghost ${
                                       sessionActionStatus[item.id]?.loading ? "loading" : ""
                                     }`}
-                                    onClick={() => handleSessionJoin(item.id)}
+                                    onClick={() => handleSessionJoin(item.id, item.session_type)}
                                     disabled={sessionActionStatus[item.id]?.loading}
                                   >
                                     Start session

@@ -46,10 +46,11 @@ async def main():
 
             await conn.execute(text("DELETE FROM content_purchases"))
             await conn.execute(text("DELETE FROM sessions"))
+
+            # Client profiles reference escrow_accounts; delete them first.
+            await conn.execute(text("DELETE FROM client_profiles"))
             await conn.execute(text("DELETE FROM escrow_accounts"))
             await conn.execute(text("DELETE FROM transactions"))
-
-            await conn.execute(text("DELETE FROM client_profiles"))
 
             await conn.execute(
                 text(

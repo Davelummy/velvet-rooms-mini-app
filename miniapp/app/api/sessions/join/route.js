@@ -6,51 +6,6 @@ import { ensureSessionColumns } from "../../_lib/sessions";
 export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
-const SESSION_HUB_CHAT_ID = process.env.SESSION_HUB_CHAT_ID || "";
-
-function normalizeChatId(rawId) {
-  if (!rawId) {
-    return null;
-  }
-  const asString = String(rawId);
-  if (asString.startsWith("-")) {
-    return asString;
-  }
-  if (asString.startsWith("100")) {
-    return `-${asString}`;
-  }
-  return `-100${asString}`;
-}
-
-async function createSessionInviteLink(sessionRef, expiresInSeconds = 7200) {
-  const channelId = normalizeChatId(SESSION_HUB_CHAT_ID);
-  if (!BOT_TOKEN || !channelId) {
-    return null;
-  }
-  const expireDate = Math.floor(Date.now() / 1000) + expiresInSeconds;
-  try {
-    const res = await fetch(
-      `https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: channelId,
-          name: `Session ${sessionRef || ""}`.trim(),
-          member_limit: 2,
-          expire_date: expireDate,
-        }),
-      }
-    );
-    const data = await res.json();
-    if (!data?.ok) {
-      return null;
-    }
-    return data?.result?.invite_link || null;
-  } catch {
-    return null;
-  }
-}
 
 export async function POST(request) {
   const body = await request.json();
@@ -138,9 +93,5 @@ export async function POST(request) {
     );
   }
 
-  const inviteLink = await createSessionInviteLink(session.session_ref);
-  if (!inviteLink) {
-    return NextResponse.json({ error: "invite_failed" }, { status: 500 });
-  }
-  return NextResponse.json({ ok: true, invite_link: inviteLink });
+  return NextResponse.json({ ok: true });
 }

@@ -5,21 +5,6 @@ import { extractUser, verifyInitData } from "../../_lib/telegram";
 export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
-const SESSION_HUB_CHAT_ID = process.env.SESSION_HUB_CHAT_ID || "";
-
-function normalizeChatId(rawId) {
-  if (!rawId) {
-    return null;
-  }
-  const asString = String(rawId);
-  if (asString.startsWith("-")) {
-    return asString;
-  }
-  if (asString.startsWith("100")) {
-    return `-${asString}`;
-  }
-  return `-100${asString}`;
-}
 
 async function sendMessage(chatId, text) {
   if (!BOT_TOKEN || !chatId) {
@@ -32,26 +17,6 @@ async function sendMessage(chatId, text) {
   });
 }
 
-async function removeFromSessionGroup(userTelegramId) {
-  const channelId = normalizeChatId(SESSION_HUB_CHAT_ID);
-  if (!BOT_TOKEN || !channelId || !userTelegramId) {
-    return;
-  }
-  try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/banChatMember`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: channelId, user_id: userTelegramId }),
-    });
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/unbanChatMember`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: channelId, user_id: userTelegramId }),
-    });
-  } catch {
-    // ignore cleanup errors
-  }
-}
 
 export async function POST(request) {
   const body = await request.json();
@@ -140,14 +105,12 @@ export async function POST(request) {
         clientRes.rows[0].telegram_id,
         "Session completed ✅ Thanks for confirming."
       );
-      await removeFromSessionGroup(clientRes.rows[0].telegram_id);
     }
     if (modelRes.rowCount) {
       await sendMessage(
         modelRes.rows[0].telegram_id,
         "Session completed ✅ Thanks for confirming."
       );
-      await removeFromSessionGroup(modelRes.rows[0].telegram_id);
     }
   }
 
