@@ -51,17 +51,21 @@ export default function Home() {
     if (!countryIso) {
       return { kind: "region", items: [] };
     }
+    const normalizeName = (value) => (value || "").toString().trim();
     const states = State.getStatesOfCountry(countryIso) || [];
     if (states.length) {
       return {
         kind: "state",
-        items: states.map((state) => state.name).sort((a, b) => a.localeCompare(b)),
+        items: states
+          .map((state) => normalizeName(state.name))
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b)),
       };
     }
     const cities = City.getCitiesOfCountry(countryIso) || [];
-    const names = Array.from(new Set(cities.map((city) => city.name))).sort((a, b) =>
-      a.localeCompare(b)
-    );
+    const names = Array.from(
+      new Set(cities.map((city) => normalizeName(city.name)).filter(Boolean))
+    ).sort((a, b) => a.localeCompare(b));
     return { kind: "city", items: names };
   };
 
@@ -1257,6 +1261,9 @@ export default function Home() {
   }, [clientLocationValue, clientLocationDirty, clientForm.location]);
 
   useEffect(() => {
+    if (clientLocationDirty) {
+      return;
+    }
     if (!clientForm.location) {
       return;
     }
@@ -1267,7 +1274,7 @@ export default function Home() {
     if (parsed.regionName !== clientRegionName) {
       setClientRegionName(parsed.regionName);
     }
-  }, [clientForm.location, clientCountryIso, clientRegionName]);
+  }, [clientForm.location, clientLocationDirty, clientCountryIso, clientRegionName]);
 
   useEffect(() => {
     if (!modelLocationDirty && modelForm.location) {
@@ -1279,6 +1286,9 @@ export default function Home() {
   }, [modelLocationValue, modelLocationDirty, modelForm.location]);
 
   useEffect(() => {
+    if (modelLocationDirty) {
+      return;
+    }
     if (!modelForm.location) {
       return;
     }
@@ -1289,7 +1299,7 @@ export default function Home() {
     if (parsed.regionName !== modelRegionName) {
       setModelRegionName(parsed.regionName);
     }
-  }, [modelForm.location, modelCountryIso, modelRegionName]);
+  }, [modelForm.location, modelLocationDirty, modelCountryIso, modelRegionName]);
 
   useEffect(() => {
     if (!profileLocationDirty && profileEditForm.location) {
