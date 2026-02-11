@@ -16,7 +16,6 @@ import logging
 import sentry_sdk
 from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT))
@@ -25,7 +24,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("user_bot")
 from shared.config import settings
 from shared.db import AsyncSessionLocal
-from models import ClientProfile, DigitalContent, EscrowAccount, ModelProfile, Transaction, User
+from models import ClientProfile, DigitalContent, ModelProfile, Transaction, User
 from bot.content_flow import (
     create_content,
     create_purchase_request,
@@ -67,51 +66,6 @@ class PendingCryptoFilter(BaseFilter):
     async def __call__(self, message: types.Message) -> bool:
         return bool(message.from_user and message.from_user.id in PENDING_CRYPTO)
 PENDING_CONTENT: dict[int, dict[str, str]] = {}
-
-
-def _normalize_chat_id(raw_id: Optional[int]) -> Optional[int]:
-    if raw_id is None:
-        return None
-    raw = str(raw_id)
-    if raw.startswith("-"):
-        return int(raw)
-    if raw.startswith("100"):
-        return int(f"-{raw}")
-    return int(f"-100{raw}")
-
-
-async def _user_has_gallery_access(db: AsyncSession, user_id: int) -> bool:
-    profile = await db.execute(select(ClientProfile).where(ClientProfile.user_id == user_id))
-    client_profile = profile.scalar_one_or_none()
-    if client_profile and client_profile.access_fee_paid:
-        return True
-    escrow = await db.execute(
-        select(EscrowAccount)
-        .where(
-            EscrowAccount.payer_id == user_id,
-            EscrowAccount.status == "released",
-            EscrowAccount.escrow_type.in_(["access_fee", "access"]),
-        )
-        .order_by(EscrowAccount.released_at.desc())
-        .limit(1)
-    )
-    released = escrow.scalar_one_or_none()
-    if not released:
-        return False
-    if not client_profile:
-        client_profile = ClientProfile(
-            user_id=user_id,
-            access_fee_paid=True,
-            access_granted_at=utcnow(),
-            access_fee_escrow_id=released.id,
-        )
-        db.add(client_profile)
-    else:
-        client_profile.access_fee_paid = True
-        client_profile.access_granted_at = client_profile.access_granted_at or utcnow()
-        client_profile.access_fee_escrow_id = client_profile.access_fee_escrow_id or released.id
-    await db.commit()
-    return True
 
 
 def _require_bot_token() -> str:
@@ -429,48 +383,6 @@ async def _send_onboarding_dashboard(message: types.Message, role: str) -> None:
             reply_markup=_entry_keyboard(),
         )
         return
-
-
-async def gallery_join_request_handler(
-    join_request: types.ChatJoinRequest,
-    bot: Bot,
-):
-    target_chat_id = _normalize_chat_id(settings.main_gallery_channel_id)
-    if not target_chat_id or join_request.chat.id != target_chat_id:
-        return
-    if not join_request.from_user:
-        return
-    async with AsyncSessionLocal() as db:
-        user = await get_user_by_telegram_id(db, join_request.from_user.id)
-        if not user:
-            try:
-                await bot.decline_chat_join_request(
-                    chat_id=join_request.chat.id,
-                    user_id=join_request.from_user.id,
-                )
-            except Exception:
-                pass
-            return
-        has_access = await _user_has_gallery_access(db, user.id)
-
-    try:
-        if has_access:
-            await bot.approve_chat_join_request(
-                chat_id=join_request.chat.id,
-                user_id=join_request.from_user.id,
-            )
-        else:
-            await bot.decline_chat_join_request(
-                chat_id=join_request.chat.id,
-                user_id=join_request.from_user.id,
-            )
-            await bot.send_message(
-                join_request.from_user.id,
-                "Gallery access requires the access fee. Please complete payment in the mini app.",
-            )
-    except Exception:
-        # avoid breaking the webhook on join request errors
-        pass
 
 
 async def _get_user_or_prompt_role(
@@ -1670,7 +1582,6 @@ def main():
 
     dp.message.register(start_handler, Command("start"))
     dp.message.register(menu_handler, Command("menu"))
-    dp.chat_join_request.register(gallery_join_request_handler)
 
     async def handle_startup(app: web.Application):
         await on_startup(bot)
