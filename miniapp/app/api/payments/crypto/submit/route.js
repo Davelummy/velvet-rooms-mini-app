@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { query } from "../../../_lib/db";
 import { extractUser, verifyInitData } from "../../../_lib/telegram";
 import { getCryptoWallets } from "../../../_lib/crypto";
+import { createRequestContext, withRequestId } from "../../../_lib/observability";
+import { checkRateLimit } from "../../../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -14,14 +16,29 @@ function normalizeToken(value) {
 }
 
 export async function POST(request) {
+  const ctx = createRequestContext(request, "payments/crypto/submit");
   const body = await request.json();
   const initData = body?.initData || "";
   if (!verifyInitData(initData, BOT_TOKEN)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return NextResponse.json(withRequestId({ error: "unauthorized" }, ctx.requestId), {
+      status: 401,
+    });
   }
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
-    return NextResponse.json({ error: "user_missing" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "user_missing" }, ctx.requestId), {
+      status: 400,
+    });
+  }
+  const allowed = await checkRateLimit({
+    key: `pay_submit:${tgUser.id}`,
+    limit: 6,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json(withRequestId({ error: "rate_limited" }, ctx.requestId), {
+      status: 429,
+    });
   }
 
   const transactionRef = body?.transaction_ref || "";
@@ -29,16 +46,27 @@ export async function POST(request) {
   const network = normalizeToken(body?.network);
   const currency = normalizeToken(body?.currency);
   if (!transactionRef || !txHash || !network || !currency) {
-    return NextResponse.json({ error: "missing_fields" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "missing_fields" }, ctx.requestId), {
+      status: 400,
+    });
   }
   if (!ALLOWED_CURRENCIES.includes(currency) || !ALLOWED_NETWORKS.includes(network)) {
-    return NextResponse.json({ error: "invalid_currency_or_network" }, { status: 400 });
+    return NextResponse.json(
+      withRequestId({ error: "invalid_currency_or_network" }, ctx.requestId),
+      { status: 400 }
+    );
   }
   if (currency === "BTC" && network !== "BTC") {
-    return NextResponse.json({ error: "invalid_network_for_btc" }, { status: 400 });
+    return NextResponse.json(
+      withRequestId({ error: "invalid_network_for_btc" }, ctx.requestId),
+      { status: 400 }
+    );
   }
   if (currency === "USDT" && !["TRC20", "BSCCHAIN"].includes(network)) {
-    return NextResponse.json({ error: "invalid_network_for_usdt" }, { status: 400 });
+    return NextResponse.json(
+      withRequestId({ error: "invalid_network_for_usdt" }, ctx.requestId),
+      { status: 400 }
+    );
   }
 
   const txRes = await query(
@@ -47,20 +75,31 @@ export async function POST(request) {
     [transactionRef]
   );
   if (!txRes.rowCount) {
-    return NextResponse.json({ error: "transaction_missing" }, { status: 404 });
+    return NextResponse.json(
+      withRequestId({ error: "transaction_missing" }, ctx.requestId),
+      { status: 404 }
+    );
   }
   const transaction = txRes.rows[0];
   if (transaction.user_id === null) {
-    return NextResponse.json({ error: "transaction_owner_missing" }, { status: 400 });
+    return NextResponse.json(
+      withRequestId({ error: "transaction_owner_missing" }, ctx.requestId),
+      { status: 400 }
+    );
   }
 
   const userRes = await query("SELECT id FROM users WHERE telegram_id = $1", [tgUser.id]);
   if (!userRes.rowCount || userRes.rows[0].id !== transaction.user_id) {
-    return NextResponse.json({ error: "transaction_owner_mismatch" }, { status: 403 });
+    return NextResponse.json(
+      withRequestId({ error: "transaction_owner_mismatch" }, ctx.requestId),
+      { status: 403 }
+    );
   }
 
   if (["submitted", "completed"].includes(transaction.status)) {
-    return NextResponse.json({ error: "already_submitted" }, { status: 409 });
+    return NextResponse.json(withRequestId({ error: "already_submitted" }, ctx.requestId), {
+      status: 409,
+    });
   }
 
   const wallets = getCryptoWallets();
@@ -85,5 +124,5 @@ export async function POST(request) {
     [JSON.stringify(metadata), transactionRef]
   );
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(withRequestId({ ok: true }, ctx.requestId));
 }

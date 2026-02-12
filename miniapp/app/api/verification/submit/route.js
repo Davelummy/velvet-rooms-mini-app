@@ -4,6 +4,7 @@ import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureUser } from "../../_lib/users";
 import { ensureSessionColumns } from "../../_lib/sessions";
 import { ensureModelProfileColumns } from "../../_lib/models";
+import { logConsent } from "../../_lib/consent";
 
 export const runtime = "nodejs";
 
@@ -153,6 +154,12 @@ export async function POST(request) {
     "UPDATE users SET disclaimer_accepted_at = NOW(), disclaimer_version = $2 WHERE id = $1",
     [userId, disclaimerVersion]
   );
+  await logConsent({
+    userId,
+    consentType: "model_disclaimer",
+    consentVersion: disclaimerVersion,
+    metadata: { birth_month: birthMonth, birth_year: birthYear },
+  });
 
   return NextResponse.json({ ok: true });
 }

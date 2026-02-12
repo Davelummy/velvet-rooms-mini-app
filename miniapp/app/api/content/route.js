@@ -6,6 +6,7 @@ import { ensureFollowTable } from "../_lib/follows";
 import { ensureBlockTable } from "../_lib/blocks";
 import { ensureSessionColumns } from "../_lib/sessions";
 import { ensureEngagementTables } from "../_lib/engagement";
+import { ensureContentColumns } from "../_lib/content";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,13 @@ function getTeaserBucket() {
 
 function getAvatarBucket() {
   return process.env.SUPABASE_AVATAR_BUCKET || "velvetrooms-avatars";
+}
+
+function parseDateInput(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString();
 }
 
 export async function POST(request) {
@@ -42,6 +50,8 @@ export async function POST(request) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
   }
 
+  await ensureContentColumns();
+
   const title = (body?.title || "").toString().trim();
   const description = (body?.description || "").toString().trim();
   const contentTypeRaw = (body?.content_type || "").toString().trim();
@@ -49,6 +59,8 @@ export async function POST(request) {
   const fullPath = (body?.full_path || "").toString().trim();
   const priceRaw = body?.price;
   const priceValue = priceRaw === null || priceRaw === "" ? null : Number(priceRaw);
+  const publishAt = parseDateInput(body?.publish_at);
+  const expiresAt = parseDateInput(body?.expires_at);
 
   if (!title || !contentTypeRaw || !previewPath) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
@@ -89,11 +101,14 @@ export async function POST(request) {
   }
 
   const now = new Date();
+  if (publishAt && expiresAt && new Date(expiresAt) <= new Date(publishAt)) {
+    return NextResponse.json({ error: "invalid_expiry" }, { status: 400 });
+  }
   const deliveryPath = fullPath || previewPath;
   const insertRes = await query(
     `INSERT INTO digital_content
-     (model_id, content_type, title, description, price, telegram_file_id, preview_file_id, is_active, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8)
+     (model_id, content_type, title, description, price, telegram_file_id, preview_file_id, is_active, created_at, publish_at, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9, $10)
      RETURNING id`,
     [
       userId,
@@ -104,6 +119,8 @@ export async function POST(request) {
       deliveryPath,
       previewPath,
       now,
+      publishAt,
+      expiresAt,
     ]
   );
 
@@ -143,6 +160,7 @@ export async function GET(request) {
   if (!verifyInitData(initData, BOT_TOKEN)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  await ensureContentColumns();
   await ensureFollowTable();
   await ensureBlockTable();
   await ensureSessionColumns();
@@ -150,6 +168,9 @@ export async function GET(request) {
 
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope");
+  let pageLimit = Math.min(Number(url.searchParams.get("limit") || 24), 50);
+  let pageOffset = Math.max(Number(url.searchParams.get("offset") || 0), 0);
+  let hasMore = false;
   let res;
   if (scope === "mine") {
     const tgUser = extractUser(initData);
@@ -169,12 +190,14 @@ export async function GET(request) {
     res = await query(
       `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
               dc.preview_file_id, dc.is_active, dc.created_at,
+              dc.publish_at, dc.expires_at,
               (SELECT COUNT(*)::int FROM content_likes cl WHERE cl.content_id = dc.id) AS likes_count,
               (SELECT COUNT(*)::int FROM content_views cv WHERE cv.content_id = dc.id) AS views_count
        FROM digital_content dc
        WHERE dc.model_id = $1
-       ORDER BY dc.created_at DESC`,
-      [userId]
+       ORDER BY dc.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, pageLimit + 1, pageOffset]
     );
   } else {
     const tgUser = extractUser(initData);
@@ -251,6 +274,7 @@ export async function GET(request) {
     res = await query(
       `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
               dc.preview_file_id, dc.model_id, dc.created_at,
+              dc.publish_at, dc.expires_at,
               u.public_id, u.username, u.avatar_path,
               mp.display_name, mp.verification_status, mp.approved_at,
               mp.tags, mp.availability, mp.bio,
@@ -283,13 +307,16 @@ export async function GET(request) {
        JOIN users u ON u.id = dc.model_id
        LEFT JOIN model_profiles mp ON mp.user_id = dc.model_id
        WHERE dc.is_active = TRUE
+         AND (dc.publish_at IS NULL OR dc.publish_at <= NOW())
+         AND (dc.expires_at IS NULL OR dc.expires_at > NOW())
          AND NOT EXISTS (
            SELECT 1 FROM blocks b
            WHERE (b.blocker_id = $1 AND b.blocked_id = dc.model_id)
               OR (b.blocker_id = dc.model_id AND b.blocked_id = $1)
          )
-       ORDER BY is_following DESC, is_spotlight DESC, dc.created_at DESC`,
-      [userRes.rows[0].id]
+       ORDER BY is_following DESC, is_spotlight DESC, dc.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userRes.rows[0].id, pageLimit + 1, pageOffset]
     );
   }
 
@@ -298,14 +325,32 @@ export async function GET(request) {
   const supabase = getSupabase();
   const ttlSeconds = Number(process.env.TEASER_PREVIEW_TTL_SECONDS || 60);
   const items = [];
-  for (const row of res.rows) {
+  const rows = res.rows || [];
+  hasMore = rows.length > pageLimit;
+  const sliced = hasMore ? rows.slice(0, pageLimit) : rows;
+  for (const row of sliced) {
     let previewUrl = null;
+    let previewThumbUrl = null;
     let avatarUrl = null;
     if (row.preview_file_id) {
       const { data } = await supabase.storage
         .from(bucket)
         .createSignedUrl(row.preview_file_id, ttlSeconds);
       previewUrl = data?.signedUrl || null;
+      try {
+        const { data: thumbData } = await supabase.storage
+          .from(bucket)
+          .createSignedUrl(row.preview_file_id, ttlSeconds, {
+            transform: {
+              width: 480,
+              height: 640,
+              resize: "cover",
+            },
+          });
+        previewThumbUrl = thumbData?.signedUrl || null;
+      } catch {
+        previewThumbUrl = null;
+      }
     }
     if (row.avatar_path) {
       const { data } = await supabase.storage
@@ -319,9 +364,10 @@ export async function GET(request) {
       views_count: row.views_count ?? 0,
       has_liked: Boolean(row.has_liked),
       preview_url: previewUrl,
+      preview_thumb_url: previewThumbUrl,
       avatar_url: avatarUrl,
     });
   }
 
-  return NextResponse.json({ items });
+  return NextResponse.json({ items, has_more: hasMore });
 }

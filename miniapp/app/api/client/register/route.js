@@ -3,6 +3,7 @@ import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureUser } from "../../_lib/users";
 import { ensureClientProfileColumns } from "../../_lib/clients";
+import { logConsent } from "../../_lib/consent";
 
 export const runtime = "nodejs";
 
@@ -119,6 +120,12 @@ export async function POST(request) {
   );
 
   await query("UPDATE users SET status = 'active' WHERE id = $1", [userId]);
+  await logConsent({
+    userId,
+    consentType: "client_disclaimer",
+    consentVersion: disclaimerVersion,
+    metadata: { birth_month: birthMonth, birth_year: birthYear },
+  });
 
   return NextResponse.json({ ok: true });
 }

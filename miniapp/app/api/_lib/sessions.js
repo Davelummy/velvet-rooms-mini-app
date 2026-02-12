@@ -46,5 +46,8 @@ export async function ensureSessionColumns() {
   await query(
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS end_note TEXT"
   );
+  await query(
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS end_outcome TEXT"
+  );
   ensured = true;
 }

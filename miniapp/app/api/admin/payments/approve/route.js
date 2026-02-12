@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
+import { getOrCreateInviteLink } from "../../../_lib/telegram_invites";
 
 export const runtime = "nodejs";
 
@@ -20,41 +21,6 @@ function normalizeChannelId(rawId) {
     return `-${asString}`;
   }
   return `-100${asString}`;
-}
-
-async function createInviteLink() {
-  const channelId = normalizeChannelId(process.env.MAIN_GALLERY_CHANNEL_ID || "");
-  if (!BOT_TOKEN || !channelId) {
-    return null;
-  }
-  const payloads = [
-    {
-      chat_id: channelId,
-      name: "Velvet Rooms Gallery",
-      creates_join_request: true,
-    },
-    {
-      chat_id: channelId,
-      name: "Velvet Rooms Gallery",
-    },
-  ];
-  for (const payload of payloads) {
-    try {
-      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!data?.ok) {
-        continue;
-      }
-      return data?.result?.invite_link || null;
-    } catch {
-      // try next payload
-    }
-  }
-  return null;
 }
 
 async function grantClientAccess(userId) {
@@ -182,7 +148,14 @@ export async function POST(request) {
       transaction.user_id,
     ]);
     if (clientRes.rowCount) {
-      const inviteLink = await createInviteLink();
+      const channelId = normalizeChannelId(process.env.MAIN_GALLERY_CHANNEL_ID || "");
+      const inviteResult = await getOrCreateInviteLink({
+        botToken: BOT_TOKEN,
+        chatId: channelId,
+        ttlSeconds: Number(process.env.GALLERY_INVITE_TTL_SECONDS || 3600),
+        rateLimitKey: `admin_invite:${transactionRef}`,
+      });
+      const inviteLink = inviteResult?.ok ? inviteResult.invite_link : null;
       const link = inviteLink ? `\nJoin gallery: ${inviteLink}` : "";
       await sendMessage(
         clientRes.rows[0].telegram_id,

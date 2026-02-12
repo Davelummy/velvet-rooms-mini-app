@@ -36,11 +36,31 @@ export function getPool() {
   return pool;
 }
 
+export async function getClient() {
+  const poolInstance = getPool();
+  return poolInstance.connect();
+}
+
 export async function query(text, params = []) {
   const client = await getPool().connect();
   try {
     const res = await client.query(text, params);
     return res;
+  } finally {
+    client.release();
+  }
+}
+
+export async function withTransaction(callback) {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const result = await callback(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
   } finally {
     client.release();
   }

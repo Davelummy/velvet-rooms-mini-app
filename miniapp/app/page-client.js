@@ -12,6 +12,8 @@ const ONBOARDING_STORAGE_KEY = "vr_onboarding_seen";
 const CLIENT_DRAFT_KEY = "vr_client_draft_v1";
 const MODEL_DRAFT_KEY = "vr_model_draft_v1";
 const AVATAR_CROP_SIZE = 220;
+const GALLERY_PAGE_SIZE = 18;
+const SESSIONS_PAGE_SIZE = 20;
 
 export default function Home() {
   const cleanTagLabel = (value) => {
@@ -41,6 +43,21 @@ export default function Home() {
       item.public_id ||
       fallback
     );
+  };
+
+  const generateIdempotencyKey = () => {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  };
+
+  const getWalletIdempotencyKey = (mode, session) => {
+    const key = `${mode}:${session?.sessionId || session?.modelId || "access"}`;
+    if (!walletIdempotencyRef.current[key]) {
+      walletIdempotencyRef.current[key] = generateIdempotencyKey();
+    }
+    return walletIdempotencyRef.current[key];
   };
 
   const countries = useMemo(() => {
@@ -196,6 +213,9 @@ export default function Home() {
   const [galleryItems, setGalleryItems] = useState([]);
   const [galleryStatus, setGalleryStatus] = useState("");
   const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryPage, setGalleryPage] = useState(0);
+  const [galleryHasMore, setGalleryHasMore] = useState(false);
+  const [galleryLoadingMore, setGalleryLoadingMore] = useState(false);
   const [galleryFilter, setGalleryFilter] = useState("all");
   const [savedGalleryIds, setSavedGalleryIds] = useState([]);
   const [galleryJoinStatus, setGalleryJoinStatus] = useState({
@@ -211,6 +231,9 @@ export default function Home() {
   const [clientSessions, setClientSessions] = useState([]);
   const [clientSessionsStatus, setClientSessionsStatus] = useState("");
   const [clientSessionsLoading, setClientSessionsLoading] = useState(false);
+  const [clientSessionsPage, setClientSessionsPage] = useState(0);
+  const [clientSessionsHasMore, setClientSessionsHasMore] = useState(false);
+  const [clientSessionsLoadingMore, setClientSessionsLoadingMore] = useState(false);
   const [callState, setCallState] = useState({
     open: false,
     sessionId: null,
@@ -236,6 +259,7 @@ export default function Home() {
   const [callInput, setCallInput] = useState("");
   const [callChatOpen, setCallChatOpen] = useState(false);
   const [callMenuOpen, setCallMenuOpen] = useState(false);
+  const [callTyping, setCallTyping] = useState(false);
   const [callTiming, setCallTiming] = useState({
     startedAt: null,
     endsAt: null,
@@ -264,7 +288,16 @@ export default function Home() {
   const callUserIdRef = useRef(null);
   const callRemoteIdRef = useRef(null);
   const callReadyTimerRef = useRef(null);
+  const callTypingTimerRef = useRef(null);
+  const callTypingSentRef = useRef(0);
+  const callTurnTimerRef = useRef(null);
+  const callTurnAppliedRef = useRef(false);
+  const callTurnRequestedRef = useRef(false);
+  const callIceRestartingRef = useRef(false);
+  const callFailureLoggedRef = useRef(false);
+  const callSuccessLoggedRef = useRef(false);
   const callSessionRef = useRef({ id: null, type: null });
+  const walletIdempotencyRef = useRef({});
   const callWarningRef = useRef({ twoMin: false, thirtySec: false, ended: false });
   const clientDraftTimerRef = useRef(null);
   const modelDraftTimerRef = useRef(null);
@@ -300,6 +333,8 @@ export default function Home() {
   const [reportDialog, setReportDialog] = useState({
     open: false,
     targetId: null,
+    targetType: "user",
+    contentId: null,
     targetLabel: "",
     selectedReason: "",
     expanded: "",
@@ -481,6 +516,9 @@ export default function Home() {
   );
   const onboardingTotal = onboardingSlides.length;
   const onboardingCurrent = onboardingSlides[Math.min(onboardingStep, onboardingTotal - 1)];
+  const onboardingProgress = Math.round(
+    ((Math.min(onboardingStep, onboardingTotal - 1) + 1) / onboardingTotal) * 100
+  );
   const [profileEditStatus, setProfileEditStatus] = useState("");
   const [profileEditSaving, setProfileEditSaving] = useState(false);
   const [profileSavedStatus, setProfileSavedStatus] = useState("");
@@ -523,6 +561,9 @@ export default function Home() {
   const [myBookings, setMyBookings] = useState([]);
   const [myBookingsStatus, setMyBookingsStatus] = useState("");
   const [myBookingsLoading, setMyBookingsLoading] = useState(false);
+  const [myBookingsPage, setMyBookingsPage] = useState(0);
+  const [myBookingsHasMore, setMyBookingsHasMore] = useState(false);
+  const [myBookingsLoadingMore, setMyBookingsLoadingMore] = useState(false);
   const [bookingActionStatus, setBookingActionStatus] = useState({});
   const [sessionActionStatus, setSessionActionStatus] = useState({});
   const [disputeState, setDisputeState] = useState({
@@ -764,6 +805,8 @@ export default function Home() {
     description: "",
     unlockPrice: "",
     contentType: "image",
+    publishAt: "",
+    expiresAt: "",
     mediaFile: null,
     mediaName: "",
     fullFile: null,
@@ -991,29 +1034,7 @@ export default function Home() {
   });
 
   const refreshBookings = async () => {
-    if (!initData || role !== "model" || !modelApproved) {
-      return;
-    }
-    setMyBookingsLoading(true);
-    try {
-      const res = await fetch("/api/sessions?scope=mine", {
-        headers: { "x-telegram-init": initData },
-      });
-      if (!res.ok) {
-        setMyBookingsStatus(`Unable to load bookings (HTTP ${res.status}).`);
-        setMyBookings([]);
-        setMyBookingsLoading(false);
-        return;
-      }
-      const data = await res.json();
-      setMyBookings(data.items || []);
-      setMyBookingsStatus("");
-      setMyBookingsLoading(false);
-    } catch {
-      setMyBookingsStatus("Unable to load bookings.");
-      setMyBookings([]);
-      setMyBookingsLoading(false);
-    }
+    await loadBookingsPage(0, false);
   };
 
   const handleBookingAction = async (sessionId, action) => {
@@ -1086,6 +1107,32 @@ export default function Home() {
     });
   };
 
+  const updateCallMessageStatus = (id, status) => {
+    if (!id) {
+      return;
+    }
+    setCallMessages((prev) =>
+      prev.map((msg) => (msg.id === id ? { ...msg, status } : msg))
+    );
+  };
+
+  const sendTypingSignal = async () => {
+    const channel = callChannelRef.current;
+    if (!channel) {
+      return;
+    }
+    const now = Date.now();
+    if (now - callTypingSentRef.current < 2000) {
+      return;
+    }
+    callTypingSentRef.current = now;
+    await channel.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { senderId: callUserIdRef.current },
+    });
+  };
+
   const sendCallSignal = async (payload) => {
     const channel = callChannelRef.current;
     if (!channel) {
@@ -1097,6 +1144,26 @@ export default function Home() {
       event: "signal",
       payload: { ...payload, userId },
     });
+  };
+
+  const logCallEvent = async (eventType, payload = {}) => {
+    if (!initData) {
+      return;
+    }
+    try {
+      await fetch("/api/metrics/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          event_type: eventType,
+          session_id: callState.sessionId,
+          payload,
+        }),
+      });
+    } catch {
+      // ignore metrics failures
+    }
   };
 
   const cleanupCall = (notifyRemote = true, resetState = true) => {
@@ -1115,6 +1182,19 @@ export default function Home() {
       clearInterval(callReadyTimerRef.current);
       callReadyTimerRef.current = null;
     }
+    if (callTypingTimerRef.current) {
+      clearTimeout(callTypingTimerRef.current);
+      callTypingTimerRef.current = null;
+    }
+    if (callTurnTimerRef.current) {
+      clearTimeout(callTurnTimerRef.current);
+      callTurnTimerRef.current = null;
+    }
+    callTurnAppliedRef.current = false;
+    callTurnRequestedRef.current = false;
+    callIceRestartingRef.current = false;
+    callFailureLoggedRef.current = false;
+    callSuccessLoggedRef.current = false;
     offerSentRef.current = false;
     if (callPcRef.current) {
       callPcRef.current.ontrack = null;
@@ -1134,6 +1214,7 @@ export default function Home() {
     if (resetState) {
       setCallMessages([]);
       setCallInput("");
+      setCallTyping(false);
       setCallState((prev) => ({
         ...prev,
         open: false,
@@ -1166,6 +1247,10 @@ export default function Home() {
     if (payload.userId && payload.userId === localUserId) {
       return;
     }
+    if (payload.type === "turn-needed") {
+      triggerTurnFallback(payload.reason || "peer-request").catch(() => null);
+      return;
+    }
     if (payload.type === "ready") {
       callRemoteIdRef.current = payload.userId || null;
       if (callReadyTimerRef.current) {
@@ -1184,6 +1269,7 @@ export default function Home() {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           await sendCallSignal({ type: "offer", sdp: pc.localDescription });
+          scheduleTurnFallback("initial-offer");
         }
       }
       return;
@@ -1198,10 +1284,14 @@ export default function Home() {
       return;
     }
     if (payload.type === "offer" && payload.sdp) {
+      if (payload.userId) {
+        callRemoteIdRef.current = payload.userId;
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       await sendCallSignal({ type: "answer", sdp: pc.localDescription });
+      scheduleTurnFallback("answer-sent");
       return;
     }
     if (payload.type === "answer" && payload.sdp) {
@@ -1219,6 +1309,159 @@ export default function Home() {
     }
   };
 
+  const getStunServers = () => [
+    { urls: "stun:global.stun.twilio.com:3478" },
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+  ];
+
+  const buildIceConfig = (turnServers = []) => ({
+    iceServers: [...getStunServers(), ...turnServers],
+    iceTransportPolicy: "all",
+  });
+
+  const buildVideoConstraints = () => {
+    const width = typeof window !== "undefined" ? window.innerWidth : 390;
+    let idealWidth = 640;
+    let idealHeight = 480;
+    if (width < 360) {
+      idealWidth = 480;
+      idealHeight = 360;
+    } else if (width >= 900) {
+      idealWidth = 960;
+      idealHeight = 540;
+    }
+    return {
+      width: { ideal: idealWidth, max: 960 },
+      height: { ideal: idealHeight, max: 540 },
+      frameRate: { ideal: 24, max: 30 },
+    };
+  };
+
+  const buildMediaConstraints = (sessionType, audioOnly) => ({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    video: sessionType === "video" && !audioOnly ? buildVideoConstraints() : false,
+  });
+
+  const applySenderBitrateCaps = (pc) => {
+    if (!pc) {
+      return;
+    }
+    pc.getSenders().forEach((sender) => {
+      const track = sender.track;
+      if (!track) {
+        return;
+      }
+      const params = sender.getParameters();
+      if (!params.encodings || !params.encodings.length) {
+        params.encodings = [{}];
+      }
+      const encoding = params.encodings[0];
+      if (track.kind === "video") {
+        encoding.maxBitrate = 700000;
+        params.degradationPreference = "balanced";
+      }
+      if (track.kind === "audio") {
+        encoding.maxBitrate = 48000;
+      }
+      sender.setParameters(params).catch(() => null);
+    });
+  };
+
+  const fetchTurnServers = async () => {
+    if (!initData) {
+      return [];
+    }
+    const iceRes = await fetch("/api/calls/ice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData }),
+    });
+    if (!iceRes.ok) {
+      return [];
+    }
+    const icePayload = await iceRes.json();
+    return icePayload?.iceServers || [];
+  };
+
+  const clearTurnFallbackTimer = () => {
+    if (callTurnTimerRef.current) {
+      clearTimeout(callTurnTimerRef.current);
+      callTurnTimerRef.current = null;
+    }
+  };
+
+  const scheduleTurnFallback = (reason) => {
+    if (callTurnTimerRef.current || callTurnAppliedRef.current) {
+      return;
+    }
+    callTurnTimerRef.current = setTimeout(() => {
+      callTurnTimerRef.current = null;
+      const pc = callPcRef.current;
+      if (!pc || callTurnAppliedRef.current) {
+        return;
+      }
+      const state = pc.iceConnectionState;
+      if (state === "connected" || state === "completed") {
+        return;
+      }
+      triggerTurnFallback(reason).catch(() => null);
+    }, 4500);
+  };
+
+  const triggerTurnFallback = async (reason) => {
+    if (callTurnAppliedRef.current || callIceRestartingRef.current) {
+      return;
+    }
+    const localUserId = callUserIdRef.current;
+    const remoteUserId = callRemoteIdRef.current;
+    const isOfferer = localUserId && remoteUserId && localUserId < remoteUserId;
+    if (!isOfferer) {
+      await sendCallSignal({ type: "turn-needed", reason });
+      return;
+    }
+    if (callTurnRequestedRef.current) {
+      return;
+    }
+    callTurnRequestedRef.current = true;
+    setCallState((prev) => ({
+      ...prev,
+      status: prev.status || "Optimizing connection…",
+    }));
+    const turnServers = await fetchTurnServers();
+    callTurnRequestedRef.current = false;
+    if (!turnServers.length) {
+      return;
+    }
+    callTurnAppliedRef.current = true;
+    const pc = callPcRef.current;
+    if (!pc) {
+      return;
+    }
+    try {
+      pc.setConfiguration(buildIceConfig(turnServers));
+    } catch {
+      // ignore configuration errors
+    }
+    if (callIceRestartingRef.current) {
+      return;
+    }
+    callIceRestartingRef.current = true;
+    try {
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      await sendCallSignal({ type: "offer", sdp: pc.localDescription, reason: "turn" });
+    } finally {
+      setTimeout(() => {
+        callIceRestartingRef.current = false;
+      }, 1500);
+    }
+  };
+
   const checkCallDevices = async (sessionType, audioOnly) => {
     if (!navigator?.mediaDevices?.getUserMedia) {
       setCallPreflight((prev) => ({
@@ -1231,10 +1474,7 @@ export default function Home() {
     }
     setCallPreflight((prev) => ({ ...prev, checking: true }));
     try {
-      const constraints = {
-        audio: true,
-        video: sessionType === "video" && !audioOnly,
-      };
+      const constraints = buildMediaConstraints(sessionType, audioOnly);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const micOk = stream.getAudioTracks().length > 0;
       const camOk =
@@ -1314,7 +1554,38 @@ export default function Home() {
         text: payload.text || "",
         sentAt: payload.sentAt || new Date().toISOString(),
         self: false,
+        status: "delivered",
       });
+      if (payload.id) {
+        channel
+          .send({
+            type: "broadcast",
+            event: "chat_ack",
+            payload: { messageId: payload.id, senderId: payload.senderId },
+          })
+          .catch(() => null);
+      }
+    });
+
+    channel.on("broadcast", { event: "chat_ack" }, ({ payload }) => {
+      if (!payload || payload.senderId !== userId) {
+        return;
+      }
+      updateCallMessageStatus(payload.messageId, "delivered");
+    });
+
+    channel.on("broadcast", { event: "typing" }, ({ payload }) => {
+      if (!payload || payload.senderId === userId) {
+        return;
+      }
+      setCallTyping(true);
+      if (callTypingTimerRef.current) {
+        clearTimeout(callTypingTimerRef.current);
+      }
+      callTypingTimerRef.current = setTimeout(() => {
+        setCallTyping(false);
+        callTypingTimerRef.current = null;
+      }, 2500);
     });
 
     channel.subscribe((status) => {
@@ -1342,23 +1613,7 @@ export default function Home() {
     }
 
     setCallState((prev) => ({ ...prev, status: "Requesting microphone/camera…" }));
-    const iceRes = await fetch("/api/calls/ice", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ initData }),
-    });
-    if (!iceRes.ok) {
-      setCallState((prev) => ({
-        ...prev,
-        connecting: false,
-        status: "Unable to get TURN credentials.",
-      }));
-      return;
-    }
-    const icePayload = await iceRes.json();
-    const iceServers = icePayload?.iceServers || [];
-
-    const pc = new RTCPeerConnection({ iceServers });
+    const pc = new RTCPeerConnection(buildIceConfig());
     callPcRef.current = pc;
     offerSentRef.current = false;
 
@@ -1384,23 +1639,32 @@ export default function Home() {
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
       if (state === "connected" || state === "completed") {
+        clearTurnFallbackTimer();
         setCallConnectionStatus("connected");
       } else if (state === "checking") {
         setCallConnectionStatus("connecting");
       } else if (state === "disconnected") {
         setCallConnectionStatus("reconnecting");
+        scheduleTurnFallback("ice-disconnected");
       } else if (state === "failed") {
         setCallConnectionStatus("failed");
+        clearTurnFallbackTimer();
+        triggerTurnFallback("ice-failed").catch(() => null);
       }
     };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
+        clearTurnFallbackTimer();
         setCallState((prev) => ({
           ...prev,
           connecting: false,
           status: "Connected.",
         }));
         setCallConnectionStatus("connected");
+        if (!callSuccessLoggedRef.current) {
+          callSuccessLoggedRef.current = true;
+          logCallEvent("call_connected", { sessionType: callState.sessionType });
+        }
       }
       if (pc.connectionState === "failed") {
         setCallState((prev) => ({
@@ -1409,6 +1673,12 @@ export default function Home() {
           status: "Connection failed. Try again.",
         }));
         setCallConnectionStatus("failed");
+        if (!callFailureLoggedRef.current) {
+          callFailureLoggedRef.current = true;
+          logCallEvent("call_setup_failed", { reason: "connection_failed" });
+        }
+        clearTurnFallbackTimer();
+        triggerTurnFallback("connection-failed").catch(() => null);
       }
       if (pc.connectionState === "disconnected") {
         setCallState((prev) => ({
@@ -1417,17 +1687,16 @@ export default function Home() {
           status: "Disconnected.",
         }));
         setCallConnectionStatus("reconnecting");
+        scheduleTurnFallback("connection-disconnected");
       }
     };
 
     try {
-      const constraints = {
-        audio: true,
-        video: sessionType === "video" && !audioOnly,
-      };
+      const constraints = buildMediaConstraints(sessionType, audioOnly);
       const localStream = await navigator.mediaDevices.getUserMedia(constraints);
       localStreamRef.current = localStream;
       localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+      applySenderBitrateCaps(pc);
       if (sessionType === "video" && localVideoRef.current) {
         localVideoRef.current.srcObject = localStream;
       }
@@ -1442,6 +1711,10 @@ export default function Home() {
         connecting: false,
         status: "Microphone/camera permission denied.",
       }));
+      if (!callFailureLoggedRef.current) {
+        callFailureLoggedRef.current = true;
+        logCallEvent("call_setup_failed", { reason: "permission_denied" });
+      }
     }
   };
 
@@ -1449,6 +1722,8 @@ export default function Home() {
     if (!initData || !sessionId) {
       return;
     }
+    callFailureLoggedRef.current = false;
+    callSuccessLoggedRef.current = false;
     const resolvedType = sessionType || "video";
     const peerLabel = options.label || "";
     if (options.session) {
@@ -1494,6 +1769,33 @@ export default function Home() {
     });
   };
 
+  const openPermissionCheck = (sessionType) => {
+    const resolvedType = sessionType || "video";
+    setCallState((prev) => ({
+      ...prev,
+      open: true,
+      sessionId: null,
+      sessionType: resolvedType,
+      status: "",
+      connecting: false,
+      micMuted: false,
+      cameraOff: false,
+      peerReady: false,
+      audioOnly: false,
+      peerLabel: "",
+    }));
+    setCallConnectionStatus("idle");
+    setCallChatOpen(false);
+    setCallPreflight({
+      open: true,
+      mic: "unknown",
+      cam: resolvedType === "video" ? "unknown" : "na",
+      audioOnly: false,
+      checking: false,
+    });
+    checkCallDevices(resolvedType, false).catch(() => null);
+  };
+
   const toggleMute = () => {
     const stream = localStreamRef.current;
     if (!stream) {
@@ -1531,12 +1833,17 @@ export default function Home() {
       text: message,
       sentAt: new Date().toISOString(),
     };
-    await callChannelRef.current.send({
-      type: "broadcast",
-      event: "chat",
-      payload,
-    });
-    appendCallMessage({ ...payload, self: true });
+    appendCallMessage({ ...payload, self: true, status: "sending" });
+    try {
+      await callChannelRef.current.send({
+        type: "broadcast",
+        event: "chat",
+        payload,
+      });
+      updateCallMessageStatus(payload.id, "sent");
+    } catch {
+      updateCallMessageStatus(payload.id, "failed");
+    }
     setCallInput("");
   };
 
@@ -2076,67 +2383,184 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [previewOverlay.open, teaserViewMs]);
 
+  const loadGalleryPage = async (page = 0, append = false) => {
+    if (!initData || role !== "client") {
+      return;
+    }
+    if (page === 0) {
+      setGalleryLoading(true);
+      setGalleryStatus("");
+    } else {
+      setGalleryLoadingMore(true);
+    }
+    try {
+      const res = await fetch(
+        `/api/content?limit=${GALLERY_PAGE_SIZE}&offset=${page * GALLERY_PAGE_SIZE}`,
+        {
+          headers: { "x-telegram-init": initData },
+          cache: "no-store",
+        }
+      );
+      if (!res.ok) {
+        if (res.status === 403) {
+          let errorMessage = clientAccessPaid
+            ? "Access approval still syncing. Tap refresh to retry."
+            : "Access fee required to view the gallery.";
+          try {
+            const payload = await res.json();
+            if (payload?.error === "client_only") {
+              errorMessage =
+                "This account is locked to the model dashboard. Switch to model mode.";
+              setRoleLocked(true);
+              setLockedRole("model");
+              setRole("model");
+              if (typeof window !== "undefined") {
+                window.localStorage.setItem("vr_role", "model");
+                window.localStorage.setItem("vr_role_locked", "1");
+              }
+            } else if (payload?.error === "access_fee_required") {
+              errorMessage = "Access fee required to view the gallery.";
+            }
+          } catch {
+            // ignore parse errors
+          }
+          setGalleryStatus(errorMessage);
+          if (clientAccessPaid) {
+            await refreshClientAccess(true);
+          }
+        } else {
+          setGalleryStatus(`Gallery unavailable (HTTP ${res.status}).`);
+        }
+        if (page === 0) {
+          setGalleryItems([]);
+          setGalleryHasMore(false);
+        }
+        setGalleryLoading(false);
+        setGalleryLoadingMore(false);
+        return;
+      }
+      const data = await res.json();
+      setGalleryItems((prev) => (append ? [...prev, ...(data.items || [])] : data.items || []));
+      setGalleryHasMore(Boolean(data?.has_more));
+      setGalleryPage(page);
+      setGalleryStatus("");
+      if (!clientAccessPaid) {
+        setClientAccessPaid(true);
+        setClientStep(3);
+        setClientTab("gallery");
+      }
+      setGalleryLoading(false);
+      setGalleryLoadingMore(false);
+    } catch {
+      setGalleryStatus("Gallery unavailable.");
+      if (page === 0) {
+        setGalleryItems([]);
+        setGalleryHasMore(false);
+      }
+      setGalleryLoading(false);
+      setGalleryLoadingMore(false);
+    }
+  };
+
+  const loadClientSessionsPage = async (page = 0, append = false) => {
+    if (!initData || role !== "client") {
+      return;
+    }
+    if (page === 0) {
+      setClientSessionsLoading(true);
+      setClientSessionsStatus("");
+    } else {
+      setClientSessionsLoadingMore(true);
+    }
+    try {
+      const res = await fetch(
+        `/api/sessions?scope=client&limit=${SESSIONS_PAGE_SIZE}&offset=${
+          page * SESSIONS_PAGE_SIZE
+        }`,
+        {
+          headers: { "x-telegram-init": initData },
+          cache: "no-store",
+        }
+      );
+      if (!res.ok) {
+        setClientSessionsStatus(`Unable to load sessions (HTTP ${res.status}).`);
+        if (page === 0) {
+          setClientSessions([]);
+          setClientSessionsHasMore(false);
+        }
+        setClientSessionsLoading(false);
+        setClientSessionsLoadingMore(false);
+        return;
+      }
+      const data = await res.json();
+      setClientSessions((prev) => (append ? [...prev, ...(data.items || [])] : data.items || []));
+      setClientSessionsHasMore(Boolean(data?.has_more));
+      setClientSessionsPage(page);
+      setClientSessionsLoading(false);
+      setClientSessionsLoadingMore(false);
+    } catch {
+      setClientSessionsStatus("Unable to load sessions.");
+      if (page === 0) {
+        setClientSessions([]);
+        setClientSessionsHasMore(false);
+      }
+      setClientSessionsLoading(false);
+      setClientSessionsLoadingMore(false);
+    }
+  };
+
+  const loadBookingsPage = async (page = 0, append = false) => {
+    if (!initData || role !== "model" || !modelApproved) {
+      return;
+    }
+    if (page === 0) {
+      setMyBookingsLoading(true);
+      setMyBookingsStatus("");
+    } else {
+      setMyBookingsLoadingMore(true);
+    }
+    try {
+      const res = await fetch(
+        `/api/sessions?scope=mine&limit=${SESSIONS_PAGE_SIZE}&offset=${
+          page * SESSIONS_PAGE_SIZE
+        }`,
+        {
+          headers: { "x-telegram-init": initData },
+          cache: "no-store",
+        }
+      );
+      if (!res.ok) {
+        setMyBookingsStatus(`Unable to load bookings (HTTP ${res.status}).`);
+        if (page === 0) {
+          setMyBookings([]);
+          setMyBookingsHasMore(false);
+        }
+        setMyBookingsLoading(false);
+        setMyBookingsLoadingMore(false);
+        return;
+      }
+      const data = await res.json();
+      setMyBookings((prev) => (append ? [...prev, ...(data.items || [])] : data.items || []));
+      setMyBookingsHasMore(Boolean(data?.has_more));
+      setMyBookingsPage(page);
+      setMyBookingsLoading(false);
+      setMyBookingsLoadingMore(false);
+    } catch {
+      setMyBookingsStatus("Unable to load bookings.");
+      if (page === 0) {
+        setMyBookings([]);
+        setMyBookingsHasMore(false);
+      }
+      setMyBookingsLoading(false);
+      setMyBookingsLoadingMore(false);
+    }
+  };
+
   useEffect(() => {
     if (!initData || role !== "client") {
       return;
     }
-    const loadGallery = async () => {
-      setGalleryLoading(true);
-      try {
-        const res = await fetch("/api/content", {
-          headers: { "x-telegram-init": initData },
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          if (res.status === 403) {
-            let errorMessage = clientAccessPaid
-              ? "Access approval still syncing. Tap refresh to retry."
-              : "Access fee required to view the gallery.";
-            try {
-              const payload = await res.json();
-              if (payload?.error === "client_only") {
-                errorMessage =
-                  "This account is locked to the model dashboard. Switch to model mode.";
-                setRoleLocked(true);
-                setLockedRole("model");
-                setRole("model");
-                if (typeof window !== "undefined") {
-                  window.localStorage.setItem("vr_role", "model");
-                  window.localStorage.setItem("vr_role_locked", "1");
-                }
-              } else if (payload?.error === "access_fee_required") {
-                errorMessage = "Access fee required to view the gallery.";
-              }
-            } catch {
-              // ignore parse errors
-            }
-            setGalleryStatus(errorMessage);
-            if (clientAccessPaid) {
-              await refreshClientAccess(true);
-            }
-          } else {
-            setGalleryStatus(`Gallery unavailable (HTTP ${res.status}).`);
-          }
-          setGalleryItems([]);
-          setGalleryLoading(false);
-          return;
-        }
-        const data = await res.json();
-        setGalleryItems(data.items || []);
-        setGalleryStatus("");
-        if (!clientAccessPaid) {
-          setClientAccessPaid(true);
-          setClientStep(3);
-          setClientTab("gallery");
-        }
-        setGalleryLoading(false);
-      } catch {
-        setGalleryStatus("Gallery unavailable.");
-        setGalleryItems([]);
-        setGalleryLoading(false);
-      }
-    };
-    loadGallery();
+    loadGalleryPage(0, false);
   }, [initData, role, clientAccessPaid, galleryRefreshKey]);
 
   const checkGalleryMembership = async () => {
@@ -2197,6 +2621,27 @@ export default function Home() {
     }
   };
 
+  const loadMoreGallery = async () => {
+    if (galleryLoadingMore || !galleryHasMore) {
+      return;
+    }
+    await loadGalleryPage(galleryPage + 1, true);
+  };
+
+  const loadMoreClientSessions = async () => {
+    if (clientSessionsLoadingMore || !clientSessionsHasMore) {
+      return;
+    }
+    await loadClientSessionsPage(clientSessionsPage + 1, true);
+  };
+
+  const loadMoreBookings = async () => {
+    if (myBookingsLoadingMore || !myBookingsHasMore) {
+      return;
+    }
+    await loadBookingsPage(myBookingsPage + 1, true);
+  };
+
   useEffect(() => {
     if (!initData || role !== "client" || !clientAccessPaid || clientTab !== "gallery") {
       return;
@@ -2249,29 +2694,7 @@ export default function Home() {
     if (!initData || role !== "client" || clientTab !== "sessions") {
       return;
     }
-    const loadSessions = async () => {
-      setClientSessionsLoading(true);
-      try {
-        const res = await fetch("/api/sessions?scope=client", {
-          headers: { "x-telegram-init": initData },
-        });
-        if (!res.ok) {
-          setClientSessionsStatus(`Unable to load sessions (HTTP ${res.status}).`);
-          setClientSessions([]);
-          setClientSessionsLoading(false);
-          return;
-        }
-        const data = await res.json();
-        setClientSessions(data.items || []);
-        setClientSessionsStatus("");
-        setClientSessionsLoading(false);
-      } catch {
-        setClientSessionsStatus("Unable to load sessions.");
-        setClientSessions([]);
-        setClientSessionsLoading(false);
-      }
-    };
-    loadSessions();
+    loadClientSessionsPage(0, false);
   }, [initData, role, clientTab]);
 
   useEffect(() => {
@@ -2636,6 +3059,7 @@ export default function Home() {
   };
   const refreshGalleryAccess = async () => {
     await refreshClientAccess(false);
+    setGalleryPage(0);
     setGalleryRefreshKey((prev) => prev + 1);
     await checkGalleryMembership();
   };
@@ -3135,10 +3559,12 @@ export default function Home() {
     });
   };
 
-  const openReportDialog = (targetId, targetLabel) => {
+  const openReportDialog = (targetId, targetLabel, targetType = "user") => {
     setReportDialog({
       open: true,
-      targetId,
+      targetId: targetType === "content" ? null : targetId,
+      targetType,
+      contentId: targetType === "content" ? targetId : null,
       targetLabel: targetLabel || "",
       selectedReason: "",
       expanded: "",
@@ -3149,11 +3575,29 @@ export default function Home() {
   };
 
   const closeReportDialog = () => {
-    setReportDialog((prev) => ({ ...prev, open: false, submitting: false, status: "" }));
+    setReportDialog((prev) => ({
+      ...prev,
+      open: false,
+      submitting: false,
+      status: "",
+      targetType: "user",
+      contentId: null,
+      targetId: null,
+    }));
   };
 
-  const reportReasons = useMemo(
-    () => [
+  const reportReasons = useMemo(() => {
+    if (reportDialog.targetType === "content") {
+      return [
+        { key: "explicit", label: "Explicit content", desc: "Content that violates platform rules." },
+        { key: "misleading", label: "Misleading", desc: "Misleading title/description or bait-and-switch." },
+        { key: "stolen_content", label: "Stolen content", desc: "Posting content without rights/permission." },
+        { key: "harassment", label: "Harassment", desc: "Targeted abuse within content or captions." },
+        { key: "underage", label: "Underage concern", desc: "Anything that suggests a creator may be under 18." },
+        { key: "other", label: "Other", desc: "Something else not listed." },
+      ];
+    }
+    return [
       { key: "spam", label: "Spam", desc: "Mass messaging, repetitive links, or unwanted promotions." },
       { key: "harassment", label: "Harassment", desc: "Threats, hate speech, or targeted abuse." },
       { key: "impersonation", label: "Impersonation", desc: "Pretending to be someone else." },
@@ -3161,12 +3605,14 @@ export default function Home() {
       { key: "stolen_content", label: "Stolen content", desc: "Posting content without rights/permission." },
       { key: "underage", label: "Underage concern", desc: "Anything that suggests a user may be under 18." },
       { key: "other", label: "Other", desc: "Something else not listed." },
-    ],
-    []
-  );
+    ];
+  }, [reportDialog.targetType]);
 
   const submitReportDialog = async () => {
-    if (!reportDialog.targetId) {
+    if (reportDialog.targetType === "content" && !reportDialog.contentId) {
+      return;
+    }
+    if (reportDialog.targetType !== "content" && !reportDialog.targetId) {
       return;
     }
     if (!reportDialog.selectedReason) {
@@ -3179,7 +3625,12 @@ export default function Home() {
       reportDialog.selectedReason;
     const details = (reportDialog.details || "").trim();
     const payloadReason = details ? `${reasonLabel}: ${details}` : reasonLabel;
-    const ok = await reportCreator(reportDialog.targetId, payloadReason);
+    const ok = await reportCreator({
+      targetId: reportDialog.targetId,
+      contentId: reportDialog.contentId,
+      targetType: reportDialog.targetType,
+      reason: payloadReason,
+    });
     if (ok) {
       setReportDialog((prev) => ({ ...prev, submitting: false, status: "Report submitted ✅" }));
       setTimeout(() => closeReportDialog(), 600);
@@ -3254,15 +3705,21 @@ export default function Home() {
     setCreatorOverlay({ open: false, creator: null });
   };
 
-  const reportCreator = async (targetId, reason = "") => {
-    if (!initData || !targetId) {
+  const reportCreator = async ({ targetId, contentId, targetType = "user", reason = "" }) => {
+    if (!initData || (targetType === "content" ? !contentId : !targetId)) {
       return false;
     }
     try {
       const res = await fetch("/api/report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData, target_id: targetId, reason }),
+        body: JSON.stringify({
+          initData,
+          target_id: targetId,
+          target_type: targetType,
+          content_id: contentId,
+          reason,
+        }),
       });
       if (res.ok) {
         setClientStatus("Report submitted. Admin will review.");
@@ -3541,13 +3998,18 @@ export default function Home() {
     if (consumedTeasers[item.id]) {
       return;
     }
-    if (!item.preview_url) {
+    const previewUrl = item.preview_url || item.preview_thumb_url;
+    if (!previewUrl) {
       setGalleryStatus("Preview unavailable. Try again later.");
       return;
     }
     setGalleryStatus("");
     setConsumedTeasers((prev) => ({ ...prev, [item.id]: true }));
-    setPreviewOverlay({ open: true, item, remaining: Math.ceil(teaserViewMs / 1000) });
+    setPreviewOverlay({
+      open: true,
+      item: { ...item, preview_url: previewUrl },
+      remaining: Math.ceil(teaserViewMs / 1000),
+    });
     // Record a unique view for engagement metrics (best-effort).
     if (initData) {
       fetch("/api/content/view", {
@@ -3784,13 +4246,15 @@ export default function Home() {
       }
       return false;
     }
+    const idempotencyKey = getWalletIdempotencyKey(mode, session);
     try {
       const res = await fetch("/api/payments/wallet/charge", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
           initData,
           escrow_type: mode,
+          idempotency_key: idempotencyKey,
           model_id: session?.modelId,
           session_type: session?.sessionType,
           duration_minutes: session?.duration,
@@ -3815,6 +4279,10 @@ export default function Home() {
         return false;
       }
       await refreshProfile();
+      if (idempotencyKey) {
+        const key = `${mode}:${session?.sessionId || session?.modelId || "access"}`;
+        delete walletIdempotencyRef.current[key];
+      }
       return true;
     } catch {
       const message = "Wallet payment failed. Try again.";
@@ -4338,6 +4806,8 @@ export default function Home() {
           content_type: contentForm.contentType,
           preview_path: uploadPayload.path,
           full_path: fullPath || undefined,
+          publish_at: contentForm.publishAt || undefined,
+          expires_at: contentForm.expiresAt || undefined,
         }),
       });
       if (!res.ok) {
@@ -4367,6 +4837,8 @@ export default function Home() {
       description: "",
       unlockPrice: "",
       contentType: "image",
+      publishAt: "",
+      expiresAt: "",
       mediaFile: null,
       mediaName: "",
       fullFile: null,
@@ -4410,6 +4882,17 @@ export default function Home() {
             <button className={`ghost ${role === "model" ? "active" : ""}`} onClick={() => handleRole("model")}>
               Model
             </button>
+            {!role && onboardingComplete && (
+              <button
+                className="ghost"
+                onClick={() => {
+                  setOnboardingComplete(false);
+                  setOnboardingStep(0);
+                }}
+              >
+                Resume onboarding
+              </button>
+            )}
           </div>
         )}
         {roleLocked && lockedRole && (
@@ -4455,7 +4938,7 @@ export default function Home() {
                   ))}
                 </div>
                 <span className="onboarding-count">
-                  Step {onboardingStep + 1} of {onboardingTotal}
+                  Step {onboardingStep + 1} of {onboardingTotal} · {onboardingProgress}%
                 </span>
               </div>
               <div className="onboarding-points">
@@ -4612,7 +5095,9 @@ export default function Home() {
             {!clientAccessPaid && (
               <div className="step-header">
                 <div>
-                  <p className="eyebrow">Step {clientStep} of 3</p>
+                  <p className="eyebrow">
+                    Step {clientStep} of 3 · {Math.round((clientStep / 3) * 100)}%
+                  </p>
                   <strong>
                     {clientStep === 1
                       ? "Profile details"
@@ -4989,7 +5474,25 @@ export default function Home() {
                         {visibleGalleryItems.map((item) => (
                           <div key={`gallery-${item.id}`} className="gallery-card">
                             <div className="gallery-media">
-                              <div className="media-fallback">Tap to view</div>
+                              {item.preview_thumb_url || item.preview_url ? (
+                                item.content_type === "video" ? (
+                                  <video
+                                    src={item.preview_thumb_url || item.preview_url}
+                                    muted
+                                    playsInline
+                                    preload="metadata"
+                                  />
+                                ) : (
+                                  <img
+                                    src={item.preview_thumb_url || item.preview_url}
+                                    alt={item.title || "Teaser"}
+                                    loading="lazy"
+                                    decoding="async"
+                                  />
+                                )
+                              ) : (
+                                <div className="media-fallback">Tap to view</div>
+                              )}
                             </div>
                             <div className="gallery-body">
                               <div className="gallery-headline">
@@ -5077,6 +5580,15 @@ export default function Home() {
                                 >
                                   View profile
                                 </button>
+                                <button
+                                  type="button"
+                                  className="cta ghost"
+                                  onClick={() =>
+                                    openReportDialog(item.id, item.title || "content", "content")
+                                  }
+                                >
+                                  Report content
+                                </button>
                                 {item.price ? (
                                   <>
                                     <label className="field">
@@ -5132,6 +5644,18 @@ export default function Home() {
                           </div>
                         ))}
                       </div>
+                      {galleryHasMore && (
+                        <div className="dash-actions">
+                          <button
+                            type="button"
+                            className={`cta ghost ${galleryLoadingMore ? "loading" : ""}`}
+                            onClick={loadMoreGallery}
+                            disabled={galleryLoadingMore}
+                          >
+                            {galleryLoadingMore ? "Loading…" : "Load more"}
+                          </button>
+                        </div>
+                      )}
                     )}
                   </div>
                 )}
@@ -5542,9 +6066,29 @@ export default function Home() {
                           )}
                         </div>
                         {sessionActionStatus[item.id]?.error && (
-                          <p className="helper error">
-                            {sessionActionStatus[item.id]?.error}
-                          </p>
+                          <>
+                            <p className="helper error">
+                              {sessionActionStatus[item.id]?.error}
+                            </p>
+                            <div className="session-actions retry-row">
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() => handleSessionJoin(item)}
+                              >
+                                Retry
+                              </button>
+                              {item.session_type !== "chat" && (
+                                <button
+                                  type="button"
+                                  className="cta ghost"
+                                  onClick={() => openPermissionCheck(item.session_type)}
+                                >
+                                  Check permissions
+                                </button>
+                              )}
+                            </div>
+                          </>
                         )}
                         {sessionActionStatus[item.id]?.info && (
                           <p className="helper">
@@ -5553,6 +6097,18 @@ export default function Home() {
                         )}
                       </div>
                     ))}
+                    {clientSessionsHasMore && !clientSessionsLoading && (
+                      <div className="dash-actions">
+                        <button
+                          type="button"
+                          className={`cta ghost ${clientSessionsLoadingMore ? "loading" : ""}`}
+                          onClick={loadMoreClientSessions}
+                          disabled={clientSessionsLoadingMore}
+                        >
+                          {clientSessionsLoadingMore ? "Loading…" : "Load more"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -5973,20 +6529,34 @@ export default function Home() {
                     <span>Join audio-only</span>
                   </label>
                 )}
-                <div className="dash-actions tabs">
+                <div className="dash-actions preflight-actions">
+                  <button
+                    type="button"
+                    className="cta ghost"
+                    onClick={() => {
+                      if (!callState.sessionId) {
+                        cleanupCall(false);
+                        return;
+                      }
+                      setCallPreflight((prev) => ({ ...prev, open: false }));
+                    }}
+                  >
+                    Close
+                  </button>
                   <button
                     type="button"
                     className={`cta ghost ${callPreflight.checking ? "loading" : ""}`}
                     onClick={() => checkCallDevices(callState.sessionType, callPreflight.audioOnly)}
                     disabled={callPreflight.checking}
                   >
-                    Check devices
+                    Enable microphone
                   </button>
                     <button
                       type="button"
                       className="cta primary"
                       onClick={beginCallFromPreflight}
                       disabled={
+                        !callState.sessionId ||
                         callPreflight.mic !== "ok" ||
                         (callState.sessionType === "video" &&
                           !callPreflight.audioOnly &&
@@ -6035,12 +6605,37 @@ export default function Home() {
                     {showAudioTiles && <audio ref={remoteAudioRef} autoPlay />}
                   </div>
                 )}
-                <div
-                  className={`call-chat-panel ${
-                    callState.sessionType === "chat" || callChatOpen ? "open" : ""
-                  }`}
-                >
-                  <div className="chat-log">
+              <div
+                className={`call-chat-panel ${
+                  callState.sessionType === "chat" || callChatOpen ? "open" : ""
+                }`}
+              >
+                <div className="chat-header">
+                  <div>
+                    <strong>{callState.peerLabel || "Chat partner"}</strong>
+                    <span className="chat-status-line">
+                      {callTyping
+                        ? "Typing…"
+                        : callConnectionStatus === "connected"
+                        ? "Online"
+                        : callConnectionStatus === "reconnecting"
+                        ? "Reconnecting…"
+                        : callConnectionStatus === "failed"
+                        ? "Offline"
+                        : "Connecting…"}
+                    </span>
+                  </div>
+                  {callState.sessionType !== "chat" && (
+                    <button
+                      type="button"
+                      className="cta ghost"
+                      onClick={() => setCallChatOpen(false)}
+                    >
+                      Close
+                    </button>
+                  )}
+                </div>
+                <div className="chat-log">
                     {callMessages.length === 0 && (
                       <p className="helper">Say hello. Messages are not saved.</p>
                     )}
@@ -6053,14 +6648,38 @@ export default function Home() {
                           {message.self ? "You" : message.senderLabel || "Partner"}
                         </span>
                         <p>{message.text}</p>
+                        {message.self && message.status && (
+                          <span className="chat-status">
+                            {message.status === "sending"
+                              ? "Sending…"
+                              : message.status === "sent"
+                              ? "Sent"
+                              : message.status === "delivered"
+                              ? "Delivered"
+                              : message.status === "failed"
+                              ? "Failed"
+                              : message.status}
+                          </span>
+                        )}
                       </div>
                     ))}
+                    {callTyping && (
+                      <div className="chat-typing">
+                        <span className="dot" />
+                        <span className="dot" />
+                        <span className="dot" />
+                        <span>Typing…</span>
+                      </div>
+                    )}
                   </div>
                   <div className="chat-input">
                     <input
                       type="text"
                       value={callInput}
-                      onChange={(event) => setCallInput(event.target.value)}
+                      onChange={(event) => {
+                        setCallInput(event.target.value);
+                        sendTypingSignal().catch(() => null);
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
@@ -6354,7 +6973,11 @@ export default function Home() {
         <section className="modal-backdrop" onClick={closeReportDialog}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <header className="modal-header">
-              <h3>Report {reportDialog.targetLabel || "user"}</h3>
+              <h3>
+                Report{" "}
+                {reportDialog.targetLabel ||
+                  (reportDialog.targetType === "content" ? "content" : "user")}
+              </h3>
               <button type="button" className="cta ghost" onClick={closeReportDialog}>
                 Close
               </button>
@@ -6827,7 +7450,9 @@ export default function Home() {
             {!modelApproved && (
               <div className="step-header">
                 <div>
-                  <p className="eyebrow">Step {modelStep} of 3</p>
+                  <p className="eyebrow">
+                    Step {modelStep} of 3 · {Math.round((modelStep / 3) * 100)}%
+                  </p>
                   <strong>
                     {modelStep === 1
                       ? "Profile setup"
@@ -7217,6 +7842,31 @@ export default function Home() {
                         </label>
                         <div className="field-row">
                           <label className="field">
+                            Publish at (optional)
+                            <input
+                              type="datetime-local"
+                              value={contentForm.publishAt}
+                              onChange={(event) =>
+                                setContentForm((prev) => ({ ...prev, publishAt: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            Expire at (optional)
+                            <input
+                              type="datetime-local"
+                              value={contentForm.expiresAt}
+                              onChange={(event) =>
+                                setContentForm((prev) => ({ ...prev, expiresAt: event.target.value }))
+                              }
+                            />
+                          </label>
+                        </div>
+                        <p className="helper">
+                          Leave publish blank to go live immediately after approval.
+                        </p>
+                        <div className="field-row">
+                          <label className="field">
                             Content type
                             <select
                               value={contentForm.contentType}
@@ -7305,11 +7955,21 @@ export default function Home() {
                           {filteredModelItems.map((item) => (
                             <div key={`mine-${item.id}`} className="gallery-card">
                               <div className="gallery-media">
-                                {item.preview_url ? (
+                                {item.preview_thumb_url || item.preview_url ? (
                                   item.content_type === "video" ? (
-                                    <video src={item.preview_url} muted playsInline />
+                                    <video
+                                      src={item.preview_thumb_url || item.preview_url}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                    />
                                   ) : (
-                                    <img src={item.preview_url} alt={item.title} />
+                                    <img
+                                      src={item.preview_thumb_url || item.preview_url}
+                                      alt={item.title}
+                                      loading="lazy"
+                                      decoding="async"
+                                    />
                                   )
                                 ) : (
                                   <div className="media-fallback">Preview pending</div>
@@ -7433,9 +8093,29 @@ export default function Home() {
                                 </p>
                               )}
                               {sessionActionStatus[item.id]?.error && (
-                                <p className="helper error">
-                                  {sessionActionStatus[item.id]?.error}
-                                </p>
+                                <>
+                                  <p className="helper error">
+                                    {sessionActionStatus[item.id]?.error}
+                                  </p>
+                                  <div className="gallery-actions retry-row">
+                                    <button
+                                      type="button"
+                                      className="cta ghost"
+                                      onClick={() => handleSessionJoin(item)}
+                                    >
+                                      Retry
+                                    </button>
+                                    {item.session_type !== "chat" && (
+                                      <button
+                                        type="button"
+                                        className="cta ghost"
+                                        onClick={() => openPermissionCheck(item.session_type)}
+                                      >
+                                        Check permissions
+                                      </button>
+                                    )}
+                                  </div>
+                                </>
                               )}
                               {sessionActionStatus[item.id]?.info && (
                                 <p className="helper">
@@ -7445,6 +8125,18 @@ export default function Home() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {myBookingsHasMore && !myBookingsLoading && (
+                      <div className="dash-actions">
+                        <button
+                          type="button"
+                          className={`cta ghost ${myBookingsLoadingMore ? "loading" : ""}`}
+                          onClick={loadMoreBookings}
+                          disabled={myBookingsLoadingMore}
+                        >
+                          {myBookingsLoadingMore ? "Loading…" : "Load more"}
+                        </button>
                       </div>
                     )}
                   </div>

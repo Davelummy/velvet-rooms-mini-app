@@ -5,6 +5,8 @@ import { extractUser, verifyInitData } from "../../../_lib/telegram";
 import { ensureUser } from "../../../_lib/users";
 import { ensureSessionColumns } from "../../../_lib/sessions";
 import { ensureBlockTable } from "../../../_lib/blocks";
+import { createRequestContext, withRequestId } from "../../../_lib/observability";
+import { checkRateLimit } from "../../../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -52,27 +54,49 @@ function parseScheduledFor(value) {
 }
 
 export async function POST(request) {
+  const ctx = createRequestContext(request, "payments/flutterwave/initiate");
   const body = await request.json();
   const initData = body?.initData || "";
   if (!verifyInitData(initData, BOT_TOKEN)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return NextResponse.json(withRequestId({ error: "unauthorized" }, ctx.requestId), {
+      status: 401,
+    });
   }
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
-    return NextResponse.json({ error: "user_missing" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "user_missing" }, ctx.requestId), {
+      status: 400,
+    });
+  }
+  const allowed = await checkRateLimit({
+    key: `pay_init:${tgUser.id}`,
+    limit: 6,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json(withRequestId({ error: "rate_limited" }, ctx.requestId), {
+      status: 429,
+    });
   }
 
   if (!FLW_SECRET) {
-    return NextResponse.json({ error: "flutterwave_not_configured" }, { status: 503 });
+    return NextResponse.json(
+      withRequestId({ error: "flutterwave_not_configured" }, ctx.requestId),
+      { status: 503 }
+    );
   }
   if (!WEBAPP_URL) {
-    return NextResponse.json({ error: "webapp_url_missing" }, { status: 500 });
+    return NextResponse.json(withRequestId({ error: "webapp_url_missing" }, ctx.requestId), {
+      status: 500,
+    });
   }
 
   const escrowType = body?.escrow_type || "";
   const contentId = Number(body?.content_id || 0);
   if (!["access_fee", "content", "session", "extension"].includes(escrowType)) {
-    return NextResponse.json({ error: "invalid_escrow_type" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "invalid_escrow_type" }, ctx.requestId), {
+      status: 400,
+    });
   }
 
   let userId;
@@ -95,7 +119,9 @@ export async function POST(request) {
       }
     }
     if (role && role !== "client") {
-      return NextResponse.json({ error: "client_only" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "client_only" }, ctx.requestId), {
+        status: 403,
+      });
     }
     userId = existingUser.rows[0].id;
   } else {
@@ -119,7 +145,10 @@ export async function POST(request) {
       [userId]
     );
     if (profileRes.rowCount && profileRes.rows[0].access_fee_paid) {
-      return NextResponse.json({ error: "access_already_unlocked" }, { status: 409 });
+      return NextResponse.json(
+        withRequestId({ error: "access_already_unlocked" }, ctx.requestId),
+        { status: 409 }
+      );
     }
     metadata.client_id = userId;
   }
@@ -127,7 +156,9 @@ export async function POST(request) {
   if (escrowType === "content") {
     await ensureBlockTable();
     if (!contentId) {
-      return NextResponse.json({ error: "missing_content" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "missing_content" }, ctx.requestId), {
+        status: 400,
+      });
     }
     const contentRes = await query(
       `SELECT dc.id, dc.price, dc.model_id, dc.is_active, dc.telegram_file_id
@@ -136,17 +167,28 @@ export async function POST(request) {
       [contentId]
     );
     if (!contentRes.rowCount) {
-      return NextResponse.json({ error: "content_missing" }, { status: 404 });
+      return NextResponse.json(withRequestId({ error: "content_missing" }, ctx.requestId), {
+        status: 404,
+      });
     }
     const content = contentRes.rows[0];
     if (!content.is_active) {
-      return NextResponse.json({ error: "content_not_approved" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "content_not_approved" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     if (!content.price || Number(content.price) <= 0) {
-      return NextResponse.json({ error: "content_not_priced" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "content_not_priced" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     if (!content.telegram_file_id) {
-      return NextResponse.json({ error: "content_missing_full_media" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "content_missing_full_media" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     const blockRes = await query(
       `SELECT 1 FROM blocks
@@ -155,7 +197,9 @@ export async function POST(request) {
       [userId, content.model_id]
     );
     if (blockRes.rowCount) {
-      return NextResponse.json({ error: "blocked" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "blocked" }, ctx.requestId), {
+        status: 403,
+      });
     }
     amount = Number(content.price);
     metadata.content_id = contentId;
@@ -170,10 +214,15 @@ export async function POST(request) {
     const durationMinutes = Number(body?.duration_minutes || 0);
     const scheduledFor = parseScheduledFor(body?.scheduled_for);
     if (!modelId || !sessionType || !durationMinutes) {
-      return NextResponse.json({ error: "missing_session_fields" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "missing_session_fields" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     if (!scheduledFor) {
-      return NextResponse.json({ error: "invalid_schedule" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "invalid_schedule" }, ctx.requestId), {
+        status: 400,
+      });
     }
     const modelRes = await query(
       `SELECT u.id, mp.verification_status
@@ -183,7 +232,10 @@ export async function POST(request) {
       [modelId]
     );
     if (!modelRes.rowCount || modelRes.rows[0].verification_status !== "approved") {
-      return NextResponse.json({ error: "model_not_approved" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "model_not_approved" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     const blockRes = await query(
       `SELECT 1 FROM blocks
@@ -192,11 +244,16 @@ export async function POST(request) {
       [userId, modelId]
     );
     if (blockRes.rowCount) {
-      return NextResponse.json({ error: "blocked" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "blocked" }, ctx.requestId), {
+        status: 403,
+      });
     }
     const sessionAmount = sessionPricing(sessionType, durationMinutes);
     if (!sessionAmount) {
-      return NextResponse.json({ error: "invalid_session_package" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "invalid_session_package" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     amount = sessionAmount;
     metadata.model_id = modelId;
@@ -218,7 +275,10 @@ export async function POST(request) {
     const sessionId = Number(body?.session_id || 0);
     const extensionMinutes = Number(body?.extension_minutes || 5);
     if (!sessionId || extensionMinutes !== 5) {
-      return NextResponse.json({ error: "invalid_extension_request" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "invalid_extension_request" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     const sessionRes = await query(
       `SELECT id, client_id, model_id, session_type, status
@@ -226,14 +286,21 @@ export async function POST(request) {
       [sessionId]
     );
     if (!sessionRes.rowCount) {
-      return NextResponse.json({ error: "session_missing" }, { status: 404 });
+      return NextResponse.json(withRequestId({ error: "session_missing" }, ctx.requestId), {
+        status: 404,
+      });
     }
     const session = sessionRes.rows[0];
     if (session.client_id !== userId) {
-      return NextResponse.json({ error: "client_only" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "client_only" }, ctx.requestId), {
+        status: 403,
+      });
     }
     if (!["accepted", "active"].includes(session.status)) {
-      return NextResponse.json({ error: "extension_not_allowed" }, { status: 409 });
+      return NextResponse.json(
+        withRequestId({ error: "extension_not_allowed" }, ctx.requestId),
+        { status: 409 }
+      );
     }
     const blockRes = await query(
       `SELECT 1 FROM blocks
@@ -242,11 +309,16 @@ export async function POST(request) {
       [userId, session.model_id]
     );
     if (blockRes.rowCount) {
-      return NextResponse.json({ error: "blocked" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "blocked" }, ctx.requestId), {
+        status: 403,
+      });
     }
     const extensionAmount = extensionPricing(session.session_type);
     if (!extensionAmount) {
-      return NextResponse.json({ error: "extension_not_supported" }, { status: 400 });
+      return NextResponse.json(
+        withRequestId({ error: "extension_not_supported" }, ctx.requestId),
+        { status: 400 }
+      );
     }
     const existingRes = await query(
       `SELECT transaction_ref
@@ -262,7 +334,9 @@ export async function POST(request) {
       [userId, String(sessionId)]
     );
     if (existingRes.rowCount) {
-      return NextResponse.json({ error: "extension_pending" }, { status: 409 });
+      return NextResponse.json(withRequestId({ error: "extension_pending" }, ctx.requestId), {
+        status: 409,
+      });
     }
     amount = extensionAmount;
     metadata.session_id = sessionId;
@@ -324,15 +398,23 @@ export async function POST(request) {
   const fwBody = await fwRes.json().catch(() => ({}));
   if (!fwRes.ok || fwBody?.status !== "success") {
     return NextResponse.json(
-      { error: "flutterwave_init_failed", detail: fwBody?.message || "error" },
+      withRequestId(
+        { error: "flutterwave_init_failed", detail: fwBody?.message || "error" },
+        ctx.requestId
+      ),
       { status: 500 }
     );
   }
 
-  return NextResponse.json({
-    ok: true,
-    transaction_ref: transactionRef,
-    amount,
-    payment_link: fwBody?.data?.link,
-  });
+  return NextResponse.json(
+    withRequestId(
+      {
+        ok: true,
+        transaction_ref: transactionRef,
+        amount,
+        payment_link: fwBody?.data?.link,
+      },
+      ctx.requestId
+    )
+  );
 }

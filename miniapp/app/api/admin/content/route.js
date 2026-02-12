@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { requireAdmin } from "../../_lib/admin_auth";
 import { getSupabase } from "../../_lib/supabase";
+import { ensureContentColumns } from "../../_lib/content";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ export async function GET(request) {
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: 401 });
   }
+  await ensureContentColumns();
 
   const url = new URL(request.url);
   const status = (url.searchParams.get("status") || "pending").toLowerCase();
@@ -28,6 +30,7 @@ export async function GET(request) {
   const res = await query(
     `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type,
             dc.telegram_file_id, dc.preview_file_id, dc.created_at,
+            dc.publish_at, dc.expires_at, dc.approved_at, dc.published_to_channel,
             u.public_id, u.telegram_id, mp.display_name, mp.verification_status,
             dc.is_active
      FROM digital_content dc

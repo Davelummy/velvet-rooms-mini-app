@@ -7,6 +7,7 @@ export default function Admin() {
   const [modelView, setModelView] = useState("pending");
   const [contentView, setContentView] = useState("pending");
   const [paymentView, setPaymentView] = useState("pending");
+  const [paymentProvider, setPaymentProvider] = useState("all");
   const [paymentRange, setPaymentRange] = useState("all");
   const [escrowView, setEscrowView] = useState("pending");
   const [escrowRange, setEscrowRange] = useState("all");
@@ -22,6 +23,7 @@ export default function Admin() {
   const [lastRefreshAt, setLastRefreshAt] = useState(null);
   const [selectedItem, setSelectedItem] = useState(null);
   const [preview, setPreview] = useState({ open: false, url: "", type: "video" });
+  const [pageHidden, setPageHidden] = useState(false);
   const [metrics, setMetrics] = useState({
     pending_models: 0,
     approved_models: 0,
@@ -58,6 +60,15 @@ export default function Admin() {
     escrow_inflow_7d: [],
     approvals_7d: [],
   });
+  const [health, setHealth] = useState({
+    total_sessions_7d: 0,
+    failed_sessions_7d: 0,
+    session_failure_rate_7d: 0,
+    disputes_7d: 0,
+    call_setup_failures_24h: 0,
+    call_setup_failure_rate_24h: 0,
+    turn_token_errors_24h: 0,
+  });
 
   const formatNumber = (value) => Number(value || 0).toLocaleString();
   const formatCurrency = (value) => `₦${formatNumber(value)}`;
@@ -73,7 +84,7 @@ export default function Admin() {
     1,
     ...approvalsSeries.map((entry) => Number(entry.count || 0))
   );
-  const livePaused = Boolean(selectedItem) || preview.open;
+  const livePaused = Boolean(selectedItem) || preview.open || pageHidden;
 
   const detailTitle = useMemo(() => {
     if (!selectedItem) {
@@ -160,6 +171,14 @@ export default function Admin() {
         { label: "Email", value: selectedItem.email || "-" },
         { label: "Followers", value: selectedItem.followers || 0 },
         { label: "Following", value: selectedItem.following || 0 },
+        { label: "Risk score", value: selectedItem.risk_score ?? 0 },
+        {
+          label: "Risk flags",
+          value:
+            Array.isArray(selectedItem.risk_flags) && selectedItem.risk_flags.length
+              ? selectedItem.risk_flags.join(", ")
+              : "-",
+        },
         { label: "Joined", value: selectedItem.created_at || "-" },
       ];
     }
@@ -250,12 +269,29 @@ export default function Admin() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+    const handler = () => {
+      setPageHidden(document.hidden);
+    };
+    handler();
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, []);
+
   const loadQueue = useCallback(async () => {
     if (!initData) {
       setError("Open the admin console inside Telegram.");
       return;
     }
     setError("");
+    if (section === "health") {
+      setItems([]);
+      setLastRefreshAt(new Date().toISOString());
+      return;
+    }
     let endpoint = "/api/admin/models";
     if (section === "content") endpoint = "/api/admin/content";
     if (section === "escrows") endpoint = "/api/admin/escrows";
@@ -280,6 +316,9 @@ export default function Admin() {
       const params = new URLSearchParams();
       if (paymentView === "approved") {
         params.set("status", "approved");
+      }
+      if (paymentProvider !== "all") {
+        params.set("provider", paymentProvider);
       }
       if (paymentRange !== "all") {
         params.set("range", paymentRange);
@@ -322,6 +361,7 @@ export default function Admin() {
     modelView,
     contentView,
     paymentView,
+    paymentProvider,
     paymentRange,
     escrowView,
     escrowRange,
@@ -347,10 +387,27 @@ export default function Admin() {
     }
   }, [initData]);
 
+  const loadHealth = useCallback(async () => {
+    if (!initData) {
+      return;
+    }
+    const res = await fetch("/api/admin/health", {
+      headers: { "x-telegram-init": initData },
+    });
+    if (!res.ok) {
+      return;
+    }
+    const data = await res.json();
+    if (data?.ok) {
+      setHealth((prev) => ({ ...prev, ...data }));
+    }
+  }, [initData]);
+
   useEffect(() => {
     loadQueue();
     loadMetrics();
-  }, [loadQueue, loadMetrics]);
+    loadHealth();
+  }, [loadQueue, loadMetrics, loadHealth]);
 
   useEffect(() => {
     if (!liveQueue) {
@@ -365,13 +422,14 @@ export default function Admin() {
         if (prev <= 1) {
           loadQueue();
           loadMetrics();
+          loadHealth();
           return 15;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [liveQueue, livePaused, loadQueue, loadMetrics]);
+  }, [liveQueue, livePaused, loadQueue, loadMetrics, loadHealth]);
 
   useEffect(() => {
     setSelectedItem(null);
@@ -381,6 +439,7 @@ export default function Admin() {
     modelView,
     contentView,
     paymentView,
+    paymentProvider,
     paymentRange,
     escrowView,
     escrowRange,
@@ -511,6 +570,7 @@ export default function Admin() {
             <option value="disputes">Disputes</option>
             <option value="users">Users</option>
             <option value="activity">Activity</option>
+            <option value="health">Health</option>
           </select>
         </label>
         <div className="admin-tabs">
@@ -569,6 +629,13 @@ export default function Admin() {
             onClick={() => setSection("activity")}
           >
             Activity
+          </button>
+          <button
+            type="button"
+            className={`ghost ${section === "health" ? "active" : ""}`}
+            onClick={() => setSection("health")}
+          >
+            Health
           </button>
         </div>
       </header>
@@ -686,6 +753,7 @@ export default function Admin() {
             </div>
           </div>
         </div>
+      )}
       </section>
 
       <section className="admin-insights">
@@ -779,6 +847,8 @@ export default function Admin() {
               ? "Follow, block, and report actions across the platform."
               : section === "users"
               ? "Search every account, track roles, and monitor activity."
+              : section === "health"
+              ? "Monitor call stability, session failures, and TURN errors."
               : "Resolve disputes with a full audit trail."}
           </p>
           {section === "models" && (
@@ -854,6 +924,36 @@ export default function Admin() {
                   onClick={() => setPaymentRange("7d")}
                 >
                   Last 7 days
+                </button>
+              </div>
+              <div className="filter-row">
+                <button
+                  type="button"
+                  className={`pill ${paymentProvider === "all" ? "active" : ""}`}
+                  onClick={() => setPaymentProvider("all")}
+                >
+                  All providers
+                </button>
+                <button
+                  type="button"
+                  className={`pill ${paymentProvider === "flutterwave" ? "active" : ""}`}
+                  onClick={() => setPaymentProvider("flutterwave")}
+                >
+                  Flutterwave
+                </button>
+                <button
+                  type="button"
+                  className={`pill ${paymentProvider === "crypto" ? "active" : ""}`}
+                  onClick={() => setPaymentProvider("crypto")}
+                >
+                  Crypto
+                </button>
+                <button
+                  type="button"
+                  className={`pill ${paymentProvider === "wallet" ? "active" : ""}`}
+                  onClick={() => setPaymentProvider("wallet")}
+                >
+                  Wallet
                 </button>
               </div>
             </div>
@@ -954,25 +1054,35 @@ export default function Admin() {
               </label>
             </div>
           )}
-          <div className="panel-actions">
-            <button
-              type="button"
-              className={`cta ${liveQueue ? "primary" : "ghost"}`}
-              onClick={() => setLiveQueue((prev) => !prev)}
-            >
-              {liveQueue ? "Live queue on" : "Open live queue"}
-            </button>
-            <button type="button" className="cta ghost" onClick={loadQueue}>
-              Refresh now
-            </button>
-            <button type="button" className="cta ghost" onClick={exportAuditLog}>
-              Export audit log
-            </button>
-          </div>
-          {liveQueue && (
+          {section !== "health" ? (
+            <div className="panel-actions">
+              <button
+                type="button"
+                className={`cta ${liveQueue ? "primary" : "ghost"}`}
+                onClick={() => setLiveQueue((prev) => !prev)}
+              >
+                {liveQueue ? "Live queue on" : "Open live queue"}
+              </button>
+              <button type="button" className="cta ghost" onClick={loadQueue}>
+                Refresh now
+              </button>
+              <button type="button" className="cta ghost" onClick={exportAuditLog}>
+                Export audit log
+              </button>
+            </div>
+          ) : (
+            <div className="panel-actions">
+              <button type="button" className="cta ghost" onClick={loadHealth}>
+                Refresh health
+              </button>
+            </div>
+          )}
+          {section !== "health" && liveQueue && (
             <p className="helper">
               {livePaused
-                ? "Live queue paused while viewing details."
+                ? pageHidden
+                  ? "Live queue paused while tab is hidden."
+                  : "Live queue paused while viewing details."
                 : `Next refresh in ${liveCountdown}s.`}
             </p>
           )}
@@ -1003,7 +1113,36 @@ export default function Admin() {
             </div>
           </div>
         )}
-        <div className={`admin-queue ${selectedItem ? "has-detail" : ""}`}>
+        {section === "health" ? (
+          <div className="health-grid">
+            <div className="metric-card">
+              <span>Sessions (7d)</span>
+              <strong>{formatNumber(health.total_sessions_7d)}</strong>
+              <p className="helper">
+                Failed: {formatNumber(health.failed_sessions_7d)} · Rate:{" "}
+                {Math.round((health.session_failure_rate_7d || 0) * 100)}%
+              </p>
+            </div>
+            <div className="metric-card">
+              <span>Disputes (7d)</span>
+              <strong>{formatNumber(health.disputes_7d)}</strong>
+              <p className="helper">Track repeated disputes and no-show patterns.</p>
+            </div>
+            <div className="metric-card">
+              <span>Call setup failures (24h)</span>
+              <strong>{formatNumber(health.call_setup_failures_24h)}</strong>
+              <p className="helper">
+                Failure rate: {Math.round((health.call_setup_failure_rate_24h || 0) * 100)}%
+              </p>
+            </div>
+            <div className="metric-card">
+              <span>TURN token errors (24h)</span>
+              <strong>{formatNumber(health.turn_token_errors_24h)}</strong>
+              <p className="helper">Twilio token failures and TURN outages.</p>
+            </div>
+          </div>
+        ) : (
+          <div className={`admin-queue ${selectedItem ? "has-detail" : ""}`}>
           <div className="admin-list">
             {error && <div className="empty">{error}</div>}
             {!error && (

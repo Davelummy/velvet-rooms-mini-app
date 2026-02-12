@@ -3,6 +3,7 @@ import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
 import { getSupabase } from "../../../_lib/supabase";
+import { ensureContentColumns } from "../../../_lib/content";
 
 export const runtime = "nodejs";
 
@@ -121,6 +122,7 @@ export async function POST(request) {
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: 401 });
   }
+  await ensureContentColumns();
   const body = await request.json();
   const contentId = Number(body?.content_id);
   if (!contentId) {
@@ -138,7 +140,8 @@ export async function POST(request) {
 
   const contentRes = await query(
     `SELECT dc.id, dc.title, dc.description, dc.price, dc.content_type, dc.telegram_file_id,
-            dc.preview_file_id, dc.model_id, mp.verification_status, u.telegram_id
+            dc.preview_file_id, dc.model_id, dc.publish_at, dc.expires_at, dc.published_to_channel,
+            mp.verification_status, u.telegram_id
      FROM digital_content dc
      JOIN users u ON u.id = dc.model_id
      LEFT JOIN model_profiles mp ON mp.user_id = dc.model_id
@@ -153,22 +156,31 @@ export async function POST(request) {
     return NextResponse.json({ error: "model_not_approved" }, { status: 400 });
   }
 
-  await query("UPDATE digital_content SET is_active = TRUE WHERE id = $1", [contentId]);
+  await query(
+    "UPDATE digital_content SET is_active = TRUE, approved_at = NOW() WHERE id = $1",
+    [contentId]
+  );
   await query(
     `INSERT INTO admin_actions (admin_id, action_type, target_type, target_id, details, created_at)
      VALUES ($1, 'approve_content', 'digital_content', $2, $3, NOW())`,
     [adminUserId, contentId, JSON.stringify({ status: "approved" })]
   );
 
-  const postResult = await sendGalleryPost(content, content.telegram_id);
-  if (postResult?.ok === false) {
-    return NextResponse.json(
-      { error: "gallery_post_failed", detail: postResult.detail || postResult.error },
-      { status: 502 }
+  const canPublishNow = !content.publish_at || new Date(content.publish_at) <= new Date();
+  if (canPublishNow) {
+    const postResult = await sendGalleryPost(content, content.telegram_id);
+    if (postResult?.ok === false) {
+      return NextResponse.json(
+        { error: "gallery_post_failed", detail: postResult.detail || postResult.error },
+        { status: 502 }
+      );
+    }
+    await query(
+      "UPDATE digital_content SET published_to_channel = TRUE WHERE id = $1",
+      [contentId]
     );
+    await notifyModel(content.telegram_id, content.title || "your teaser");
   }
-
-  await notifyModel(content.telegram_id, content.title || "your teaser");
 
   return NextResponse.json({ ok: true });
 }

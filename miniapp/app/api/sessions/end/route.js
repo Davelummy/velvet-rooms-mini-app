@@ -2,40 +2,57 @@ import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureSessionColumns } from "../../_lib/sessions";
+import { createRequestContext, logError, withRequestId } from "../../_lib/observability";
+import { checkRateLimit } from "../../_lib/rate_limit";
+import { logAppEvent } from "../../_lib/metrics";
 
 export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
-const DISPUTE_REASONS = new Set([
-  "client_no_show",
-  "model_no_show",
-  "safety_concern",
-  "connection_issue",
-]);
+const DISPUTE_REASONS = new Set(["safety_concern", "connection_issue", "other"]);
 
 export async function POST(request) {
+  const ctx = createRequestContext(request, "sessions/end");
   const body = await request.json();
   const initData = body?.initData || "";
   if (!verifyInitData(initData, BOT_TOKEN)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return NextResponse.json(withRequestId({ error: "unauthorized" }, ctx.requestId), {
+      status: 401,
+    });
   }
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
-    return NextResponse.json({ error: "user_missing" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "user_missing" }, ctx.requestId), {
+      status: 400,
+    });
+  }
+  const rateAllowed = await checkRateLimit({
+    key: `session_end:${tgUser.id}`,
+    limit: 6,
+    windowSeconds: 60,
+  });
+  if (!rateAllowed) {
+    return NextResponse.json(withRequestId({ error: "rate_limited" }, ctx.requestId), {
+      status: 429,
+    });
   }
 
   const sessionId = Number(body?.session_id || 0);
   const reason = (body?.reason || "").toString().trim();
   const note = (body?.note || "").toString().trim();
   if (!sessionId || !reason) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "invalid_request" }, ctx.requestId), {
+      status: 400,
+    });
   }
 
   const userRes = await query("SELECT id, role FROM users WHERE telegram_id = $1", [
     tgUser.id,
   ]);
   if (!userRes.rowCount) {
-    return NextResponse.json({ error: "user_missing" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "user_missing" }, ctx.requestId), {
+      status: 400,
+    });
   }
   const userId = userRes.rows[0].id;
   const userRole = userRes.rows[0].role || "user";
@@ -48,19 +65,35 @@ export async function POST(request) {
     [sessionId]
   );
   if (!sessionRes.rowCount) {
-    return NextResponse.json({ error: "session_missing" }, { status: 404 });
+    return NextResponse.json(withRequestId({ error: "session_missing" }, ctx.requestId), {
+      status: 404,
+    });
   }
   const session = sessionRes.rows[0];
   if (![session.client_id, session.model_id].includes(userId)) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    return NextResponse.json(withRequestId({ error: "forbidden" }, ctx.requestId), {
+      status: 403,
+    });
   }
   if (["completed", "cancelled_by_client", "cancelled_by_model", "rejected"].includes(session.status)) {
-    return NextResponse.json({ error: "already_ended" }, { status: 409 });
+    return NextResponse.json(withRequestId({ error: "already_ended" }, ctx.requestId), {
+      status: 409,
+    });
   }
 
   const endActor = userId === session.client_id ? "client" : "model";
-  const shouldDispute = DISPUTE_REASONS.has(reason);
-  const nextStatus = shouldDispute ? "disputed" : "awaiting_confirmation";
+  let outcome = "release";
+  if (reason === "model_no_show") {
+    outcome = endActor === "client" ? "refund" : "dispute";
+  } else if (reason === "client_no_show") {
+    outcome = endActor === "model" ? "release" : "dispute";
+  } else if (DISPUTE_REASONS.has(reason)) {
+    outcome = "dispute";
+  } else if (reason === "completed_early") {
+    outcome = "release";
+  }
+  const shouldDispute = outcome === "dispute";
+  const nextStatus = shouldDispute ? "disputed" : "completed";
 
   await query(
     `UPDATE sessions
@@ -68,20 +101,59 @@ export async function POST(request) {
          ended_at = NOW(),
          end_reason = $3,
          end_actor = $4,
-         end_note = $5
+         end_note = $5,
+         end_outcome = $6,
+         completed_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE completed_at END
      WHERE id = $1`,
-    [sessionId, nextStatus, reason, endActor, note || null]
+    [sessionId, nextStatus, reason, endActor, note || null, outcome]
   );
 
-  if (shouldDispute) {
-    await query(
-      `UPDATE escrow_accounts
-       SET status = 'disputed',
-           dispute_reason = $2
-       WHERE escrow_type IN ('session','extension') AND related_id = $1`,
-      [sessionId, reason]
-    );
+  try {
+    if (shouldDispute) {
+      await query(
+        `UPDATE escrow_accounts
+         SET status = 'disputed',
+             dispute_reason = $2
+         WHERE escrow_type IN ('session','extension')
+           AND related_id = $1
+           AND status = 'held'`,
+        [sessionId, reason]
+      );
+    } else if (outcome === "refund") {
+      await query(
+        `UPDATE escrow_accounts
+         SET status = 'refunded',
+             released_at = NOW(),
+             release_condition_met = TRUE
+         WHERE escrow_type IN ('session','extension')
+           AND related_id = $1
+           AND status = 'held'`,
+        [sessionId]
+      );
+    } else {
+      await query(
+        `UPDATE escrow_accounts
+         SET status = 'released',
+             released_at = NOW(),
+             release_condition_met = TRUE
+         WHERE escrow_type IN ('session','extension')
+           AND related_id = $1
+           AND status = 'held'`,
+        [sessionId]
+      );
+    }
+  } catch (err) {
+    logError(ctx, "escrow_update_failed", { sessionId, error: err?.message });
   }
 
-  return NextResponse.json({ ok: true, status: nextStatus, end_actor: endActor, role: userRole });
+  await logAppEvent({
+    eventType: "session_end",
+    userId,
+    sessionId,
+    payload: { reason, outcome, actor: endActor },
+  });
+
+  return NextResponse.json(
+    withRequestId({ ok: true, status: nextStatus, end_actor: endActor, role: userRole, outcome }, ctx.requestId)
+  );
 }

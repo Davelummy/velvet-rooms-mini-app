@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { query } from "../../../_lib/db";
+import { query, withTransaction } from "../../../_lib/db";
 import { extractUser, verifyInitData } from "../../../_lib/telegram";
 import { ensureUser } from "../../../_lib/users";
 import { ensureSessionColumns } from "../../../_lib/sessions";
 import { ensureBlockTable } from "../../../_lib/blocks";
+import { ensureIdempotencyTable, readIdempotencyRecord, writeIdempotencyRecord } from "../../../_lib/idempotency";
+import { createRequestContext, logError, withRequestId } from "../../../_lib/observability";
+import { checkRateLimit } from "../../../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -54,24 +57,55 @@ function generateEscrowRef(prefix) {
 }
 
 export async function POST(request) {
+  const ctx = createRequestContext(request, "payments/wallet/charge");
   const body = await request.json();
   const initData = body?.initData || "";
   if (!verifyInitData(initData, BOT_TOKEN)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return NextResponse.json(withRequestId({ error: "unauthorized" }, ctx.requestId), {
+      status: 401,
+    });
   }
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
-    return NextResponse.json({ error: "user_missing" }, { status: 400 });
+    return NextResponse.json(withRequestId({ error: "user_missing" }, ctx.requestId), {
+      status: 400,
+    });
+  }
+
+  const rateAllowed = await checkRateLimit({
+    key: `wallet_charge:${tgUser.id}`,
+    limit: 6,
+    windowSeconds: 60,
+  });
+  if (!rateAllowed) {
+    return NextResponse.json(withRequestId({ error: "rate_limited" }, ctx.requestId), {
+      status: 429,
+    });
   }
 
   const escrowType = (body?.escrow_type || "").toString().trim().toLowerCase();
-  if (!["session", "extension"].includes(escrowType)) {
-    return NextResponse.json({ error: "invalid_escrow_type" }, { status: 400 });
+  if (!['session', 'extension'].includes(escrowType)) {
+    return NextResponse.json(withRequestId({ error: "invalid_escrow_type" }, ctx.requestId), {
+      status: 400,
+    });
+  }
+
+  const idempotencyKeyRaw =
+    request.headers.get("Idempotency-Key") ||
+    request.headers.get("idempotency-key") ||
+    body?.idempotency_key ||
+    "";
+  const idempotencyKey = idempotencyKeyRaw.toString().trim();
+  if (!idempotencyKey) {
+    return NextResponse.json(
+      withRequestId({ error: "missing_idempotency_key" }, ctx.requestId),
+      { status: 400 }
+    );
   }
 
   let userId;
   const existingUser = await query(
-    "SELECT id, role, wallet_balance FROM users WHERE telegram_id = $1",
+    "SELECT id, role FROM users WHERE telegram_id = $1",
     [tgUser.id]
   );
   if (existingUser.rowCount) {
@@ -89,7 +123,9 @@ export async function POST(request) {
       }
     }
     if (role && role !== "client") {
-      return NextResponse.json({ error: "client_only" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "client_only" }, ctx.requestId), {
+        status: 403,
+      });
     }
     userId = existingUser.rows[0].id;
   } else {
@@ -106,12 +142,14 @@ export async function POST(request) {
 
   await ensureSessionColumns();
   await ensureBlockTable();
+  await ensureIdempotencyTable();
 
   let amount = 0;
   let metadata = { escrow_type: escrowType };
   let receiverId = null;
-  let relatedId = null;
   let releaseCondition = "both_confirmed";
+  let sessionPayload = null;
+  let extensionPayload = null;
 
   if (escrowType === "session") {
     const modelId = Number(body?.model_id || 0);
@@ -119,10 +157,14 @@ export async function POST(request) {
     const durationMinutes = Number(body?.duration_minutes || 0);
     const scheduledFor = parseScheduledFor(body?.scheduled_for);
     if (!modelId || !sessionType || !durationMinutes) {
-      return NextResponse.json({ error: "missing_session_fields" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "missing_session_fields" }, ctx.requestId), {
+        status: 400,
+      });
     }
     if (!scheduledFor) {
-      return NextResponse.json({ error: "invalid_schedule" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "invalid_schedule" }, ctx.requestId), {
+        status: 400,
+      });
     }
     const modelRes = await query(
       `SELECT u.id, mp.verification_status
@@ -132,7 +174,9 @@ export async function POST(request) {
       [modelId]
     );
     if (!modelRes.rowCount || modelRes.rows[0].verification_status !== "approved") {
-      return NextResponse.json({ error: "model_not_approved" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "model_not_approved" }, ctx.requestId), {
+        status: 400,
+      });
     }
     const blockRes = await query(
       `SELECT 1 FROM blocks
@@ -141,28 +185,29 @@ export async function POST(request) {
       [userId, modelId]
     );
     if (blockRes.rowCount) {
-      return NextResponse.json({ error: "blocked" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "blocked" }, ctx.requestId), {
+        status: 403,
+      });
     }
     const sessionAmount = sessionPricing(sessionType, durationMinutes);
     if (!sessionAmount) {
-      return NextResponse.json({ error: "invalid_session_package" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "invalid_session_package" }, ctx.requestId), {
+        status: 400,
+      });
     }
     amount = sessionAmount;
-    const sessionRef = generateTransactionRef().replace("WAL", "SES");
-    const sessionRes = await query(
-      `INSERT INTO sessions (session_ref, client_id, model_id, session_type, package_price, status, duration_minutes, scheduled_for, created_at)
-       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, NOW())
-       RETURNING id`,
-      [sessionRef, userId, modelId, sessionType, amount, durationMinutes, scheduledFor]
-    );
-    relatedId = sessionRes.rows[0]?.id;
     receiverId = modelId;
     metadata = {
       ...metadata,
       model_id: modelId,
       session_type: sessionType,
       duration_minutes: durationMinutes,
-      session_id: relatedId,
+    };
+    sessionPayload = {
+      modelId,
+      sessionType,
+      durationMinutes,
+      scheduledFor,
     };
   }
 
@@ -170,7 +215,9 @@ export async function POST(request) {
     const sessionId = Number(body?.session_id || 0);
     const extensionMinutes = Number(body?.extension_minutes || 5);
     if (!sessionId || extensionMinutes !== 5) {
-      return NextResponse.json({ error: "invalid_extension_request" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "invalid_extension_request" }, ctx.requestId), {
+        status: 400,
+      });
     }
     const sessionRes = await query(
       `SELECT id, client_id, model_id, session_type, status, duration_minutes, actual_start, scheduled_end
@@ -178,14 +225,20 @@ export async function POST(request) {
       [sessionId]
     );
     if (!sessionRes.rowCount) {
-      return NextResponse.json({ error: "session_missing" }, { status: 404 });
+      return NextResponse.json(withRequestId({ error: "session_missing" }, ctx.requestId), {
+        status: 404,
+      });
     }
     const session = sessionRes.rows[0];
     if (session.client_id !== userId) {
-      return NextResponse.json({ error: "client_only" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "client_only" }, ctx.requestId), {
+        status: 403,
+      });
     }
-    if (!["accepted", "active", "awaiting_confirmation"].includes(session.status)) {
-      return NextResponse.json({ error: "extension_not_allowed" }, { status: 409 });
+    if (!['accepted', 'active', 'awaiting_confirmation'].includes(session.status)) {
+      return NextResponse.json(withRequestId({ error: "extension_not_allowed" }, ctx.requestId), {
+        status: 409,
+      });
     }
     const blockRes = await query(
       `SELECT 1 FROM blocks
@@ -194,97 +247,172 @@ export async function POST(request) {
       [userId, session.model_id]
     );
     if (blockRes.rowCount) {
-      return NextResponse.json({ error: "blocked" }, { status: 403 });
+      return NextResponse.json(withRequestId({ error: "blocked" }, ctx.requestId), {
+        status: 403,
+      });
     }
     const extensionAmount = extensionPricing(session.session_type);
     if (!extensionAmount) {
-      return NextResponse.json({ error: "extension_not_supported" }, { status: 400 });
+      return NextResponse.json(withRequestId({ error: "extension_not_supported" }, ctx.requestId), {
+        status: 400,
+      });
     }
     amount = extensionAmount;
-    relatedId = sessionId;
     receiverId = session.model_id;
     metadata = {
       ...metadata,
       model_id: receiverId,
-      session_id: relatedId,
+      session_id: sessionId,
       session_type: session.session_type,
       extension_minutes: extensionMinutes,
     };
-    const currentDuration = Number(session.duration_minutes || 0);
-    const newDuration = currentDuration + extensionMinutes;
-    let newEnd = null;
-    if (session.scheduled_end) {
-      const base = new Date(session.scheduled_end);
-      newEnd = new Date(base.getTime() + extensionMinutes * 60 * 1000).toISOString();
-    } else if (session.actual_start) {
-      const base = new Date(session.actual_start);
-      newEnd = new Date(base.getTime() + newDuration * 60 * 1000).toISOString();
+    extensionPayload = {
+      sessionId,
+      extensionMinutes,
+    };
+  }
+
+  try {
+    const result = await withTransaction(async (client) => {
+      const cached = await readIdempotencyRecord(client, idempotencyKey);
+      if (cached) {
+        return { cached: true, response: cached };
+      }
+
+      const balanceRes = await client.query(
+        "SELECT wallet_balance FROM users WHERE id = $1 FOR UPDATE",
+        [userId]
+      );
+      const balance = Number(balanceRes.rows[0]?.wallet_balance || 0);
+      if (balance < amount) {
+        return { error: "insufficient_wallet", balance };
+      }
+
+      const updateBalance = await client.query(
+        `UPDATE users
+         SET wallet_balance = wallet_balance - $1
+         WHERE id = $2 AND wallet_balance >= $1`,
+        [amount, userId]
+      );
+      if (!updateBalance.rowCount) {
+        return { error: "insufficient_wallet" };
+      }
+
+      let relatedId = null;
+      if (sessionPayload) {
+        const sessionRef = generateTransactionRef().replace("WAL", "SES");
+        const sessionRes = await client.query(
+          `INSERT INTO sessions (session_ref, client_id, model_id, session_type, package_price, status, duration_minutes, scheduled_for, created_at)
+           VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, NOW())
+           RETURNING id`,
+          [
+            sessionRef,
+            userId,
+            sessionPayload.modelId,
+            sessionPayload.sessionType,
+            amount,
+            sessionPayload.durationMinutes,
+            sessionPayload.scheduledFor,
+          ]
+        );
+        relatedId = sessionRes.rows[0]?.id || null;
+        metadata = { ...metadata, session_id: relatedId };
+      }
+
+      if (extensionPayload) {
+        const sessionRes = await client.query(
+          `SELECT duration_minutes, actual_start, scheduled_end
+           FROM sessions
+           WHERE id = $1 FOR UPDATE`,
+          [extensionPayload.sessionId]
+        );
+        const session = sessionRes.rows[0] || {};
+        const currentDuration = Number(session.duration_minutes || 0);
+        const newDuration = currentDuration + extensionPayload.extensionMinutes;
+        let newEnd = null;
+        if (session.scheduled_end) {
+          const base = new Date(session.scheduled_end);
+          newEnd = new Date(base.getTime() + extensionPayload.extensionMinutes * 60 * 1000).toISOString();
+        } else if (session.actual_start) {
+          const base = new Date(session.actual_start);
+          newEnd = new Date(base.getTime() + newDuration * 60 * 1000).toISOString();
+        }
+        await client.query(
+          `UPDATE sessions
+           SET duration_minutes = $1,
+               extension_minutes = COALESCE(extension_minutes, 0) + $2,
+               scheduled_end = COALESCE($3, scheduled_end)
+           WHERE id = $4`,
+          [newDuration, extensionPayload.extensionMinutes, newEnd, extensionPayload.sessionId]
+        );
+        relatedId = extensionPayload.sessionId;
+      }
+
+      const transactionRef = generateTransactionRef();
+      const transactionRes = await client.query(
+        `INSERT INTO transactions
+         (transaction_ref, user_id, transaction_type, amount, payment_provider, status, metadata_json, created_at, completed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+         RETURNING id`,
+        [
+          transactionRef,
+          userId,
+          "payment",
+          amount,
+          "wallet",
+          "completed",
+          JSON.stringify(metadata),
+        ]
+      );
+      const transactionId = transactionRes.rows[0]?.id;
+
+      const { platformFee, receiverPayout } = calculateFees(amount);
+      const escrowRef = generateEscrowRef("WAL");
+      await client.query(
+        `INSERT INTO escrow_accounts
+         (escrow_ref, escrow_type, related_id, payer_id, receiver_id, amount, platform_fee, receiver_payout, status, transaction_id, held_at, release_condition)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'held', $9, NOW(), $10)`,
+        [
+          escrowRef,
+          escrowType,
+          relatedId,
+          userId,
+          receiverId,
+          amount,
+          platformFee,
+          receiverPayout,
+          transactionId,
+          releaseCondition,
+        ]
+      );
+
+      const response = { ok: true, transaction_ref: transactionRef, amount, idempotency_key: idempotencyKey };
+      await writeIdempotencyRecord(client, {
+        key: idempotencyKey,
+        userId,
+        scope: "wallet_charge",
+        response,
+      });
+
+      return { response };
+    });
+
+    if (result?.cached) {
+      return NextResponse.json(withRequestId({ ...result.response, cached: true }, ctx.requestId));
     }
-    await query(
-      `UPDATE sessions
-       SET duration_minutes = $1,
-           extension_minutes = COALESCE(extension_minutes, 0) + $2,
-           scheduled_end = COALESCE($3, scheduled_end)
-       WHERE id = $4`,
-      [newDuration, extensionMinutes, newEnd, relatedId]
-    );
+    if (result?.error === "insufficient_wallet") {
+      return NextResponse.json(withRequestId({ error: "insufficient_wallet", balance: result.balance }, ctx.requestId), {
+        status: 409,
+      });
+    }
+    if (result?.error) {
+      return NextResponse.json(withRequestId({ error: result.error }, ctx.requestId), { status: 400 });
+    }
+    return NextResponse.json(withRequestId(result.response, ctx.requestId));
+  } catch (err) {
+    logError(ctx, "wallet_charge_failed", { error: err?.message });
+    return NextResponse.json(withRequestId({ error: "wallet_charge_failed" }, ctx.requestId), {
+      status: 500,
+    });
   }
-
-  const balanceRes = await query("SELECT wallet_balance FROM users WHERE id = $1", [
-    userId,
-  ]);
-  const balance = Number(balanceRes.rows[0]?.wallet_balance || 0);
-  if (balance < amount) {
-    return NextResponse.json({ error: "insufficient_wallet", balance }, { status: 409 });
-  }
-
-  const updateBalance = await query(
-    `UPDATE users
-     SET wallet_balance = wallet_balance - $1
-     WHERE id = $2 AND wallet_balance >= $1`,
-    [amount, userId]
-  );
-  if (!updateBalance.rowCount) {
-    return NextResponse.json({ error: "insufficient_wallet" }, { status: 409 });
-  }
-
-  const transactionRef = generateTransactionRef();
-  const transactionRes = await query(
-    `INSERT INTO transactions
-     (transaction_ref, user_id, transaction_type, amount, payment_provider, status, metadata_json, created_at, completed_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-     RETURNING id`,
-    [
-      transactionRef,
-      userId,
-      "payment",
-      amount,
-      "wallet",
-      "completed",
-      JSON.stringify(metadata),
-    ]
-  );
-  const transactionId = transactionRes.rows[0]?.id;
-
-  const { platformFee, receiverPayout } = calculateFees(amount);
-  const escrowRef = generateEscrowRef("WAL");
-  await query(
-    `INSERT INTO escrow_accounts
-     (escrow_ref, escrow_type, related_id, payer_id, receiver_id, amount, platform_fee, receiver_payout, status, transaction_id, held_at, release_condition)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'held', $9, NOW(), $10)`,
-    [
-      escrowRef,
-      escrowType,
-      relatedId,
-      userId,
-      receiverId,
-      amount,
-      platformFee,
-      receiverPayout,
-      transactionId,
-      releaseCondition,
-    ]
-  );
-
-  return NextResponse.json({ ok: true, transaction_ref: transactionRef, amount });
 }

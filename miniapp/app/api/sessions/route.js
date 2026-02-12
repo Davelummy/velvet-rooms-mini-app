@@ -13,6 +13,8 @@ export async function GET(request) {
   }
   const url = new URL(request.url);
   const scope = url.searchParams.get("scope") || "mine";
+  const limit = Math.min(Number(url.searchParams.get("limit") || 20), 50);
+  const offset = Math.max(Number(url.searchParams.get("offset") || 0), 0);
   const tgUser = extractUser(initData);
   if (!tgUser || !tgUser.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
@@ -35,10 +37,14 @@ export async function GET(request) {
        LEFT JOIN client_profiles cp ON cp.user_id = u.id
        WHERE s.model_id = $1
          AND s.status NOT IN ('pending_payment', 'rejected', 'cancelled_by_client', 'cancelled_by_model')
-       ORDER BY s.created_at DESC`,
-      [userId]
+       ORDER BY s.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit + 1, offset]
     );
-    return NextResponse.json({ items: res.rows });
+    const rows = res.rows || [];
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    return NextResponse.json({ items, has_more: hasMore });
   }
 
   if (scope === "client") {
@@ -49,11 +55,15 @@ export async function GET(request) {
        JOIN users u ON u.id = s.model_id
        LEFT JOIN model_profiles mp ON mp.user_id = u.id
        WHERE s.client_id = $1
-       ORDER BY s.created_at DESC`,
-      [userId]
+       ORDER BY s.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit + 1, offset]
     );
-    return NextResponse.json({ items: res.rows });
+    const rows = res.rows || [];
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+    return NextResponse.json({ items, has_more: hasMore });
   }
 
-  return NextResponse.json({ items: [] });
+  return NextResponse.json({ items: [], has_more: false });
 }

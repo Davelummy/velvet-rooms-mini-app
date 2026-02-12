@@ -1644,6 +1644,13 @@ h1 {
   margin: 12px 0 16px;
 }
 
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 12px 0 16px;
+}
+
 .metric-card {
   background: rgba(16, 8, 12, 0.6);
   border: 1px solid var(--line);
@@ -2029,6 +2036,8 @@ h1 {
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(16, 8, 11, 0.9);
+  max-height: 62vh;
+  overflow: auto;
 }
 
 .preflight-list {
@@ -2070,6 +2079,14 @@ h1 {
 .preflight-item.online {
   border-color: rgba(25, 195, 125, 0.4);
   color: #b6f7dd;
+}
+
+.preflight-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 0 4px;
+  background: rgba(16, 8, 11, 0.95);
+  border-top: 1px solid var(--line);
 }
 
 .call-media {
@@ -2167,6 +2184,29 @@ h1 {
   display: flex;
 }
 
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(8, 4, 6, 0.6);
+}
+
+.chat-header strong {
+  display: block;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.chat-status-line {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
 .chat-log {
   flex: 1;
   padding: 16px;
@@ -2205,6 +2245,57 @@ h1 {
   line-height: 1.4;
 }
 
+.chat-status {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chat-typing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(12, 5, 7, 0.6);
+  width: fit-content;
+}
+
+.chat-typing .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.4;
+  animation: typingPulse 1.2s infinite;
+}
+
+.chat-typing .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.chat-typing .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.retry-row {
+  margin-top: 6px;
+}
+
+@keyframes typingPulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
 .chat-input {
   display: flex;
   gap: 10px;
