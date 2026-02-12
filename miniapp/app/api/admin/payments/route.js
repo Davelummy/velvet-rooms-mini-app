@@ -37,9 +37,12 @@ export async function GET(request) {
 
   const res = await query(
     `SELECT t.transaction_ref, t.amount, t.status, t.metadata_json, t.created_at,
-            u.public_id, u.username, u.telegram_id, t.payment_provider
+            u.public_id, u.username, u.telegram_id, t.payment_provider,
+            COALESCE(cp.display_name, mp.display_name, u.username, u.public_id) AS display_name
      FROM transactions t
      JOIN users u ON u.id = t.user_id
+     LEFT JOIN client_profiles cp ON cp.user_id = u.id
+     LEFT JOIN model_profiles mp ON mp.user_id = u.id
      WHERE t.status = ANY($1)
        ${providerClause}
        ${rangeClause}

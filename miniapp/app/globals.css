@@ -1389,6 +1389,11 @@ h1 {
   margin-top: 20px;
 }
 
+.tab-select,
+.admin-select {
+  display: none;
+}
+
 .filter-row {
   display: flex;
   flex-wrap: wrap;
@@ -1739,6 +1744,23 @@ h1 {
     max-height: 70vh;
     border-radius: 20px 20px 0 0;
   }
+
+  .admin-tabs {
+    display: none;
+  }
+
+  .admin-select {
+    display: grid;
+    min-width: 180px;
+  }
+
+  .dash-actions.tabs .cta {
+    display: none;
+  }
+
+  .tab-select {
+    display: grid;
+  }
 }
 
 .call-overlay {
@@ -1785,6 +1807,7 @@ h1 {
   gap: 10px;
   font-size: 13px;
   color: var(--muted);
+  align-items: center;
 }
 
 .timer-elapsed {
@@ -1797,6 +1820,30 @@ h1 {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(0, 0, 0, 0.35);
+}
+
+.call-progress {
+  width: 34px;
+  height: 34px;
+}
+
+.call-progress svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.progress-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 3;
+}
+
+.progress-ring {
+  fill: none;
+  stroke: rgba(255, 179, 71, 0.8);
+  stroke-width: 3;
+  stroke-linecap: round;
 }
 
 .call-head-actions {
@@ -1853,6 +1900,51 @@ h1 {
   color: #ffd6a3;
 }
 
+.call-mini-menu {
+  display: none;
+}
+
+.call-menu-panel {
+  position: absolute;
+  top: 80px;
+  right: 18px;
+  background: rgba(12, 5, 7, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  z-index: 20;
+  min-width: 200px;
+}
+
+@media (min-width: 601px) {
+  .call-mini-menu {
+    display: none;
+  }
+}
+
+.menu-item {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--ink);
+}
+
+.menu-item.active {
+  border-color: rgba(255, 179, 71, 0.6);
+  color: #ffd6a3;
+}
+
+.menu-item.danger {
+  border-color: rgba(255, 71, 100, 0.6);
+  color: #ffe2e7;
+  background: rgba(255, 71, 100, 0.25);
+}
+
 .status-chip {
   padding: 6px 12px;
   border-radius: 999px;
@@ -1900,6 +1992,20 @@ h1 {
 
 .call-body.chat-only {
   grid-template-columns: 1fr;
+}
+
+.call-card.chat-only .call-chat-panel {
+  display: flex;
+  flex: 1;
+  border-radius: 20px;
+}
+
+.call-card.chat-only .call-controls {
+  justify-content: center;
+}
+
+.call-card.chat-only .chat-log {
+  background: linear-gradient(180deg, rgba(22, 9, 13, 0.6) 0%, rgba(12, 5, 7, 0.95) 100%);
 }
 
 .call-banner {
@@ -2149,5 +2255,16 @@ h1 {
     height: 55%;
     border-radius: 20px 20px 0 0;
     box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.45);
+  }
+
+  .call-mini-menu {
+    display: grid;
+  }
+
+  .call-menu-panel {
+    right: 12px;
+    left: 12px;
+    top: auto;
+    bottom: 88px;
   }
 }

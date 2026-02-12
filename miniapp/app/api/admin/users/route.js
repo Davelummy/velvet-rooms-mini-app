@@ -27,7 +27,9 @@ export async function GET(request) {
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
     where.push(
-      `(LOWER(u.username) LIKE $${params.length} OR LOWER(u.public_id) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length})`
+      `(LOWER(COALESCE(cp.display_name, mp.display_name, u.username, u.public_id)) LIKE $${params.length}
+        OR LOWER(u.public_id) LIKE $${params.length}
+        OR LOWER(u.email) LIKE $${params.length})`
     );
   }
   if (role !== "all") {
@@ -42,9 +44,12 @@ export async function GET(request) {
   const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const res = await query(
     `SELECT u.id, u.public_id, u.username, u.role, u.status, u.email, u.created_at, u.avatar_path,
+            COALESCE(cp.display_name, mp.display_name, u.username, u.public_id) AS display_name,
             (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id) AS followers,
             (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id) AS following
      FROM users u
+     LEFT JOIN client_profiles cp ON cp.user_id = u.id
+     LEFT JOIN model_profiles mp ON mp.user_id = u.id
      ${whereClause}
      ORDER BY u.created_at DESC
      LIMIT 200`,

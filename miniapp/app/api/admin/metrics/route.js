@@ -71,15 +71,18 @@ export async function GET(request) {
     query(
       `SELECT COUNT(*)::int AS count
        FROM transactions
-       WHERE (payment_provider = 'crypto' AND status = 'submitted')
-          OR (payment_provider <> 'crypto' AND status IN ('pending','submitted'))`
+       WHERE payment_provider <> 'wallet'
+         AND (
+           (payment_provider = 'crypto' AND status = 'submitted')
+           OR (payment_provider <> 'crypto' AND status IN ('pending','submitted'))
+         )`
     ),
     query(
-      "SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'completed'"
+      "SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'completed' AND payment_provider <> 'wallet'"
     ),
-    query("SELECT COUNT(*)::int AS count FROM transactions"),
-    query("SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'failed'"),
-    query("SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'failed' AND created_at >= NOW() - INTERVAL '24 hours'"),
+    query("SELECT COUNT(*)::int AS count FROM transactions WHERE payment_provider <> 'wallet'"),
+    query("SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'failed' AND payment_provider <> 'wallet'"),
+    query("SELECT COUNT(*)::int AS count FROM transactions WHERE status = 'failed' AND payment_provider <> 'wallet' AND created_at >= NOW() - INTERVAL '24 hours'"),
     query(
       "SELECT COUNT(*)::int AS count FROM users"
     ),
@@ -97,7 +100,7 @@ export async function GET(request) {
     query("SELECT COUNT(*)::int AS count FROM content_purchases"),
     query("SELECT COUNT(*)::int AS count FROM content_purchases WHERE purchased_at >= NOW() - INTERVAL '24 hours'"),
     query("SELECT COUNT(*)::int AS count FROM sessions WHERE created_at >= NOW() - INTERVAL '24 hours'"),
-    query("SELECT COALESCE(SUM(amount),0)::numeric AS amount FROM transactions WHERE status = 'completed' AND created_at >= NOW() - INTERVAL '7 days'"),
+    query("SELECT COALESCE(SUM(amount),0)::numeric AS amount FROM transactions WHERE status = 'completed' AND payment_provider <> 'wallet' AND created_at >= NOW() - INTERVAL '7 days'"),
     query("SELECT COALESCE(SUM(amount),0)::numeric AS amount FROM escrow_accounts WHERE status = 'released' AND released_at >= NOW() - INTERVAL '7 days'"),
     query(
       `SELECT COUNT(*)::int AS count

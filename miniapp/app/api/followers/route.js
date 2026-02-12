@@ -32,9 +32,11 @@ export async function GET(request) {
 
   const res = await query(
     `SELECT u.id, u.public_id, u.username, u.role, u.avatar_path,
-            mp.is_online, mp.display_name
+            mp.is_online, mp.display_name,
+            COALESCE(cp.display_name, mp.display_name, u.username, u.public_id) AS display_name
      FROM follows f
      JOIN users u ON u.id = f.follower_id
+     LEFT JOIN client_profiles cp ON cp.user_id = u.id
      LEFT JOIN model_profiles mp ON mp.user_id = u.id
      WHERE f.followee_id = $1
      ORDER BY f.created_at DESC`,

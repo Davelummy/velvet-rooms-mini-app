@@ -61,6 +61,8 @@ export default function Admin() {
 
   const formatNumber = (value) => Number(value || 0).toLocaleString();
   const formatCurrency = (value) => `₦${formatNumber(value)}`;
+  const resolveName = (item, fallback = "User") =>
+    item?.display_name || item?.username || item?.public_id || fallback;
   const revenueSeries = metrics.escrow_inflow_7d || [];
   const approvalsSeries = metrics.approvals_7d || [];
   const maxRevenue = Math.max(
@@ -90,7 +92,7 @@ export default function Admin() {
       return selectedItem.escrow_ref || "Escrow";
     }
     if (section === "users") {
-      return selectedItem.username || selectedItem.public_id || "User";
+      return resolveName(selectedItem, "User");
     }
     if (section === "clients") {
       return selectedItem.display_name || selectedItem.username || selectedItem.public_id || "Client";
@@ -131,7 +133,7 @@ export default function Admin() {
         { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
         { label: "Status", value: selectedItem.status || "-" },
         { label: "Provider", value: selectedItem.payment_provider || "-" },
-        { label: "Username", value: selectedItem.username || selectedItem.public_id || "-" },
+        { label: "Username", value: resolveName(selectedItem, "-") },
         {
           label: "Reference",
           value:
@@ -152,7 +154,7 @@ export default function Admin() {
     if (section === "users") {
       return [
         { label: "Public ID", value: selectedItem.public_id || "-" },
-        { label: "Username", value: selectedItem.username || "-" },
+        { label: "Username", value: resolveName(selectedItem, "-") },
         { label: "Role", value: selectedItem.role || "-" },
         { label: "Status", value: selectedItem.status || "-" },
         { label: "Email", value: selectedItem.email || "-" },
@@ -164,7 +166,7 @@ export default function Admin() {
     if (section === "clients") {
       return [
         { label: "Display name", value: selectedItem.display_name || "-" },
-        { label: "Username", value: selectedItem.username || "-" },
+        { label: "Username", value: selectedItem.display_name || selectedItem.username || "-" },
         { label: "Public ID", value: selectedItem.public_id || "-" },
         { label: "Email", value: selectedItem.email || "-" },
         { label: "Location", value: selectedItem.location || "-" },
@@ -186,8 +188,8 @@ export default function Admin() {
     if (section === "activity") {
       return [
         { label: "Action", value: selectedItem.action_type || "-" },
-        { label: "Actor", value: selectedItem.actor_username || selectedItem.actor_public_id || "-" },
-        { label: "Target", value: selectedItem.target_username || selectedItem.target_public_id || "-" },
+        { label: "Actor", value: selectedItem.actor_display_name || selectedItem.actor_public_id || "-" },
+        { label: "Target", value: selectedItem.target_display_name || selectedItem.target_public_id || "-" },
         { label: "Details", value: selectedItem.details ? JSON.stringify(selectedItem.details) : "-" },
         { label: "Created", value: selectedItem.created_at || "-" },
       ];
@@ -199,11 +201,11 @@ export default function Admin() {
       { label: "Status", value: selectedItem.status || "-" },
       {
         label: "Payer",
-        value: selectedItem.payer_username || selectedItem.payer_public_id || "-",
+        value: selectedItem.payer_display_name || selectedItem.payer_public_id || "-",
       },
       {
         label: "Receiver",
-        value: selectedItem.receiver_username || selectedItem.receiver_public_id || "-",
+        value: selectedItem.receiver_display_name || selectedItem.receiver_public_id || "-",
       },
     ];
   }, [section, selectedItem]);
@@ -498,6 +500,19 @@ export default function Admin() {
           <span className="logo-text">Velvet Rooms</span>
           <span className="admin-pill">Admin</span>
         </div>
+        <label className="field admin-select">
+          Section
+          <select value={section} onChange={(event) => setSection(event.target.value)}>
+            <option value="models">Model Queue</option>
+            <option value="content">Content Queue</option>
+            <option value="payments">Payments</option>
+            <option value="clients">Client Queue</option>
+            <option value="escrows">Escrow Releases</option>
+            <option value="disputes">Disputes</option>
+            <option value="users">Users</option>
+            <option value="activity">Activity</option>
+          </select>
+        </label>
         <div className="admin-tabs">
           <button
             type="button"
@@ -910,7 +925,7 @@ export default function Admin() {
                   type="text"
                   value={userQuery}
                   onChange={(event) => setUserQuery(event.target.value)}
-                  placeholder="Search username, email, ID"
+                  placeholder="Search name, email, ID"
                 />
               </label>
               <label className="field">
@@ -1012,7 +1027,7 @@ export default function Admin() {
                   >
                 <div>
                   <p className="queue-id">
-                    {(section === "payments" && (item.username || item.public_id)) ||
+                    {(section === "payments" && resolveName(item)) ||
                       item.public_id ||
                       item.escrow_ref ||
                       item.transaction_ref ||
@@ -1020,9 +1035,9 @@ export default function Admin() {
                   </p>
                   <h3>
                     {section === "users"
-                      ? item.username || item.public_id || "User"
+                      ? resolveName(item, "User")
                       : section === "clients"
-                      ? item.display_name || item.username || item.public_id || "Client"
+                      ? item.display_name || resolveName(item, "Client")
                       : section === "activity"
                       ? item.action_type || "Activity"
                       : item.display_name || item.title || item.escrow_type || "Payment"}
@@ -1051,8 +1066,8 @@ export default function Admin() {
                     {section === "users" &&
                       `${item.role || "user"} · ${item.status || "status"}`}
                     {section === "activity" &&
-                      `${item.actor_username || item.actor_public_id || "Actor"} → ${
-                        item.target_username || item.target_public_id || "Target"
+                      `${item.actor_display_name || item.actor_public_id || "Actor"} → ${
+                        item.target_display_name || item.target_public_id || "Target"
                       }`}
                   </p>
                 </div>
@@ -1289,8 +1304,7 @@ export default function Admin() {
                 <div className="admin-detail-header">
                   <div>
                     <p className="queue-id">
-                      {(section === "payments" &&
-                        (selectedItem.username || selectedItem.public_id)) ||
+                      {(section === "payments" && resolveName(selectedItem)) ||
                         selectedItem.public_id ||
                         selectedItem.escrow_ref ||
                         selectedItem.transaction_ref ||

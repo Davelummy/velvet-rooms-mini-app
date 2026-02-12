@@ -86,7 +86,10 @@ export async function POST(request) {
   const location = clampText(body?.location, 120) || null;
 
   // Client username/display name
-  const username = clampText(body?.username, 32).replace(/^@/, "") || null;
+  const displayNameInput = clampText(body?.display_name, 60) || "";
+  const usernameInput = clampText(body?.username, 32).replace(/^@/, "") || "";
+  const clientDisplayName = displayNameInput || usernameInput || null;
+  const username = usernameInput || (displayNameInput ? displayNameInput.slice(0, 32) : null);
 
   // Birth fields (optional update)
   const birthMonth = body?.birth_month != null ? String(body.birth_month).trim() : "";
@@ -112,7 +115,7 @@ export async function POST(request) {
     if (email) {
       await query("UPDATE users SET email = $1 WHERE id = $2", [email, userId]);
     }
-    if (location != null || birthMonth || birthYear) {
+    if (location != null || birthMonth || birthYear || clientDisplayName) {
       if (birthMonth || birthYear) {
         if (!isAdult(birthYear, birthMonth)) {
           return NextResponse.json({ error: "age_restricted" }, { status: 400 });
@@ -120,12 +123,14 @@ export async function POST(request) {
       }
       await query(
         `UPDATE client_profiles
-         SET location = COALESCE($2, location),
-             birth_month = COALESCE($3, birth_month),
-             birth_year = COALESCE($4, birth_year)
+         SET display_name = COALESCE($2, display_name),
+             location = COALESCE($3, location),
+             birth_month = COALESCE($4, birth_month),
+             birth_year = COALESCE($5, birth_year)
          WHERE user_id = $1`,
         [
           userId,
+          clientDisplayName,
           location,
           birthMonth ? Number(birthMonth) : null,
           birthYear ? Number(birthYear) : null,

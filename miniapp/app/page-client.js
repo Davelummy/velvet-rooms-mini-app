@@ -29,6 +29,20 @@ export default function Home() {
     return out.slice(0, 24);
   };
 
+  const resolveDisplayName = (item, fallback = "User") => {
+    if (!item) {
+      return fallback;
+    }
+    return (
+      item.display_name ||
+      item.client_display_name ||
+      item.model_display_name ||
+      item.username ||
+      item.public_id ||
+      fallback
+    );
+  };
+
   const countries = useMemo(() => {
     const list = Country.getAllCountries() || [];
     return list.sort((a, b) => a.name.localeCompare(b.name));
@@ -221,6 +235,7 @@ export default function Home() {
   const [callMessages, setCallMessages] = useState([]);
   const [callInput, setCallInput] = useState("");
   const [callChatOpen, setCallChatOpen] = useState(false);
+  const [callMenuOpen, setCallMenuOpen] = useState(false);
   const [callTiming, setCallTiming] = useState({
     startedAt: null,
     endsAt: null,
@@ -405,6 +420,15 @@ export default function Home() {
       durationMinutes: durationMinutes || null,
     };
   };
+
+  const callProgress = useMemo(() => {
+    if (!callTiming.durationMinutes || callCountdown.remaining == null) {
+      return null;
+    }
+    const totalSeconds = Math.max(1, callTiming.durationMinutes * 60);
+    const remaining = Math.min(totalSeconds, Math.max(0, callCountdown.remaining));
+    return remaining / totalSeconds;
+  }, [callTiming.durationMinutes, callCountdown.remaining]);
 
   const onboardingSlides = useMemo(
     () => [
@@ -669,6 +693,7 @@ export default function Home() {
       setCallCountdown({ remaining: null, elapsed: null });
       setCallTiming({ startedAt: null, endsAt: null, durationMinutes: null });
       setCallChatOpen(false);
+      setCallMenuOpen(false);
       setCallToast({ open: false, message: "", tone: "neutral" });
       setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false });
       callWarningRef.current = { twoMin: false, thirtySec: false, ended: false };
@@ -786,6 +811,17 @@ export default function Home() {
     loading: false,
   });
   const avatarUrl = profile?.user?.avatar_url || "";
+  const clientDisplayName =
+    profile?.client?.display_name ||
+    profile?.user?.username ||
+    profile?.user?.public_id ||
+    "Client";
+  const modelDisplayName =
+    profile?.model?.display_name ||
+    profile?.user?.username ||
+    profile?.user?.public_id ||
+    "Model";
+  const selfDisplayName = role === "model" ? modelDisplayName : clientDisplayName;
   const clientLocationValue = buildLocationValue(clientCountryIso, clientRegionName);
   const modelLocationValue = buildLocationValue(modelCountryIso, modelRegionName);
   const profileLocationValue = buildLocationValue(profileCountryIso, profileRegionName);
@@ -1491,7 +1527,7 @@ export default function Home() {
     const payload = {
       id: `${senderId || "me"}-${Date.now()}`,
       senderId,
-      senderLabel: profile?.user?.public_id || profile?.user?.username || "You",
+      senderLabel: selfDisplayName || "You",
       text: message,
       sentAt: new Date().toISOString(),
     };
@@ -3247,7 +3283,7 @@ export default function Home() {
     const locationValue = role === "model" ? model.location || "" : client.location || "";
     const parsedLocation = parseLocation(locationValue);
     setProfileEditForm({
-      username: user.username || client.display_name || "",
+      username: client.display_name || user.username || "",
       email: user.email || "",
       location: locationValue,
       birthMonth: client.birth_month ? String(client.birth_month) : "",
@@ -3282,6 +3318,7 @@ export default function Home() {
       const resolvedLocation = profileLocationValue || profileEditForm.location;
       const payload = { initData };
       if (role === "client") {
+        payload.display_name = profileEditForm.username;
         payload.username = profileEditForm.username;
         payload.email = profileEditForm.email;
         payload.location = resolvedLocation;
@@ -4593,7 +4630,7 @@ export default function Home() {
             )}
             {profile?.user && (
               <div className="flow-card">
-                <h3>Welcome, {profile.user.username || profile.user.public_id || "Client"}</h3>
+                <h3>Welcome, {clientDisplayName}</h3>
                 <div className="line">
                   <span>Access status</span>
                   <strong>{clientAccessPaid ? "Unlocked" : "Pending approval"}</strong>
@@ -4787,7 +4824,21 @@ export default function Home() {
             )}
             {clientAccessPaid && (
               <>
-                <div className="dash-actions">
+                <div className="dash-actions tabs">
+                  <label className="field tab-select">
+                    Section
+                    <select
+                      value={clientTab}
+                      onChange={(event) => setClientTab(event.target.value)}
+                    >
+                      <option value="gallery">Gallery</option>
+                      <option value="profile">Profile</option>
+                      <option value="purchases">Purchases</option>
+                      <option value="following">Following</option>
+                      <option value="sessions">Sessions</option>
+                      <option value="wallet">Wallet</option>
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className={`cta ${clientTab === "gallery" ? "primary" : "ghost"}`}
@@ -4981,7 +5032,8 @@ export default function Home() {
                                   className={`pill ghost ${item.has_liked ? "active" : ""}`}
                                   onClick={() => toggleLike(item.id)}
                                 >
-                                  {Number(item.likes_count || 0)} likes
+                                  {item.has_liked ? "Liked" : "Like"} ·{" "}
+                                  {Number(item.likes_count || 0)}
                                 </button>
                                 <button
                                   type="button"
@@ -5113,7 +5165,7 @@ export default function Home() {
                         {avatarUrl ? (
                           <img src={avatarUrl} alt="Profile" />
                         ) : (
-                          <span>{(profile?.user?.username || "C")[0]}</span>
+                          <span>{(clientDisplayName || "C")[0]}</span>
                         )}
                       </div>
                       <div className="avatar-actions">
@@ -5194,10 +5246,7 @@ export default function Home() {
                     <div className="line">
                       <span>Display name</span>
                       <strong>
-                        {profile?.client?.display_name ||
-                          profile?.user?.username ||
-                          profile?.user?.first_name ||
-                          "-"}
+                        {clientDisplayName || profile?.user?.first_name || "-"}
                       </strong>
                     </div>
                     <div className="line">
@@ -5283,30 +5332,30 @@ export default function Home() {
                         {blockedList.map((item) => (
                           <div key={`blocked-${item.id}`} className="list-row">
                             <div className="gallery-user">
-                              <span className="avatar tiny">
-                                {item.avatar_url ? (
-                                  <img src={item.avatar_url} alt="User" />
-                                ) : (
-                                  <span>{(item.username || item.public_id || "U")[0]}</span>
-                                )}
-                              </span>
-                              <div>
-                                <strong>{item.model_display_name || item.username || item.public_id}</strong>
-                                {item.verification_status === "approved" && (
-                                  <span className="pill success">Verified</span>
-                                )}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="cta ghost"
-                              onClick={() =>
-                                requestBlockToggle(
-                                  item.id,
-                                  item.model_display_name || item.username || item.public_id || ""
-                                )
-                              }
-                            >
+                                  <span className="avatar tiny">
+                                    {item.avatar_url ? (
+                                      <img src={item.avatar_url} alt="User" />
+                                    ) : (
+                                      <span>{resolveDisplayName(item, "U")[0]}</span>
+                                    )}
+                                  </span>
+                                  <div>
+                                    <strong>{resolveDisplayName(item)}</strong>
+                                    {item.verification_status === "approved" && (
+                                      <span className="pill success">Verified</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="cta ghost"
+                                  onClick={() =>
+                                    requestBlockToggle(
+                                      item.id,
+                                      resolveDisplayName(item, "")
+                                    )
+                                  }
+                                >
                               Unblock
                             </button>
                           </div>
@@ -5432,7 +5481,7 @@ export default function Home() {
                               onClick={() => handleSessionJoin(item)}
                               disabled={sessionActionStatus[item.id]?.loading}
                             >
-                              Start session
+                              {item.session_type === "chat" ? "Open chat" : "Start session"}
                             </button>
                           )}
                           {item.status === "active" &&
@@ -5755,7 +5804,7 @@ export default function Home() {
 
       {callState.open && (
         <section className="call-overlay">
-          <div className={`call-card ${callChatOpen ? "chat-open" : ""}`}>
+          <div className={`call-card ${callChatOpen ? "chat-open" : ""} ${callState.sessionType === "chat" ? "chat-only" : ""}`}>
             <header className="call-top">
               <div className="call-title">
                 <p className="eyebrow">
@@ -5765,6 +5814,23 @@ export default function Home() {
                 </p>
                 <h3>{callState.peerLabel || "Session"}</h3>
                 <div className="call-timer">
+                  {callProgress != null && (
+                    <div className="call-progress">
+                      <svg viewBox="0 0 36 36" aria-hidden="true">
+                        <path
+                          className="progress-track"
+                          d="M18 2.5a15.5 15.5 0 1 1 0 31a15.5 15.5 0 1 1 0-31"
+                        />
+                        <path
+                          className="progress-ring"
+                          d="M18 2.5a15.5 15.5 0 1 1 0 31a15.5 15.5 0 1 1 0-31"
+                          style={{
+                            strokeDasharray: `${Math.round(callProgress * 100)} 100`,
+                          }}
+                        />
+                      </svg>
+                    </div>
+                  )}
                   <span className="timer-elapsed">{callElapsedLabel}</span>
                   <span className="timer-remaining">{callRemainingLabel}</span>
                 </div>
@@ -5777,6 +5843,16 @@ export default function Home() {
                 <span className={`status-chip ${callStatusChip.tone}`}>
                   {callStatusChip.label}
                 </span>
+                <button
+                  type="button"
+                  className="icon-btn call-mini-menu"
+                  onClick={() => setCallMenuOpen((prev) => !prev)}
+                  aria-label="Open call menu"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 7h14M5 12h14M5 17h14" />
+                  </svg>
+                </button>
                 {callState.sessionType !== "chat" && (
                   <button
                     type="button"
@@ -5793,6 +5869,54 @@ export default function Home() {
             </header>
             {callToast.open && (
               <div className={`call-toast ${callToast.tone}`}>{callToast.message}</div>
+            )}
+            {callMenuOpen && (
+              <div className="call-menu-panel">
+                <button
+                  type="button"
+                  className={`menu-item ${callState.micMuted ? "active" : ""}`}
+                  onClick={() => {
+                    toggleMute();
+                    setCallMenuOpen(false);
+                  }}
+                >
+                  {callState.micMuted ? "Unmute" : "Mute"}
+                </button>
+                {callState.sessionType === "video" && !callState.audioOnly && (
+                  <button
+                    type="button"
+                    className={`menu-item ${callState.cameraOff ? "active" : ""}`}
+                    onClick={() => {
+                      toggleCamera();
+                      setCallMenuOpen(false);
+                    }}
+                  >
+                    {callState.cameraOff ? "Camera on" : "Camera off"}
+                  </button>
+                )}
+                {callState.sessionType !== "chat" && (
+                  <button
+                    type="button"
+                    className={`menu-item ${callChatOpen ? "active" : ""}`}
+                    onClick={() => {
+                      setCallChatOpen((prev) => !prev);
+                      setCallMenuOpen(false);
+                    }}
+                  >
+                    {callChatOpen ? "Hide chat" : "Show chat"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="menu-item danger"
+                  onClick={() => {
+                    setCallMenuOpen(false);
+                    requestEndCall();
+                  }}
+                >
+                  End session
+                </button>
+              </div>
             )}
             {callConnectionStatus === "reconnecting" && callState.sessionType !== "chat" && (
               <div className="call-banner warn">
@@ -5849,7 +5973,7 @@ export default function Home() {
                     <span>Join audio-only</span>
                   </label>
                 )}
-                <div className="dash-actions">
+                <div className="dash-actions tabs">
                   <button
                     type="button"
                     className={`cta ghost ${callPreflight.checking ? "loading" : ""}`}
@@ -6045,7 +6169,8 @@ export default function Home() {
                 className={`pill ghost ${previewOverlay.item.has_liked ? "active" : ""}`}
                 onClick={() => toggleLike(previewOverlay.item.id)}
               >
-                {Number(previewOverlay.item.likes_count || 0)} likes
+                {previewOverlay.item.has_liked ? "Liked" : "Like"} ·{" "}
+                {Number(previewOverlay.item.likes_count || 0)}
               </button>
             </div>
             <div className="preview-media">
@@ -6323,7 +6448,7 @@ export default function Home() {
                         username: event.target.value,
                       }))
                     }
-                    placeholder="Choose a unique username"
+                    placeholder="Choose a display name"
                   />
                 </label>
                 <label className="field">
@@ -6721,6 +6846,16 @@ export default function Home() {
             {modelApproved ? (
               <>
                 <div className="dash-actions">
+                  <label className="field tab-select">
+                    Section
+                    <select value={modelTab} onChange={(event) => setModelTab(event.target.value)}>
+                      <option value="profile">Profile</option>
+                      <option value="content">Content</option>
+                      <option value="sessions">Sessions</option>
+                      <option value="earnings">Earnings</option>
+                      <option value="followers">Followers</option>
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className={`cta ${modelTab === "profile" ? "primary" : "ghost"}`}
@@ -6980,30 +7115,30 @@ export default function Home() {
                         {blockedList.map((item) => (
                           <div key={`blocked-model-${item.id}`} className="list-row">
                             <div className="gallery-user">
-                              <span className="avatar tiny">
-                                {item.avatar_url ? (
-                                  <img src={item.avatar_url} alt="User" />
-                                ) : (
-                                  <span>{(item.username || item.public_id || "U")[0]}</span>
-                                )}
-                              </span>
-                              <div>
-                                <strong>{item.model_display_name || item.username || item.public_id}</strong>
-                                {item.verification_status === "approved" && (
-                                  <span className="pill success">Verified</span>
-                                )}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              className="cta ghost"
-                              onClick={() =>
-                                requestBlockToggle(
-                                  item.id,
-                                  item.model_display_name || item.username || item.public_id || ""
-                                )
-                              }
-                            >
+                                  <span className="avatar tiny">
+                                    {item.avatar_url ? (
+                                      <img src={item.avatar_url} alt="User" />
+                                    ) : (
+                                      <span>{resolveDisplayName(item, "U")[0]}</span>
+                                    )}
+                                  </span>
+                                  <div>
+                                    <strong>{resolveDisplayName(item)}</strong>
+                                    {item.verification_status === "approved" && (
+                                      <span className="pill success">Verified</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="cta ghost"
+                                  onClick={() =>
+                                    requestBlockToggle(
+                                      item.id,
+                                      resolveDisplayName(item, "")
+                                    )
+                                  }
+                                >
                               Unblock
                             </button>
                           </div>
@@ -7259,7 +7394,7 @@ export default function Home() {
                                     onClick={() => handleSessionJoin(item)}
                                     disabled={sessionActionStatus[item.id]?.loading}
                                   >
-                                    Start session
+                                    {item.session_type === "chat" ? "Open chat" : "Start session"}
                                   </button>
                                   <button
                                     type="button"
@@ -7436,11 +7571,11 @@ export default function Home() {
                                   {item.avatar_url ? (
                                     <img src={item.avatar_url} alt="Follower" />
                                   ) : (
-                                    <span>{(item.display_name || item.username || "U")[0]}</span>
+                                    <span>{resolveDisplayName(item, "U")[0]}</span>
                                   )}
                                 </div>
                                 <div>
-                                  <strong>{item.display_name || item.username || item.public_id}</strong>
+                                  <strong>{resolveDisplayName(item)}</strong>
                                   <p className="muted">{item.role || "user"}</p>
                                 </div>
                               </div>

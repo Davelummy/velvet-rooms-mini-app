@@ -29,9 +29,10 @@ export async function GET(request) {
   if (scope === "mine") {
     const res = await query(
       `SELECT s.id, s.session_type, s.status, s.duration_minutes,
-              COALESCE(u.username, u.public_id) AS client_label
+              COALESCE(cp.display_name, u.username, u.public_id) AS client_label
        FROM sessions s
        JOIN users u ON u.id = s.client_id
+       LEFT JOIN client_profiles cp ON cp.user_id = u.id
        WHERE s.model_id = $1
          AND s.status NOT IN ('pending_payment', 'rejected', 'cancelled_by_client', 'cancelled_by_model')
        ORDER BY s.created_at DESC`,
@@ -43,7 +44,7 @@ export async function GET(request) {
   if (scope === "client") {
     const res = await query(
       `SELECT s.id, s.session_type, s.status, s.duration_minutes,
-              COALESCE(mp.display_name, u.public_id) AS model_label
+              COALESCE(mp.display_name, u.username, u.public_id) AS model_label
        FROM sessions s
        JOIN users u ON u.id = s.model_id
        LEFT JOIN model_profiles mp ON mp.user_id = u.id
