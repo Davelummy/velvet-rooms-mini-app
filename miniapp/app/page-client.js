@@ -5470,192 +5470,196 @@ export default function Home() {
                       </p>
                     )}
                     {!galleryStatus && !galleryLoading && visibleGalleryItems.length > 0 && (
-                      <div className="gallery-grid" id="client-gallery">
-                        {visibleGalleryItems.map((item) => (
-                          <div key={`gallery-${item.id}`} className="gallery-card">
-                            <div className="gallery-media">
-                              {item.preview_thumb_url || item.preview_url ? (
-                                item.content_type === "video" ? (
-                                  <video
-                                    src={item.preview_thumb_url || item.preview_url}
-                                    muted
-                                    playsInline
-                                    preload="metadata"
-                                  />
+                      <>
+                        <div className="gallery-grid" id="client-gallery">
+                          {visibleGalleryItems.map((item) => (
+                            <div key={`gallery-${item.id}`} className="gallery-card">
+                              <div className="gallery-media">
+                                {item.preview_thumb_url || item.preview_url ? (
+                                  item.content_type === "video" ? (
+                                    <video
+                                      src={item.preview_thumb_url || item.preview_url}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                    />
+                                  ) : (
+                                    <img
+                                      src={item.preview_thumb_url || item.preview_url}
+                                      alt={item.title || "Teaser"}
+                                      loading="lazy"
+                                      decoding="async"
+                                    />
+                                  )
                                 ) : (
-                                  <img
-                                    src={item.preview_thumb_url || item.preview_url}
-                                    alt={item.title || "Teaser"}
-                                    loading="lazy"
-                                    decoding="async"
-                                  />
-                                )
-                              ) : (
-                                <div className="media-fallback">Tap to view</div>
-                              )}
-                            </div>
-                            <div className="gallery-body">
-                              <div className="gallery-headline">
-                                <div>
-                                  <h4>{item.title}</h4>
-                                  <p>{item.description || "Exclusive teaser content."}</p>
-                                </div>
-                                <div className="badge-row">
-                                  {item.verification_status === "approved" && (
-                                    <span className="pill success">Verified</span>
-                                  )}
-                                  {item.is_spotlight && (
-                                    <span className="pill featured">Featured</span>
-                                  )}
-                                  {item.is_new_from_followed && (
-                                    <span className="pill">New</span>
-                                  )}
-                                  {!item.price && <span className="pill">Teaser</span>}
-                                </div>
+                                  <div className="media-fallback">Tap to view</div>
+                                )}
                               </div>
-                              <div className="gallery-meta">
-                                <span className="gallery-user">
-                                  <span className="avatar tiny">
-                                    {item.avatar_url ? (
-                                      <img src={item.avatar_url} alt="Creator" />
-                                    ) : (
-                                      <span>{(item.display_name || item.public_id || "M")[0]}</span>
+                              <div className="gallery-body">
+                                <div className="gallery-headline">
+                                  <div>
+                                    <h4>{item.title}</h4>
+                                    <p>{item.description || "Exclusive teaser content."}</p>
+                                  </div>
+                                  <div className="badge-row">
+                                    {item.verification_status === "approved" && (
+                                      <span className="pill success">Verified</span>
                                     )}
+                                    {item.is_spotlight && (
+                                      <span className="pill featured">Featured</span>
+                                    )}
+                                    {item.is_new_from_followed && (
+                                      <span className="pill">New</span>
+                                    )}
+                                    {!item.price && <span className="pill">Teaser</span>}
+                                  </div>
+                                </div>
+                                <div className="gallery-meta">
+                                  <span className="gallery-user">
+                                    <span className="avatar tiny">
+                                      {item.avatar_url ? (
+                                        <img src={item.avatar_url} alt="Creator" />
+                                      ) : (
+                                        <span>
+                                          {(item.display_name || item.public_id || "M")[0]}
+                                        </span>
+                                      )}
+                                    </span>
+                                    {item.display_name || item.public_id}
                                   </span>
-                                  {item.display_name || item.public_id}
-                                </span>
-                                <span>{item.content_type}</span>
-                              </div>
-                              <div className="gallery-stats">
-                                <span className="pill ghost">
-                                  {Number(item.views_count || 0)} views
-                                </span>
-                                <button
-                                  type="button"
-                                  className={`pill ghost ${item.has_liked ? "active" : ""}`}
-                                  onClick={() => toggleLike(item.id)}
-                                >
-                                  {item.has_liked ? "Liked" : "Like"} ·{" "}
-                                  {Number(item.likes_count || 0)}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`pill ghost ${
-                                    savedGallerySet.has(item.id) ? "active" : ""
-                                  }`}
-                                  onClick={() => toggleSaved(item.id)}
-                                >
-                                  {savedGallerySet.has(item.id) ? "Saved" : "Save"}
-                                </button>
-                              </div>
-                              <div className="gallery-actions">
-                                <button
-                                  type="button"
-                                  className="cta primary"
-                                  onClick={() => openPreview(item)}
-                                >
-                                  View once
-                                </button>
-                                <button
-                                  type="button"
-                                  className="cta primary alt"
-                                  onClick={() => openBooking(item)}
-                                >
-                                  Book session
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`cta ghost ${item.is_following ? "active" : ""} ${
-                                    followState[item.model_id]?.loading ? "loading" : ""
-                                  }`}
-                                  onClick={() => toggleFollow(item.model_id)}
-                                  disabled={followState[item.model_id]?.loading}
-                                >
-                                  {item.is_following ? "Following" : "Follow"}
-                                </button>
-                                <button
-                                  type="button"
-                                  className="cta ghost"
-                                  onClick={() => openCreator(item)}
-                                >
-                                  View profile
-                                </button>
-                                <button
-                                  type="button"
-                                  className="cta ghost"
-                                  onClick={() =>
-                                    openReportDialog(item.id, item.title || "content", "content")
-                                  }
-                                >
-                                  Report content
-                                </button>
-                                {item.price ? (
-                                  <>
-                                    <label className="field">
-                                      Payment method
-                                      <select
-                                        value={contentPaymentMethod[item.id] || "flutterwave"}
-                                        onChange={(event) =>
-                                          setContentPaymentMethod((prev) => ({
-                                            ...prev,
-                                            [item.id]: event.target.value,
-                                          }))
-                                        }
+                                  <span>{item.content_type}</span>
+                                </div>
+                                <div className="gallery-stats">
+                                  <span className="pill ghost">
+                                    {Number(item.views_count || 0)} views
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className={`pill ghost ${item.has_liked ? "active" : ""}`}
+                                    onClick={() => toggleLike(item.id)}
+                                  >
+                                    {item.has_liked ? "Liked" : "Like"} ·{" "}
+                                    {Number(item.likes_count || 0)}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`pill ghost ${
+                                      savedGallerySet.has(item.id) ? "active" : ""
+                                    }`}
+                                    onClick={() => toggleSaved(item.id)}
+                                  >
+                                    {savedGallerySet.has(item.id) ? "Saved" : "Save"}
+                                  </button>
+                                </div>
+                                <div className="gallery-actions">
+                                  <button
+                                    type="button"
+                                    className="cta primary"
+                                    onClick={() => openPreview(item)}
+                                  >
+                                    View once
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="cta primary alt"
+                                    onClick={() => openBooking(item)}
+                                  >
+                                    Book session
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`cta ghost ${
+                                      item.is_following ? "active" : ""
+                                    } ${followState[item.model_id]?.loading ? "loading" : ""}`}
+                                    onClick={() => toggleFollow(item.model_id)}
+                                    disabled={followState[item.model_id]?.loading}
+                                  >
+                                    {item.is_following ? "Following" : "Follow"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="cta ghost"
+                                    onClick={() => openCreator(item)}
+                                  >
+                                    View profile
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="cta ghost"
+                                    onClick={() =>
+                                      openReportDialog(item.id, item.title || "content", "content")
+                                    }
+                                  >
+                                    Report content
+                                  </button>
+                                  {item.price ? (
+                                    <>
+                                      <label className="field">
+                                        Payment method
+                                        <select
+                                          value={contentPaymentMethod[item.id] || "flutterwave"}
+                                          onChange={(event) =>
+                                            setContentPaymentMethod((prev) => ({
+                                              ...prev,
+                                              [item.id]: event.target.value,
+                                            }))
+                                          }
+                                        >
+                                          <option value="flutterwave">Flutterwave</option>
+                                          <option value="crypto">Crypto (BTC/USDT)</option>
+                                        </select>
+                                      </label>
+                                      <button
+                                        type="button"
+                                        className="cta primary alt"
+                                        onClick={() => {
+                                          const method =
+                                            contentPaymentMethod[item.id] || "flutterwave";
+                                          if (method === "crypto") {
+                                            startCryptoPayment({
+                                              mode: "content",
+                                              contentId: item.id,
+                                            });
+                                          } else {
+                                            startFlutterwavePayment({
+                                              mode: "content",
+                                              contentId: item.id,
+                                            });
+                                          }
+                                        }}
                                       >
-                                        <option value="flutterwave">Flutterwave</option>
-                                        <option value="crypto">Crypto (BTC/USDT)</option>
-                                      </select>
-                                    </label>
-                                    <button
-                                      type="button"
-                                      className="cta primary alt"
-                                      onClick={() => {
-                                        const method =
-                                          contentPaymentMethod[item.id] || "flutterwave";
-                                        if (method === "crypto") {
-                                          startCryptoPayment({
-                                            mode: "content",
-                                            contentId: item.id,
-                                          });
-                                        } else {
-                                          startFlutterwavePayment({
-                                            mode: "content",
-                                            contentId: item.id,
-                                          });
-                                        }
-                                      }}
-                                    >
-                                      Pay {`₦${item.price}`}
-                                    </button>
-                                  </>
-                                ) : null}
+                                        Pay {`₦${item.price}`}
+                                      </button>
+                                    </>
+                                  ) : null}
+                                </div>
+                                {followState[item.model_id]?.error && (
+                                  <p className="helper error">
+                                    {followState[item.model_id]?.error}
+                                  </p>
+                                )}
+                                {blockState[item.model_id]?.error && (
+                                  <p className="helper error">
+                                    {blockState[item.model_id]?.error}
+                                  </p>
+                                )}
                               </div>
-                              {followState[item.model_id]?.error && (
-                                <p className="helper error">
-                                  {followState[item.model_id]?.error}
-                                </p>
-                              )}
-                              {blockState[item.model_id]?.error && (
-                                <p className="helper error">
-                                  {blockState[item.model_id]?.error}
-                                </p>
-                              )}
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                      {galleryHasMore && (
-                        <div className="dash-actions">
-                          <button
-                            type="button"
-                            className={`cta ghost ${galleryLoadingMore ? "loading" : ""}`}
-                            onClick={loadMoreGallery}
-                            disabled={galleryLoadingMore}
-                          >
-                            {galleryLoadingMore ? "Loading…" : "Load more"}
-                          </button>
+                          ))}
                         </div>
-                      )}
+                        {galleryHasMore && (
+                          <div className="dash-actions">
+                            <button
+                              type="button"
+                              className={`cta ghost ${galleryLoadingMore ? "loading" : ""}`}
+                              onClick={loadMoreGallery}
+                              disabled={galleryLoadingMore}
+                            >
+                              {galleryLoadingMore ? "Loading…" : "Load more"}
+                            </button>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

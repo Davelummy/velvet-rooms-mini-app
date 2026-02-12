@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "../../../_lib/admin_auth";
-import { query } from "../../../_lib/db";
-import { ensureAppEventsTable } from "../../../_lib/metrics";
+import { requireAdmin } from "../../_lib/admin_auth";
+import { query } from "../../_lib/db";
+import { ensureAppEventsTable } from "../../_lib/metrics";
 
 export const runtime = "nodejs";
 

@@ -753,7 +753,6 @@ export default function Admin() {
             </div>
           </div>
         </div>
-      )}
       </section>
 
       <section className="admin-insights">
@@ -1143,292 +1142,302 @@ export default function Admin() {
           </div>
         ) : (
           <div className={`admin-queue ${selectedItem ? "has-detail" : ""}`}>
-          <div className="admin-list">
-            {error && <div className="empty">{error}</div>}
-            {!error && (
-              <div className="empty subtle">Live queue updates when new submissions arrive.</div>
-            )}
-            {!error && items.length === 0 && <div className="empty">Queue is empty.</div>}
-            {!error &&
-              items.map((item) => {
-                const itemKey =
-                  item.user_id || item.id || item.escrow_ref || item.transaction_ref;
-                const selectedKey = selectedItem
-                  ? selectedItem.user_id ||
-                    selectedItem.id ||
-                    selectedItem.escrow_ref ||
-                    selectedItem.transaction_ref
-                  : null;
-                return (
-                  <article
-                    key={itemKey}
-                    className={`queue-card ${selectedKey === itemKey ? "selected" : ""}`}
-                  >
-                <div>
-                  <p className="queue-id">
-                    {(section === "payments" && resolveName(item)) ||
-                      item.public_id ||
-                      item.escrow_ref ||
-                      item.transaction_ref ||
-                      item.id}
-                  </p>
-                  <h3>
-                    {section === "users"
-                      ? resolveName(item, "User")
-                      : section === "clients"
-                      ? item.display_name || resolveName(item, "Client")
-                      : section === "activity"
-                      ? item.action_type || "Activity"
-                      : item.display_name || item.title || item.escrow_type || "Payment"}
-                  </h3>
-                  <p className="queue-meta">
-                    {section === "models" &&
-                      (modelView === "approved" ? "Verified model" : "Verification pending")}
-                    {section === "content" &&
-                      (contentView === "approved" ? "Approved content" : "Content awaiting approval")}
-                    {section === "payments" &&
-                      `${paymentView === "approved" ? "Approved" : "Payment"} · ${
-                        item.amount
-                      } · ${
-                        item.metadata_json?.crypto_tx_hash ||
-                        item.metadata_json?.flutterwave_ref ||
-                        "ref pending"
-                      }`}
-                    {section === "escrows" &&
-                      `${escrowView === "released" ? "Released" : "Held"} escrow · ${
-                        item.amount
-                      }`}
-                    {section === "clients" &&
-                      `${item.access_fee_paid ? "Unlocked" : "Pending"} · ${
-                        item.email || "no email"
-                      }`}
-                    {section === "users" &&
-                      `${item.role || "user"} · ${item.status || "status"}`}
-                    {section === "activity" &&
-                      `${item.actor_display_name || item.actor_public_id || "Actor"} → ${
-                        item.target_display_name || item.target_public_id || "Target"
-                      }`}
-                  </p>
-                </div>
-                <div className="queue-actions">
-                  <button
-                    type="button"
-                    className="cta ghost"
-                    onClick={() => setSelectedItem(item)}
-                  >
-                    View details
-                  </button>
-                  {section === "models" && modelView === "pending" && (
-                    <>
-                      <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
-                        {item.is_online ? "Online" : "Offline"}
+            <div className="admin-list">
+              {error && <div className="empty">{error}</div>}
+              {!error && (
+                <div className="empty subtle">Live queue updates when new submissions arrive.</div>
+              )}
+              {!error && items.length === 0 && <div className="empty">Queue is empty.</div>}
+              {!error &&
+                items.map((item) => {
+                  const itemKey =
+                    item.user_id || item.id || item.escrow_ref || item.transaction_ref;
+                  const selectedKey = selectedItem
+                    ? selectedItem.user_id ||
+                      selectedItem.id ||
+                      selectedItem.escrow_ref ||
+                      selectedItem.transaction_ref
+                    : null;
+                  return (
+                    <article
+                      key={itemKey}
+                      className={`queue-card ${selectedKey === itemKey ? "selected" : ""}`}
+                    >
+                      <div>
+                        <p className="queue-id">
+                          {(section === "payments" && resolveName(item)) ||
+                            item.public_id ||
+                            item.escrow_ref ||
+                            item.transaction_ref ||
+                            item.id}
+                        </p>
+                        <h3>
+                          {section === "users"
+                            ? resolveName(item, "User")
+                            : section === "clients"
+                            ? item.display_name || resolveName(item, "Client")
+                            : section === "activity"
+                            ? item.action_type || "Activity"
+                            : item.display_name || item.title || item.escrow_type || "Payment"}
+                        </h3>
+                        <p className="queue-meta">
+                          {section === "models" &&
+                            (modelView === "approved"
+                              ? "Verified model"
+                              : "Verification pending")}
+                          {section === "content" &&
+                            (contentView === "approved"
+                              ? "Approved content"
+                              : "Content awaiting approval")}
+                          {section === "payments" &&
+                            `${paymentView === "approved" ? "Approved" : "Payment"} · ${
+                              item.amount
+                            } · ${
+                              item.metadata_json?.crypto_tx_hash ||
+                              item.metadata_json?.flutterwave_ref ||
+                              "ref pending"
+                            }`}
+                          {section === "escrows" &&
+                            `${escrowView === "released" ? "Released" : "Held"} escrow · ${
+                              item.amount
+                            }`}
+                          {section === "clients" &&
+                            `${item.access_fee_paid ? "Unlocked" : "Pending"} · ${
+                              item.email || "no email"
+                            }`}
+                          {section === "users" &&
+                            `${item.role || "user"} · ${item.status || "status"}`}
+                          {section === "activity" &&
+                            `${item.actor_display_name || item.actor_public_id || "Actor"} → ${
+                              item.target_display_name || item.target_public_id || "Target"
+                            }`}
+                        </p>
                       </div>
-                      <button
-                        type="button"
-                        className="cta primary"
-                        onClick={() =>
-                          handleAction("/api/admin/models/approve", {
-                            user_id: item.user_id,
-                          })
-                        }
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        className="cta primary alt"
-                        onClick={() =>
-                          handleAction("/api/admin/models/reject", {
-                            user_id: item.user_id,
-                          })
-                        }
-                      >
-                        Reject
-                      </button>
-                      {item.verification_video_url && (
+                      <div className="queue-actions">
                         <button
                           type="button"
                           className="cta ghost"
-                          onClick={() => openPreview(item.verification_video_url, "video")}
+                          onClick={() => setSelectedItem(item)}
                         >
-                          Preview video
+                          View details
                         </button>
-                      )}
-                    </>
-                  )}
-                  {section === "models" && modelView === "approved" && (
-                    <>
-                      <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
-                        {item.is_online ? "Online" : "Offline"}
+                        {section === "models" && modelView === "pending" && (
+                          <>
+                            <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
+                              {item.is_online ? "Online" : "Offline"}
+                            </div>
+                            <button
+                              type="button"
+                              className="cta primary"
+                              onClick={() =>
+                                handleAction("/api/admin/models/approve", {
+                                  user_id: item.user_id,
+                                })
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="cta primary alt"
+                              onClick={() =>
+                                handleAction("/api/admin/models/reject", {
+                                  user_id: item.user_id,
+                                })
+                              }
+                            >
+                              Reject
+                            </button>
+                            {item.verification_video_url && (
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() => openPreview(item.verification_video_url, "video")}
+                              >
+                                Preview video
+                              </button>
+                            )}
+                          </>
+                        )}
+                        {section === "models" && modelView === "approved" && (
+                          <>
+                            <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
+                              {item.is_online ? "Online" : "Offline"}
+                            </div>
+                            <div className="status-pill live">Verified</div>
+                          </>
+                        )}
+                        {section === "content" && (
+                          <>
+                            {item.preview_url && (
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() =>
+                                  openPreview(
+                                    item.preview_url,
+                                    item.content_type === "video" ? "video" : "image"
+                                  )
+                                }
+                              >
+                                Preview
+                              </button>
+                            )}
+                            {contentView === "pending" && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="cta primary"
+                                  onClick={() =>
+                                    handleAction("/api/admin/content/approve", {
+                                      content_id: item.id,
+                                    })
+                                  }
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cta primary alt"
+                                  onClick={() =>
+                                    handleAction("/api/admin/content/reject", {
+                                      content_id: item.id,
+                                    })
+                                  }
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              className="cta ghost"
+                              onClick={() =>
+                                handleAction("/api/admin/content/delete", {
+                                  content_id: item.id,
+                                })
+                              }
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                        {section === "escrows" && (
+                          <>
+                            {escrowView === "pending" && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="cta primary"
+                                  onClick={() =>
+                                    handleAction("/api/admin/escrows/release", {
+                                      escrow_ref: item.escrow_ref,
+                                    })
+                                  }
+                                >
+                                  Release
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cta primary alt"
+                                  onClick={() =>
+                                    handleAction("/api/admin/escrows/refund", {
+                                      escrow_ref: item.escrow_ref,
+                                    })
+                                  }
+                                >
+                                  Refund
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+                        {section === "disputes" && (
+                          <>
+                            <button
+                              type="button"
+                              className="cta primary"
+                              onClick={() =>
+                                handleAction("/api/admin/escrows/release", {
+                                  escrow_ref: item.escrow_ref,
+                                })
+                              }
+                            >
+                              Release
+                            </button>
+                            <button
+                              type="button"
+                              className="cta primary alt"
+                              onClick={() =>
+                                handleAction("/api/admin/escrows/refund", {
+                                  escrow_ref: item.escrow_ref,
+                                })
+                              }
+                            >
+                              Refund
+                            </button>
+                          </>
+                        )}
+                        {section === "payments" && (
+                          <>
+                            <div className="status-pill live">
+                              {(item.payment_provider || "PAYMENT").toUpperCase()}
+                            </div>
+                            {paymentView === "pending" && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="cta primary"
+                                  onClick={() =>
+                                    handleAction("/api/admin/payments/approve", {
+                                      transaction_ref: item.transaction_ref,
+                                    })
+                                  }
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  type="button"
+                                  className="cta primary alt"
+                                  onClick={() =>
+                                    handleAction("/api/admin/payments/reject", {
+                                      transaction_ref: item.transaction_ref,
+                                    })
+                                  }
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+                        {section === "users" && (
+                          <>
+                            <div
+                              className={`status-pill ${item.status === "active" ? "live" : "idle"}`}
+                            >
+                              {item.status || "status"}
+                            </div>
+                          </>
+                        )}
+                        {section === "clients" && (
+                          <>
+                            <div
+                              className={`status-pill ${
+                                item.access_fee_paid ? "live" : "idle"
+                              }`}
+                            >
+                              {item.access_fee_paid ? "Unlocked" : "Pending"}
+                            </div>
+                          </>
+                        )}
                       </div>
-                      <div className="status-pill live">Verified</div>
-                    </>
-                  )}
-                  {section === "content" && (
-                    <>
-                      {item.preview_url && (
-                        <button
-                          type="button"
-                          className="cta ghost"
-                          onClick={() =>
-                            openPreview(
-                              item.preview_url,
-                              item.content_type === "video" ? "video" : "image"
-                            )
-                          }
-                        >
-                          Preview
-                        </button>
-                      )}
-                      {contentView === "pending" && (
-                        <>
-                          <button
-                            type="button"
-                            className="cta primary"
-                            onClick={() =>
-                              handleAction("/api/admin/content/approve", {
-                                content_id: item.id,
-                              })
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="cta primary alt"
-                            onClick={() =>
-                              handleAction("/api/admin/content/reject", {
-                                content_id: item.id,
-                              })
-                            }
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      <button
-                        type="button"
-                        className="cta ghost"
-                        onClick={() =>
-                          handleAction("/api/admin/content/delete", {
-                            content_id: item.id,
-                          })
-                        }
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
-                  {section === "escrows" && (
-                    <>
-                      {escrowView === "pending" && (
-                        <>
-                          <button
-                            type="button"
-                            className="cta primary"
-                            onClick={() =>
-                              handleAction("/api/admin/escrows/release", {
-                                escrow_ref: item.escrow_ref,
-                              })
-                            }
-                          >
-                            Release
-                          </button>
-                          <button
-                            type="button"
-                            className="cta primary alt"
-                            onClick={() =>
-                              handleAction("/api/admin/escrows/refund", {
-                                escrow_ref: item.escrow_ref,
-                              })
-                            }
-                          >
-                            Refund
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {section === "disputes" && (
-                    <>
-                      <button
-                        type="button"
-                        className="cta primary"
-                        onClick={() =>
-                          handleAction("/api/admin/escrows/release", {
-                            escrow_ref: item.escrow_ref,
-                          })
-                        }
-                      >
-                        Release
-                      </button>
-                      <button
-                        type="button"
-                        className="cta primary alt"
-                        onClick={() =>
-                          handleAction("/api/admin/escrows/refund", {
-                            escrow_ref: item.escrow_ref,
-                          })
-                        }
-                      >
-                        Refund
-                      </button>
-                    </>
-                  )}
-                  {section === "payments" && (
-                    <>
-                      <div className="status-pill live">
-                        {(item.payment_provider || "PAYMENT").toUpperCase()}
-                      </div>
-                      {paymentView === "pending" && (
-                        <>
-                          <button
-                            type="button"
-                            className="cta primary"
-                            onClick={() =>
-                              handleAction("/api/admin/payments/approve", {
-                                transaction_ref: item.transaction_ref,
-                              })
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="cta primary alt"
-                            onClick={() =>
-                              handleAction("/api/admin/payments/reject", {
-                                transaction_ref: item.transaction_ref,
-                              })
-                            }
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                    </>
-                  )}
-                  {section === "users" && (
-                    <>
-                      <div className={`status-pill ${item.status === "active" ? "live" : "idle"}`}>
-                        {item.status || "status"}
-                      </div>
-                    </>
-                  )}
-                  {section === "clients" && (
-                    <>
-                      <div className={`status-pill ${item.access_fee_paid ? "live" : "idle"}`}>
-                        {item.access_fee_paid ? "Unlocked" : "Pending"}
-                      </div>
-                    </>
-                  )}
-                </div>
-                  </article>
-                );
-              })}
-          </div>
-          {selectedItem && (
-            <aside className="admin-detail-panel">
+                    </article>
+                  );
+                })}
+            </div>
+            {selectedItem && (
+              <aside className="admin-detail-panel">
               <div className="admin-detail-top">
                 <strong>Details</strong>
                 <button
@@ -1637,6 +1646,7 @@ export default function Admin() {
             </aside>
           )}
         </div>
+        )}
       </section>
     </main>
   );
