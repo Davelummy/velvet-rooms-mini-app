@@ -85,5 +85,12 @@ export async function POST(request) {
     );
   }
 
-  return NextResponse.json({ ok: true });
+  const stateRes = await query(
+    `SELECT status, duration_minutes, actual_start, scheduled_end
+     FROM sessions WHERE id = $1`,
+    [sessionId]
+  );
+  const sessionState = stateRes.rows[0] || null;
+
+  return NextResponse.json({ ok: true, session: sessionState });
 }

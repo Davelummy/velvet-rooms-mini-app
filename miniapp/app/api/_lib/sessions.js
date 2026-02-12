@@ -34,5 +34,17 @@ export async function ensureSessionColumns() {
   await query(
     "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS model_confirmed BOOLEAN DEFAULT FALSE"
   );
+  await query(
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ"
+  );
+  await query(
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS end_reason TEXT"
+  );
+  await query(
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS end_actor TEXT"
+  );
+  await query(
+    "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS end_note TEXT"
+  );
   ensured = true;
 }

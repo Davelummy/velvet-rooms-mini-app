@@ -207,6 +207,7 @@ export default function Home() {
     cameraOff: false,
     peerReady: false,
     audioOnly: false,
+    peerLabel: "",
   });
   const [callPreflight, setCallPreflight] = useState({
     open: false,
@@ -219,6 +220,24 @@ export default function Home() {
   const [callNetworkStatus, setCallNetworkStatus] = useState("online");
   const [callMessages, setCallMessages] = useState([]);
   const [callInput, setCallInput] = useState("");
+  const [callChatOpen, setCallChatOpen] = useState(false);
+  const [callTiming, setCallTiming] = useState({
+    startedAt: null,
+    endsAt: null,
+    durationMinutes: null,
+  });
+  const [callCountdown, setCallCountdown] = useState({
+    remaining: null,
+    elapsed: null,
+  });
+  const [callToast, setCallToast] = useState({ open: false, message: "", tone: "neutral" });
+  const [callEndDialog, setCallEndDialog] = useState({
+    open: false,
+    reason: "",
+    note: "",
+    status: "",
+    sending: false,
+  });
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
@@ -231,6 +250,7 @@ export default function Home() {
   const callRemoteIdRef = useRef(null);
   const callReadyTimerRef = useRef(null);
   const callSessionRef = useRef({ id: null, type: null });
+  const callWarningRef = useRef({ twoMin: false, thirtySec: false, ended: false });
   const clientDraftTimerRef = useRef(null);
   const modelDraftTimerRef = useRef(null);
   const [clientDeleteStatus, setClientDeleteStatus] = useState("");
@@ -351,6 +371,40 @@ export default function Home() {
     }
     return { label: "Ready", tone: "neutral" };
   }, [callNetworkStatus, callConnectionStatus, callState.connecting]);
+
+  const formatSeconds = (value) => {
+    if (value == null || Number.isNaN(value)) {
+      return "--:--";
+    }
+    const total = Math.max(0, Math.floor(value));
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  };
+
+  const showCallToast = (message, tone = "neutral") => {
+    setCallToast({ open: true, message, tone });
+    setTimeout(() => {
+      setCallToast((prev) => (prev.message === message ? { ...prev, open: false } : prev));
+    }, 4000);
+  };
+
+  const resolveCallTiming = (session = {}) => {
+    const durationMinutes = Number(session.duration_minutes || session.durationMinutes || 0);
+    const startedAt = session.actual_start || session.started_at || session.startedAt || null;
+    const scheduledEnd = session.scheduled_end || session.scheduledEnd || null;
+    let endsAt = scheduledEnd;
+    if (!endsAt && startedAt && durationMinutes) {
+      endsAt = new Date(
+        new Date(startedAt).getTime() + durationMinutes * 60 * 1000
+      ).toISOString();
+    }
+    return {
+      startedAt: startedAt || null,
+      endsAt: endsAt || null,
+      durationMinutes: durationMinutes || null,
+    };
+  };
 
   const onboardingSlides = useMemo(
     () => [
@@ -609,6 +663,65 @@ export default function Home() {
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
+
+  useEffect(() => {
+    if (!callState.open) {
+      setCallCountdown({ remaining: null, elapsed: null });
+      setCallTiming({ startedAt: null, endsAt: null, durationMinutes: null });
+      setCallChatOpen(false);
+      setCallToast({ open: false, message: "", tone: "neutral" });
+      setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false });
+      callWarningRef.current = { twoMin: false, thirtySec: false, ended: false };
+      return;
+    }
+    callWarningRef.current = { twoMin: false, thirtySec: false, ended: false };
+  }, [callState.open]);
+
+  useEffect(() => {
+    if (!callState.open || callState.sessionType === "chat") {
+      return;
+    }
+    if (!callTiming.startedAt && callTiming.durationMinutes && callConnectionStatus === "connected") {
+      const startedAt = new Date().toISOString();
+      const endsAt = new Date(
+        Date.now() + callTiming.durationMinutes * 60 * 1000
+      ).toISOString();
+      setCallTiming((prev) => ({ ...prev, startedAt, endsAt }));
+    }
+  }, [callState.open, callState.sessionType, callTiming, callConnectionStatus]);
+
+  useEffect(() => {
+    if (!callState.open || callState.sessionType === "chat") {
+      return;
+    }
+    if (!callTiming.endsAt || !callTiming.startedAt) {
+      setCallCountdown({ remaining: null, elapsed: null });
+      return;
+    }
+    const updateTimer = () => {
+      const now = Date.now();
+      const start = new Date(callTiming.startedAt).getTime();
+      const end = new Date(callTiming.endsAt).getTime();
+      const remaining = Math.max(0, Math.floor((end - now) / 1000));
+      const elapsed = Math.max(0, Math.floor((now - start) / 1000));
+      setCallCountdown({ remaining, elapsed });
+      if (remaining <= 120 && !callWarningRef.current.twoMin) {
+        callWarningRef.current.twoMin = true;
+        showCallToast("2 minutes left in this session.", "warn");
+      }
+      if (remaining <= 30 && !callWarningRef.current.thirtySec) {
+        callWarningRef.current.thirtySec = true;
+        showCallToast("30 seconds left.", "warn");
+      }
+      if (remaining <= 0 && !callWarningRef.current.ended) {
+        callWarningRef.current.ended = true;
+        handleAutoCallEnd();
+      }
+    };
+    updateTimer();
+    const id = setInterval(updateTimer, 1000);
+    return () => clearInterval(id);
+  }, [callState.open, callState.sessionType, callTiming]);
   const modelEngagementTotals = useMemo(() => {
     if (!Array.isArray(modelItems) || modelItems.length === 0) {
       return { likes: 0, views: 0 };
@@ -694,6 +807,16 @@ export default function Home() {
   const showAudioTiles =
     callState.sessionType === "voice" ||
     (callState.sessionType === "video" && callState.audioOnly);
+  const callRemainingLabel =
+    callState.sessionType === "chat"
+      ? "Chat open"
+      : callCountdown.remaining != null
+      ? `${formatSeconds(callCountdown.remaining)} left`
+      : callConnectionStatus === "connected"
+      ? "In call"
+      : "Waiting";
+  const callElapsedLabel =
+    callCountdown.elapsed != null ? formatSeconds(callCountdown.elapsed) : "--:--";
 
   const profileChecklist = useMemo(() => {
     if (!profile?.user || !role) {
@@ -986,6 +1109,7 @@ export default function Home() {
         cameraOff: false,
         peerReady: false,
         audioOnly: false,
+        peerLabel: "",
       }));
       setCallPreflight({
         open: false,
@@ -1029,6 +1153,7 @@ export default function Home() {
       return;
     }
     if (payload.type === "hangup") {
+      showCallToast("Call ended by partner.", "neutral");
       cleanupCall(false);
       return;
     }
@@ -1284,11 +1409,15 @@ export default function Home() {
     }
   };
 
-  const startSessionCall = async (sessionId, sessionType) => {
+  const startSessionCall = async (sessionId, sessionType, options = {}) => {
     if (!initData || !sessionId) {
       return;
     }
     const resolvedType = sessionType || "video";
+    const peerLabel = options.label || "";
+    if (options.session) {
+      setCallTiming(resolveCallTiming(options.session));
+    }
     setCallState({
       open: true,
       sessionId,
@@ -1299,9 +1428,11 @@ export default function Home() {
       cameraOff: false,
       peerReady: false,
       audioOnly: false,
+      peerLabel,
     });
     setCallMessages([]);
     setCallInput("");
+    setCallChatOpen(resolvedType === "chat");
     if (resolvedType === "chat") {
       await startCall(sessionId, resolvedType);
       return;
@@ -1373,7 +1504,16 @@ export default function Home() {
     setCallInput("");
   };
 
-  const handleSessionJoin = async (sessionId, sessionType) => {
+  const handleSessionJoin = async (session) => {
+    const sessionId = typeof session === "object" ? session?.id : session;
+    const sessionType =
+      typeof session === "object"
+        ? session?.session_type || session?.sessionType
+        : null;
+    const peerLabel =
+      typeof session === "object"
+        ? session?.model_label || session?.client_label || session?.label || ""
+        : "";
     if (!initData || !sessionId) {
       return;
     }
@@ -1428,6 +1568,12 @@ export default function Home() {
         }));
         return;
       }
+      const fallbackSession = {
+        duration_minutes: typeof session === "object" ? session?.duration_minutes : null,
+      };
+      if (data?.session || fallbackSession.duration_minutes) {
+        setCallTiming(resolveCallTiming({ ...fallbackSession, ...data?.session }));
+      }
       setSessionActionStatus((prev) => ({
         ...prev,
         [sessionId]: {
@@ -1436,7 +1582,10 @@ export default function Home() {
           info: "Opening session…",
         },
       }));
-      await startSessionCall(sessionId, sessionType);
+      await startSessionCall(sessionId, sessionType, {
+        session: { ...fallbackSession, ...data?.session },
+        label: peerLabel,
+      });
     } catch {
       setSessionActionStatus((prev) => ({
         ...prev,
@@ -1447,6 +1596,81 @@ export default function Home() {
         },
       }));
     }
+  };
+
+  const endReasonOptions = [
+    { value: "completed_early", label: "Ended early (both agreed)" },
+    { value: "connection_issue", label: "Connection issues" },
+    { value: "client_no_show", label: "Client no-show" },
+    { value: "model_no_show", label: "Model no-show" },
+    { value: "safety_concern", label: "Safety / comfort concern" },
+    { value: "other", label: "Other" },
+  ];
+
+  const submitCallEnd = async ({ reason, note, auto = false }) => {
+    if (!callState.sessionId || !initData) {
+      cleanupCall(true);
+      return;
+    }
+    try {
+      if (!auto) {
+        setCallEndDialog((prev) => ({ ...prev, sending: true, status: "" }));
+      }
+      const res = await fetch("/api/sessions/end", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          session_id: callState.sessionId,
+          reason,
+          note,
+          auto,
+        }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        const message = payload?.error
+          ? `Unable to end call: ${payload.error}`
+          : `Unable to end call (HTTP ${res.status}).`;
+        if (!auto) {
+          setCallEndDialog((prev) => ({ ...prev, status: message, sending: false }));
+        } else {
+          showCallToast("Session ended.", "warn");
+        }
+        cleanupCall(true);
+        return;
+      }
+      if (!auto) {
+        setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false });
+      }
+      showCallToast("Session ended.", "neutral");
+      cleanupCall(true);
+    } catch {
+      if (!auto) {
+        setCallEndDialog((prev) => ({
+          ...prev,
+          status: "Unable to end call. Try again.",
+          sending: false,
+        }));
+      }
+      cleanupCall(true);
+    }
+  };
+
+  const handleAutoCallEnd = () => {
+    if (!callState.open || callState.sessionType === "chat") {
+      cleanupCall(true);
+      return;
+    }
+    submitCallEnd({ reason: "time_elapsed", note: "timer_complete", auto: true });
+  };
+
+  const requestEndCall = () => {
+    if (callCountdown.remaining == null || callCountdown.remaining > 0) {
+      setCallEndDialog({ open: true, reason: "", note: "", status: "", sending: false });
+      return;
+    }
+    submitCallEnd({ reason: "time_elapsed", note: "user_end", auto: true });
   };
 
   const handleSessionConfirm = async (sessionId) => {
@@ -3513,6 +3737,59 @@ export default function Home() {
     }
   };
 
+  const startWalletPayment = async ({ mode, session = null, onError }) => {
+    if (!initData) {
+      const message = "Open this mini app inside Telegram to proceed.";
+      if (onError) {
+        onError(message);
+      } else {
+        setClientStatus(message);
+      }
+      return false;
+    }
+    try {
+      const res = await fetch("/api/payments/wallet/charge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          escrow_type: mode,
+          model_id: session?.modelId,
+          session_type: session?.sessionType,
+          duration_minutes: session?.duration,
+          scheduled_for: session?.scheduledFor,
+          session_id: session?.sessionId,
+          extension_minutes: session?.extensionMinutes,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const message =
+          data?.error === "insufficient_wallet"
+            ? "Wallet balance is too low."
+            : data?.error
+            ? `Wallet payment failed: ${data.error}`
+            : `Wallet payment failed (HTTP ${res.status}).`;
+        if (onError) {
+          onError(message);
+        } else {
+          setClientStatus(message);
+        }
+        return false;
+      }
+      await refreshProfile();
+      return true;
+    } catch {
+      const message = "Wallet payment failed. Try again.";
+      if (onError) {
+        onError(message);
+      } else {
+        setClientStatus(message);
+      }
+      return false;
+    }
+  };
+
   const submitExtensionPayment = async () => {
     if (!extensionSheet.sessionId) {
       return;
@@ -3527,6 +3804,17 @@ export default function Home() {
       setExtensionSheet((prev) => ({ ...prev, loading: false, status: message }));
     if (extensionSheet.paymentMethod === "crypto") {
       const ok = await startCryptoPayment({
+        mode: "extension",
+        session: sessionPayload,
+        onError,
+      });
+      if (ok) {
+        setExtensionSheet((prev) => ({ ...prev, open: false, loading: false }));
+      }
+      return;
+    }
+    if (extensionSheet.paymentMethod === "wallet") {
+      const ok = await startWalletPayment({
         mode: "extension",
         session: sessionPayload,
         onError,
@@ -3581,6 +3869,17 @@ export default function Home() {
       setBookingSheet((prev) => ({ ...prev, loading: false, status: message }));
     if (bookingSheet.paymentMethod === "crypto") {
       const ok = await startCryptoPayment({
+        mode: "session",
+        session: sessionPayload,
+        onError,
+      });
+      if (ok) {
+        setBookingSheet((prev) => ({ ...prev, open: false, loading: false }));
+      }
+      return;
+    }
+    if (bookingSheet.paymentMethod === "wallet") {
+      const ok = await startWalletPayment({
         mode: "session",
         session: sessionPayload,
         onError,
@@ -5130,7 +5429,7 @@ export default function Home() {
                               className={`cta ghost ${
                                 sessionActionStatus[item.id]?.loading ? "loading" : ""
                               }`}
-                              onClick={() => handleSessionJoin(item.id, item.session_type)}
+                              onClick={() => handleSessionJoin(item)}
                               disabled={sessionActionStatus[item.id]?.loading}
                             >
                               Start session
@@ -5380,23 +5679,95 @@ export default function Home() {
         </section>
       )}
 
+      {callEndDialog.open && (
+        <section className="modal-backdrop" onClick={() => setCallEndDialog((prev) => ({ ...prev, open: false }))}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <header className="modal-header">
+              <h3>End session early?</h3>
+            </header>
+            <p className="helper">
+              Choose a reason so we can handle the held funds correctly.
+            </p>
+            <label className="field">
+              Reason
+              <select
+                value={callEndDialog.reason}
+                onChange={(event) =>
+                  setCallEndDialog((prev) => ({ ...prev, reason: event.target.value }))
+                }
+              >
+                <option value="">Select a reason</option>
+                {endReasonOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Notes (optional)
+              <textarea
+                rows={3}
+                value={callEndDialog.note}
+                onChange={(event) =>
+                  setCallEndDialog((prev) => ({ ...prev, note: event.target.value }))
+                }
+                placeholder="Add details for the admin if needed."
+              />
+            </label>
+            {callEndDialog.status && <p className="helper error">{callEndDialog.status}</p>}
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="cta ghost"
+                onClick={() =>
+                  setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false })
+                }
+                disabled={callEndDialog.sending}
+              >
+                Keep call
+              </button>
+              <button
+                type="button"
+                className={`cta danger ${callEndDialog.sending ? "loading" : ""}`}
+                onClick={() => {
+                  if (!callEndDialog.reason) {
+                    setCallEndDialog((prev) => ({
+                      ...prev,
+                      status: "Select a reason to continue.",
+                    }));
+                    return;
+                  }
+                  submitCallEnd({
+                    reason: callEndDialog.reason,
+                    note: callEndDialog.note,
+                    auto: false,
+                  });
+                }}
+                disabled={callEndDialog.sending}
+              >
+                End session
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
       {callState.open && (
         <section className="call-overlay">
-          <div className="call-card">
-            <header>
-              <div>
+          <div className={`call-card ${callChatOpen ? "chat-open" : ""}`}>
+            <header className="call-top">
+              <div className="call-title">
                 <p className="eyebrow">
                   {callState.sessionType === "chat"
                     ? "Private chat"
                     : `${callState.sessionType || "session"} call`}
                 </p>
-                <h3>
-                  {callState.sessionType === "video"
-                    ? "Video session"
-                    : callState.sessionType === "voice"
-                    ? "Voice session"
-                    : "Chat session"}
-                </h3>
+                <h3>{callState.peerLabel || "Session"}</h3>
+                <div className="call-timer">
+                  <span className="timer-elapsed">{callElapsedLabel}</span>
+                  <span className="timer-remaining">{callRemainingLabel}</span>
+                </div>
                 {callState.sessionType === "video" && callState.audioOnly && (
                   <span className="pill ghost">Audio-only</span>
                 )}
@@ -5406,11 +5777,23 @@ export default function Home() {
                 <span className={`status-chip ${callStatusChip.tone}`}>
                   {callStatusChip.label}
                 </span>
-                <button type="button" className="cta ghost" onClick={() => cleanupCall(true)}>
-                  End
-                </button>
+                {callState.sessionType !== "chat" && (
+                  <button
+                    type="button"
+                    className={`icon-btn ${callChatOpen ? "active" : ""}`}
+                    onClick={() => setCallChatOpen((prev) => !prev)}
+                    aria-label="Toggle chat"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 4h16v10H7l-3 3V4z" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </header>
+            {callToast.open && (
+              <div className={`call-toast ${callToast.tone}`}>{callToast.message}</div>
+            )}
             {callConnectionStatus === "reconnecting" && callState.sessionType !== "chat" && (
               <div className="call-banner warn">
                 Reconnecting… We’ll restore the call once the network stabilizes.
@@ -5528,7 +5911,11 @@ export default function Home() {
                     {showAudioTiles && <audio ref={remoteAudioRef} autoPlay />}
                   </div>
                 )}
-                <div className="call-chat">
+                <div
+                  className={`call-chat-panel ${
+                    callState.sessionType === "chat" || callChatOpen ? "open" : ""
+                  }`}
+                >
                   <div className="chat-log">
                     {callMessages.length === 0 && (
                       <p className="helper">Say hello. Messages are not saved.</p>
@@ -5572,16 +5959,61 @@ export default function Home() {
             )}
             {callState.sessionType !== "chat" && !callPreflight.open && (
               <div className="call-controls">
-                <button type="button" className="cta ghost" onClick={toggleMute}>
-                  {callState.micMuted ? "Unmute" : "Mute"}
+                <button
+                  type="button"
+                  className={`icon-btn ${callState.micMuted ? "active" : ""}`}
+                  onClick={toggleMute}
+                  aria-label={callState.micMuted ? "Unmute" : "Mute"}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2zm-5 8v-3h-2v3h2z" />
+                  </svg>
                 </button>
                 {callState.sessionType === "video" && !callState.audioOnly && (
-                  <button type="button" className="cta ghost" onClick={toggleCamera}>
-                    {callState.cameraOff ? "Camera on" : "Camera off"}
+                  <button
+                    type="button"
+                    className={`icon-btn ${callState.cameraOff ? "active" : ""}`}
+                    onClick={toggleCamera}
+                    aria-label={callState.cameraOff ? "Camera on" : "Camera off"}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2zm14 2 4-2v12l-4-2V8z" />
+                    </svg>
                   </button>
                 )}
-                <button type="button" className="cta danger" onClick={() => cleanupCall(true)}>
-                  End call
+                <button
+                  type="button"
+                  className={`icon-btn ${callChatOpen ? "active" : ""}`}
+                  onClick={() => setCallChatOpen((prev) => !prev)}
+                  aria-label="Toggle chat"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 4h16v10H7l-3 3V4z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn end"
+                  onClick={requestEndCall}
+                  aria-label="End call"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 15c2-3 5-4 9-4s7 1 9 4l-2 3c-2-2-4-3-7-3s-5 1-7 3l-2-3z" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            {callState.sessionType === "chat" && !callPreflight.open && (
+              <div className="call-controls chat-controls">
+                <button
+                  type="button"
+                  className="icon-btn end"
+                  onClick={requestEndCall}
+                  aria-label="End chat"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 15c2-3 5-4 9-4s7 1 9 4l-2 3c-2-2-4-3-7-3s-5 1-7 3l-2-3z" />
+                  </svg>
                 </button>
               </div>
             )}
@@ -6164,8 +6596,14 @@ export default function Home() {
               >
                 <option value="flutterwave">Flutterwave</option>
                 <option value="crypto">Crypto (BTC/USDT)</option>
+                <option value="wallet">Wallet balance</option>
               </select>
             </label>
+            {bookingSheet.paymentMethod === "wallet" && (
+              <p className="helper">
+                Wallet balance: ₦{Number(profile?.user?.wallet_balance || 0).toLocaleString()}
+              </p>
+            )}
             {bookingSheet.status && <p className="helper">{bookingSheet.status}</p>}
             <button
               type="button"
@@ -6212,8 +6650,14 @@ export default function Home() {
               >
                 <option value="flutterwave">Flutterwave</option>
                 <option value="crypto">Crypto (BTC/USDT)</option>
+                <option value="wallet">Wallet balance</option>
               </select>
             </label>
+            {extensionSheet.paymentMethod === "wallet" && (
+              <p className="helper">
+                Wallet balance: ₦{Number(profile?.user?.wallet_balance || 0).toLocaleString()}
+              </p>
+            )}
             {extensionSheet.status && <p className="helper">{extensionSheet.status}</p>}
             <button
               type="button"
@@ -6812,7 +7256,7 @@ export default function Home() {
                                     className={`cta ghost ${
                                       sessionActionStatus[item.id]?.loading ? "loading" : ""
                                     }`}
-                                    onClick={() => handleSessionJoin(item.id, item.session_type)}
+                                    onClick={() => handleSessionJoin(item)}
                                     disabled={sessionActionStatus[item.id]?.loading}
                                   >
                                     Start session
