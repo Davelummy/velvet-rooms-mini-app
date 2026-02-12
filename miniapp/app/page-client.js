@@ -1388,11 +1388,29 @@ export default function Home() {
         body: JSON.stringify({ initData, session_id: sessionId }),
       });
       if (!res.ok) {
+        let message = `Unable to join (HTTP ${res.status}).`;
+        try {
+          const payload = await res.json();
+          if (payload?.error === "invalid_status") {
+            message = "Session isn't ready yet. Wait for acceptance or payment approval.";
+          } else if (payload?.error === "session_not_started") {
+            if (payload?.scheduled_for) {
+              const when = new Date(payload.scheduled_for).toLocaleString();
+              message = `Session starts at ${when}. Try again then.`;
+            } else {
+              message = "Session hasn't started yet.";
+            }
+          } else if (payload?.error === "forbidden") {
+            message = "You don't have access to this session.";
+          }
+        } catch {
+          // ignore parse errors
+        }
         setSessionActionStatus((prev) => ({
           ...prev,
           [sessionId]: {
             loading: false,
-            error: `Unable to join (HTTP ${res.status}).`,
+            error: message,
             info: "",
           },
         }));

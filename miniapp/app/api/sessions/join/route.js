@@ -49,15 +49,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
-  if (session.scheduled_for) {
-    const scheduledFor = new Date(session.scheduled_for);
-    if (scheduledFor > new Date()) {
-      return NextResponse.json({
-        error: "session_not_started",
-        scheduled_for: session.scheduled_for,
-      }, { status: 409 });
-    }
-  }
+  // Allow both parties to start early if they are ready, even if a future schedule was set.
 
   if (session.client_id === userId && !session.client_joined_at) {
     await query(
