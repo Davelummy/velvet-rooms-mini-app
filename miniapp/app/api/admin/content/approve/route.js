@@ -4,6 +4,7 @@ import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
 import { getSupabase } from "../../../_lib/supabase";
 import { ensureContentColumns } from "../../../_lib/content";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -181,6 +182,15 @@ export async function POST(request) {
     );
     await notifyModel(content.telegram_id, content.title || "your teaser");
   }
+
+  await createNotification({
+    recipientId: content.model_id,
+    recipientRole: "model",
+    title: "Teaser approved",
+    body: `Your teaser "${content.title || "Untitled"}" is now live in the gallery.`,
+    type: "content_approved",
+    metadata: { content_id: contentId },
+  });
 
   return NextResponse.json({ ok: true });
 }

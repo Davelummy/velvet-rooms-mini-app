@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -71,6 +72,14 @@ export async function POST(request) {
       "Your model verification was rejected. Contact support for details."
     );
   }
+  await createNotification({
+    recipientId: userId,
+    recipientRole: "model",
+    title: "Verification rejected",
+    body: "Your model verification was rejected. Contact support for details.",
+    type: "verification_rejected",
+    metadata: { status: "rejected" },
+  });
 
   return NextResponse.json({ ok: true });
 }

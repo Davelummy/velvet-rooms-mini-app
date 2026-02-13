@@ -277,6 +277,20 @@ export default function Home() {
     status: "",
     sending: false,
   });
+  const [callRemoteVideoReady, setCallRemoteVideoReady] = useState(false);
+  const [callConclusion, setCallConclusion] = useState({
+    open: false,
+    title: "",
+    body: "",
+  });
+  const [callTimeOffset, setCallTimeOffset] = useState(0);
+  const [notifications, setNotifications] = useState({
+    open: false,
+    items: [],
+    unread: 0,
+    loading: false,
+    error: "",
+  });
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
@@ -284,6 +298,7 @@ export default function Home() {
   const remoteStreamRef = useRef(null);
   const callPcRef = useRef(null);
   const callChannelRef = useRef(null);
+  const callChannelSubscribedRef = useRef(false);
   const offerSentRef = useRef(false);
   const callUserIdRef = useRef(null);
   const callRemoteIdRef = useRef(null);
@@ -297,11 +312,13 @@ export default function Home() {
   const callFailureLoggedRef = useRef(false);
   const callSuccessLoggedRef = useRef(false);
   const callSessionRef = useRef({ id: null, type: null });
+  const callChatOpenRef = useRef(false);
   const callLocalReadyRef = useRef(false);
   const callRemoteReadyRef = useRef(false);
   const callRemoteRoleRef = useRef("");
   const callRoleRef = useRef("");
   const pendingOfferRef = useRef(null);
+  const callTimingSyncRef = useRef(false);
   const walletIdempotencyRef = useRef({});
   const callWarningRef = useRef({ twoMin: false, thirtySec: false, ended: false });
   const clientDraftTimerRef = useRef(null);
@@ -437,6 +454,8 @@ export default function Home() {
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   };
 
+  const getCallNow = () => Date.now() + callTimeOffset;
+
   const showCallToast = (message, tone = "neutral") => {
     setCallToast({ open: true, message, tone });
     setTimeout(() => {
@@ -459,6 +478,34 @@ export default function Home() {
       endsAt: endsAt || null,
       durationMinutes: durationMinutes || null,
     };
+  };
+
+  const syncCallTimingFromServer = async () => {
+    if (!initData || !callState.sessionId) {
+      return;
+    }
+    try {
+      const res = await fetch("/api/sessions/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData, session_id: callState.sessionId }),
+      });
+      if (!res.ok) {
+        return;
+      }
+      const data = await res.json();
+      if (data?.server_time) {
+        const serverMs = Number(data.server_time);
+        if (!Number.isNaN(serverMs)) {
+          setCallTimeOffset(serverMs - Date.now());
+        }
+      }
+      if (data?.session) {
+        setCallTiming(resolveCallTiming(data.session));
+      }
+    } catch {
+      // ignore sync errors
+    }
   };
 
   const callProgress = useMemo(() => {
@@ -742,6 +789,9 @@ export default function Home() {
       setCallMenuOpen(false);
       setCallToast({ open: false, message: "", tone: "neutral" });
       setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false });
+      setCallConclusion({ open: false, title: "", body: "" });
+      setCallTimeOffset(0);
+      setCallRemoteVideoReady(false);
       callWarningRef.current = { twoMin: false, thirtySec: false, ended: false };
       return;
     }
@@ -749,17 +799,35 @@ export default function Home() {
   }, [callState.open]);
 
   useEffect(() => {
+    callChatOpenRef.current = callChatOpen;
+  }, [callChatOpen]);
+
+  useEffect(() => {
+    if (!callState.open || callState.sessionType === "chat") {
+      return;
+    }
+    if (callConnectionStatus !== "connected") {
+      return;
+    }
+    if (callTimingSyncRef.current) {
+      return;
+    }
+    callTimingSyncRef.current = true;
+    syncCallTimingFromServer().catch(() => null);
+  }, [callState.open, callState.sessionType, callConnectionStatus, callState.sessionId, initData]);
+
+  useEffect(() => {
     if (!callState.open || callState.sessionType === "chat") {
       return;
     }
     if (!callTiming.startedAt && callTiming.durationMinutes && callConnectionStatus === "connected") {
-      const startedAt = new Date().toISOString();
+      const startedAt = new Date(getCallNow()).toISOString();
       const endsAt = new Date(
-        Date.now() + callTiming.durationMinutes * 60 * 1000
+        getCallNow() + callTiming.durationMinutes * 60 * 1000
       ).toISOString();
       setCallTiming((prev) => ({ ...prev, startedAt, endsAt }));
     }
-  }, [callState.open, callState.sessionType, callTiming, callConnectionStatus]);
+  }, [callState.open, callState.sessionType, callTiming, callConnectionStatus, callTimeOffset]);
 
   useEffect(() => {
     if (!callState.open || callState.sessionType === "chat") {
@@ -770,7 +838,7 @@ export default function Home() {
       return;
     }
     const updateTimer = () => {
-      const now = Date.now();
+      const now = getCallNow();
       const start = new Date(callTiming.startedAt).getTime();
       const end = new Date(callTiming.endsAt).getTime();
       const remaining = Math.max(0, Math.floor((end - now) / 1000));
@@ -792,7 +860,7 @@ export default function Home() {
     updateTimer();
     const id = setInterval(updateTimer, 1000);
     return () => clearInterval(id);
-  }, [callState.open, callState.sessionType, callTiming]);
+  }, [callState.open, callState.sessionType, callTiming, callTimeOffset]);
   const modelEngagementTotals = useMemo(() => {
     if (!Array.isArray(modelItems) || modelItems.length === 0) {
       return { likes: 0, views: 0 };
@@ -993,6 +1061,25 @@ export default function Home() {
         return status || "-";
     }
   };
+  const formatSessionTime = (session) => {
+    const scheduled = session?.scheduled_for || session?.scheduledFor || null;
+    if (scheduled) {
+      try {
+        return new Date(scheduled).toLocaleString();
+      } catch {
+        return "Scheduled";
+      }
+    }
+    const started = session?.actual_start || session?.started_at || null;
+    if (started) {
+      try {
+        return `Started ${new Date(started).toLocaleString()}`;
+      } catch {
+        return "In progress";
+      }
+    }
+    return "Flexible schedule";
+  };
   const getStatusTone = (status) => {
     switch (status) {
       case "active":
@@ -1192,6 +1279,19 @@ export default function Home() {
     });
   };
 
+  const startReadyLoop = async () => {
+    if (!callChannelRef.current) {
+      return;
+    }
+    await sendCallSignal({ type: "ready", role: callRoleRef.current });
+    if (callReadyTimerRef.current) {
+      clearInterval(callReadyTimerRef.current);
+    }
+    callReadyTimerRef.current = setInterval(() => {
+      sendCallSignal({ type: "ready", role: callRoleRef.current }).catch(() => null);
+    }, 3000);
+  };
+
   const logCallEvent = async (eventType, payload = {}) => {
     if (!initData) {
       return;
@@ -1212,6 +1312,125 @@ export default function Home() {
     }
   };
 
+  const loadNotifications = async (silent = false) => {
+    if (!initData) {
+      return;
+    }
+    if (!silent) {
+      setNotifications((prev) => ({ ...prev, loading: true, error: "" }));
+    }
+    try {
+      const res = await fetch("/api/notifications", {
+        headers: { "x-telegram-init": initData },
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setNotifications((prev) => ({
+          ...prev,
+          loading: false,
+          error: `Unable to load notifications (HTTP ${res.status}).`,
+        }));
+        return;
+      }
+      const data = await res.json();
+      setNotifications((prev) => ({
+        ...prev,
+        items: data.items || [],
+        unread: Number(data.unread || 0),
+        loading: false,
+        error: "",
+      }));
+    } catch {
+      setNotifications((prev) => ({
+        ...prev,
+        loading: false,
+        error: "Unable to load notifications.",
+      }));
+    }
+  };
+
+  const markNotificationsRead = async (ids = []) => {
+    if (!initData) {
+      return;
+    }
+    try {
+      await fetch("/api/notifications/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          ids: Array.isArray(ids) ? ids : [],
+        }),
+      });
+    } catch {
+      // ignore mark read failures
+    }
+  };
+
+  const pushLocalNotification = (notification, persist = false) => {
+    const item = {
+      id: notification.id || `local-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: notification.title || "Notification",
+      body: notification.body || "",
+      type: notification.type || "",
+      metadata: notification.metadata || null,
+      created_at: notification.created_at || new Date().toISOString(),
+      read_at: null,
+    };
+    setNotifications((prev) => ({
+      ...prev,
+      items: [item, ...(prev.items || [])].slice(0, 40),
+      unread: Math.max(0, (prev.unread || 0) + 1),
+    }));
+    if (persist && initData) {
+      fetch("/api/notifications/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          title: item.title,
+          body: item.body,
+          type: item.type,
+          metadata: item.metadata,
+        }),
+      }).catch(() => null);
+    }
+  };
+
+  const openNotifications = () => {
+    setNotifications((prev) => ({ ...prev, open: true }));
+    loadNotifications(true).catch(() => null);
+  };
+
+  const closeNotifications = () => {
+    const unreadIds = (notifications.items || [])
+      .filter((item) => !item.read_at)
+      .map((item) => item.id)
+      .filter(Boolean);
+    if (unreadIds.length) {
+      markNotificationsRead(unreadIds).catch(() => null);
+    }
+    setNotifications((prev) => ({
+      ...prev,
+      open: false,
+      unread: 0,
+      items: (prev.items || []).map((item) =>
+        item.read_at ? item : { ...item, read_at: item.read_at || new Date().toISOString() }
+      ),
+    }));
+  };
+
+  const formatNotificationTime = (value) => {
+    if (!value) {
+      return "";
+    }
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return "";
+    }
+  };
+
   const cleanupCall = (notifyRemote = true, resetState = true) => {
     if (notifyRemote) {
       sendCallSignal({ type: "hangup" }).catch(() => null);
@@ -1221,6 +1440,7 @@ export default function Home() {
       channel.unsubscribe().catch(() => null);
     }
     callChannelRef.current = null;
+    callChannelSubscribedRef.current = false;
     callRemoteIdRef.current = null;
     callUserIdRef.current = null;
     callSessionRef.current = { id: null, type: null };
@@ -1229,6 +1449,7 @@ export default function Home() {
     callRemoteRoleRef.current = "";
     callRoleRef.current = "";
     pendingOfferRef.current = null;
+    callTimingSyncRef.current = false;
     if (callReadyTimerRef.current) {
       clearInterval(callReadyTimerRef.current);
       callReadyTimerRef.current = null;
@@ -1266,6 +1487,7 @@ export default function Home() {
       setCallMessages([]);
       setCallInput("");
       setCallTyping(false);
+      setCallRemoteVideoReady(false);
       setCallState((prev) => ({
         ...prev,
         open: false,
@@ -1287,7 +1509,27 @@ export default function Home() {
         checking: false,
       });
       setCallConnectionStatus("idle");
+      setCallTimeOffset(0);
     }
+  };
+
+  const showCallConclusion = (message = "Thanks for joining. Your session has concluded.") => {
+    setCallConclusion({
+      open: true,
+      title: "Session concluded",
+      body: message,
+    });
+    setCallState((prev) => ({
+      ...prev,
+      connecting: false,
+      status: "Session concluded.",
+    }));
+    setCallMenuOpen(false);
+  };
+
+  const closeCallConclusion = () => {
+    setCallConclusion({ open: false, title: "", body: "" });
+    cleanupCall(false);
   };
 
   const handleCallSignal = async (payload) => {
@@ -1316,6 +1558,11 @@ export default function Home() {
         status: prev.status || "Partner connected.",
       }));
       await maybeStartOffer();
+      return;
+    }
+    if (payload.type === "session-ended") {
+      showCallConclusion("Your session has concluded. Thanks for spending time here.");
+      cleanupCall(false, false);
       return;
     }
     if (payload.type === "hangup") {
@@ -1579,6 +1826,7 @@ export default function Home() {
     callRemoteRoleRef.current = "";
     callRoleRef.current = role || "";
     pendingOfferRef.current = null;
+    callChannelSubscribedRef.current = false;
     setCallState((prev) => ({
       ...prev,
       connecting: true,
@@ -1610,6 +1858,17 @@ export default function Home() {
         self: false,
         status: "delivered",
       });
+      if (!callChatOpenRef.current && callSessionRef.current.type !== "chat") {
+        pushLocalNotification(
+          {
+            title: "New message",
+            body: `${payload.senderLabel || "Partner"}: ${payload.text || ""}`.trim(),
+            type: "chat_message",
+            metadata: { session_id: sessionId },
+          },
+          true
+        );
+      }
       if (payload.id) {
         channel
           .send({
@@ -1644,13 +1903,12 @@ export default function Home() {
 
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
-        sendCallSignal({ type: "ready", role: callRoleRef.current }).catch(() => null);
-        if (callReadyTimerRef.current) {
-          clearInterval(callReadyTimerRef.current);
+        callChannelSubscribedRef.current = true;
+        if (sessionType === "chat") {
+          startReadyLoop().catch(() => null);
+        } else if (callLocalReadyRef.current) {
+          startReadyLoop().catch(() => null);
         }
-        callReadyTimerRef.current = setInterval(() => {
-          sendCallSignal({ type: "ready", role: callRoleRef.current }).catch(() => null);
-        }, 3000);
         if (sessionType === "chat") {
           setCallState((prev) => ({
             ...prev,
@@ -1681,9 +1939,22 @@ export default function Home() {
     }
 
     pc.ontrack = (event) => {
-      event.streams[0]?.getTracks().forEach((track) => {
-        remoteStream.addTrack(track);
-      });
+      if (event.streams && event.streams[0]) {
+        event.streams[0].getTracks().forEach((track) => {
+          remoteStream.addTrack(track);
+        });
+      } else if (event.track) {
+        remoteStream.addTrack(event.track);
+      }
+      if (event.track?.kind === "video") {
+        setCallRemoteVideoReady(true);
+      }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream;
+      }
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStream;
+      }
     };
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -1758,6 +2029,9 @@ export default function Home() {
         localVideoRef.current.srcObject = localStream;
       }
       callLocalReadyRef.current = true;
+      if (callChannelSubscribedRef.current) {
+        startReadyLoop().catch(() => null);
+      }
       if (pendingOfferRef.current?.sdp) {
         const pending = pendingOfferRef.current;
         pendingOfferRef.current = null;
@@ -1988,6 +2262,12 @@ export default function Home() {
         }));
         return;
       }
+      if (data?.server_time) {
+        const serverMs = Number(data.server_time);
+        if (!Number.isNaN(serverMs)) {
+          setCallTimeOffset(serverMs - Date.now());
+        }
+      }
       const fallbackSession = {
         duration_minutes: typeof session === "object" ? session?.duration_minutes : null,
       };
@@ -2062,6 +2342,15 @@ export default function Home() {
       }
       if (!auto) {
         setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false });
+      }
+      const isTimeElapsed = reason === "time_elapsed";
+      if (isTimeElapsed) {
+        sendCallSignal({ type: "session-ended", reason }).catch(() => null);
+        showCallConclusion("Thanks for spending time here. Your session has concluded.");
+        await refreshBookings();
+        await refreshProfile();
+        cleanupCall(false, false);
+        return;
       }
       showCallToast("Session ended.", "neutral");
       await refreshBookings();
@@ -2431,6 +2720,17 @@ export default function Home() {
   }, [initData, clientStatus, modelStatus]);
 
   useEffect(() => {
+    if (!initData) {
+      return;
+    }
+    loadNotifications(true).catch(() => null);
+    const interval = setInterval(() => {
+      loadNotifications(true).catch(() => null);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [initData]);
+
+  useEffect(() => {
     if (!initData || role !== "model") {
       return undefined;
     }
@@ -2775,6 +3075,16 @@ export default function Home() {
       return;
     }
     loadClientSessionsPage(0, false);
+  }, [initData, role, clientTab]);
+
+  useEffect(() => {
+    if (!initData || role !== "client" || clientTab !== "sessions") {
+      return;
+    }
+    const interval = setInterval(() => {
+      loadClientSessionsPage(0, false);
+    }, 20000);
+    return () => clearInterval(interval);
   }, [initData, role, clientTab]);
 
   useEffect(() => {
@@ -5002,6 +5312,23 @@ export default function Home() {
             <span className="pill">Account: {lockedRole === "model" ? "Model" : "Client"}</span>
           </div>
         )}
+        {(role || roleLocked) && !showOnboarding && (
+          <button
+            type="button"
+            className="icon-btn notice-bell"
+            onClick={() => (notifications.open ? closeNotifications() : openNotifications())}
+            aria-label="Notifications"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 22a2.5 2.5 0 0 0 2.45-2H9.55A2.5 2.5 0 0 0 12 22zm6-6V11a6 6 0 1 0-12 0v5l-2 2v1h16v-1l-2-2z" />
+            </svg>
+            {notifications.unread > 0 && (
+              <span className="notify-badge">
+                {notifications.unread > 99 ? "99+" : notifications.unread}
+              </span>
+            )}
+          </button>
+        )}
       </header>
 
       {roleStatus && (
@@ -5226,6 +5553,58 @@ export default function Home() {
                   <span>Account type</span>
                   <strong>Client</strong>
                 </div>
+              </div>
+            )}
+            {profile?.user && (
+              <div className="flow-card profile-summary">
+                <div className="summary-head">
+                  <span className="avatar">
+                    {avatarUrl ? (
+                      <img src={avatarUrl} alt="Profile" />
+                    ) : (
+                      <span>{(clientDisplayName || "C")[0]}</span>
+                    )}
+                  </span>
+                  <div>
+                    <strong>{clientDisplayName}</strong>
+                    <p className="muted">
+                      {clientAccessPaid ? "Gallery unlocked" : "Access pending"}
+                    </p>
+                  </div>
+                  <span className={`pill ${clientAccessPaid ? "success" : "warning"}`}>
+                    {clientAccessPaid ? "Active" : "Pending"}
+                  </span>
+                </div>
+                <div className="summary-grid">
+                  <div>
+                    <span className="eyebrow">Wallet</span>
+                    <strong>
+                      ₦{Number(profile?.user?.wallet_balance || 0).toLocaleString()}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="eyebrow">Location</span>
+                    <strong>{profile?.client?.location || "Not set"}</strong>
+                  </div>
+                </div>
+                {clientAccessPaid && (
+                  <div className="summary-actions">
+                    <button
+                      type="button"
+                      className="cta ghost"
+                      onClick={() => setClientTab("profile")}
+                    >
+                      Edit profile
+                    </button>
+                    <button
+                      type="button"
+                      className="cta primary"
+                      onClick={() => setClientTab("gallery")}
+                    >
+                      Browse gallery
+                    </button>
+                  </div>
+                )}
               </div>
             )}
             {!clientAccessPaid && (
@@ -5596,6 +5975,16 @@ export default function Home() {
                                 ) : (
                                   <div className="media-fallback">Tap to view</div>
                                 )}
+                                <div className="gallery-overlay">
+                                  <span className="pill ghost">
+                                    {item.content_type === "video" ? "Video" : "Image"}
+                                  </span>
+                                  {item.price ? (
+                                    <span className="pill warning">Unlock ₦{item.price}</span>
+                                  ) : (
+                                    <span className="pill success">Free</span>
+                                  )}
+                                </div>
                               </div>
                               <div className="gallery-body">
                                 <div className="gallery-headline">
@@ -5637,7 +6026,9 @@ export default function Home() {
                                   </span>
                                   <button
                                     type="button"
-                                    className={`pill ghost ${item.has_liked ? "active" : ""}`}
+                                    className={`pill ghost like-pill ${
+                                      item.has_liked ? "active" : ""
+                                    }`}
                                     onClick={() => toggleLike(item.id)}
                                   >
                                     {item.has_liked ? "Liked" : "Like"} ·{" "}
@@ -6086,7 +6477,16 @@ export default function Home() {
                     {clientSessionsStatus && (
                       <p className="helper error">{clientSessionsStatus}</p>
                     )}
-                    {clientSessionsLoading && <p className="helper">Loading sessions…</p>}
+                    {clientSessionsLoading && (
+                      <div className="list-skeleton">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                          <div key={`session-skel-${index}`} className="list-row skeleton">
+                            <div className="skeleton-line wide" />
+                            <div className="skeleton-line short" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {!clientSessionsStatus && !clientSessionsLoading && clientSessions.length === 0 && (
                       <p className="helper">No sessions yet.</p>
                     )}
@@ -6097,6 +6497,10 @@ export default function Home() {
                           <p className="muted">
                             {item.session_type} · {item.duration_minutes} min
                           </p>
+                          <div className="session-timeline">
+                            <span className="timeline-dot" />
+                            <span>{formatSessionTime(item)}</span>
+                          </div>
                         </div>
                         <div className="session-actions">
                           <span className={`pill ${getStatusTone(item.status)}`}>
@@ -6105,7 +6509,7 @@ export default function Home() {
                           {["accepted", "active"].includes(item.status) && (
                             <button
                               type="button"
-                              className={`cta ghost ${
+                              className={`cta primary start ${
                                 sessionActionStatus[item.id]?.loading ? "loading" : ""
                               }`}
                               onClick={() => handleSessionJoin(item)}
@@ -6466,7 +6870,13 @@ export default function Home() {
 
       {callState.open && (
         <section className="call-overlay">
-          <div className={`call-card ${callChatOpen ? "chat-open" : ""} ${callState.sessionType === "chat" ? "chat-only" : ""}`}>
+          <div
+            className={`call-card ${callChatOpen ? "chat-open" : ""} ${
+              callChatOpen && callState.sessionType !== "chat" ? "chat-overlay" : ""
+            } ${callState.sessionType === "chat" ? "chat-only" : ""} ${
+              callConclusion.open ? "concluded" : ""
+            }`}
+          >
             <header className="call-top">
               <div className="call-title">
                 <p className="eyebrow">
@@ -6531,6 +6941,15 @@ export default function Home() {
             </header>
             {callToast.open && (
               <div className={`call-toast ${callToast.tone}`}>{callToast.message}</div>
+            )}
+            {callConclusion.open && (
+              <div className="call-conclusion">
+                <h3>{callConclusion.title}</h3>
+                <p>{callConclusion.body}</p>
+                <button type="button" className="cta primary" onClick={closeCallConclusion}>
+                  Back to dashboard
+                </button>
+              </div>
             )}
             {callMenuOpen && (
               <div className="call-menu-panel">
@@ -6684,8 +7103,17 @@ export default function Home() {
                   <div className="call-media">
                     {showVideoTiles && (
                       <div className="call-video-grid">
-                        <div className="call-video remote">
+                        <div
+                          className={`call-video remote ${
+                            callConnectionStatus === "connected" ? "connected" : ""
+                          } ${callRemoteVideoReady ? "ready" : ""}`}
+                        >
                           <video ref={remoteVideoRef} autoPlay playsInline />
+                          {!callRemoteVideoReady && (
+                            <div className="video-placeholder">
+                              <span>Waiting for partner video…</span>
+                            </div>
+                          )}
                           <span className="call-label">Partner</span>
                         </div>
                         <div className="call-video local">
@@ -6767,6 +7195,14 @@ export default function Home() {
                               : message.status}
                           </span>
                         )}
+                        {message.sentAt && (
+                          <span className="chat-time">
+                            {new Date(message.sentAt).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        )}
                       </div>
                     ))}
                     {callTyping && (
@@ -6806,7 +7242,7 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {callState.sessionType !== "chat" && !callPreflight.open && (
+            {callState.sessionType !== "chat" && !callPreflight.open && !callConclusion.open && (
               <div className="call-controls">
                 <button
                   type="button"
@@ -6852,7 +7288,7 @@ export default function Home() {
                 </button>
               </div>
             )}
-            {callState.sessionType === "chat" && !callPreflight.open && (
+            {callState.sessionType === "chat" && !callPreflight.open && !callConclusion.open && (
               <div className="call-controls chat-controls">
                 <button
                   type="button"
@@ -6866,6 +7302,43 @@ export default function Home() {
                 </button>
               </div>
             )}
+          </div>
+        </section>
+      )}
+
+      {notifications.open && (
+        <section className="notification-overlay" onClick={closeNotifications}>
+          <div className="notification-panel" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <p className="eyebrow">Inbox</p>
+                <h3>Notifications</h3>
+              </div>
+              <button type="button" className="cta ghost" onClick={closeNotifications}>
+                Close
+              </button>
+            </header>
+            {notifications.loading && <p className="helper">Loading notifications…</p>}
+            {notifications.error && <p className="helper error">{notifications.error}</p>}
+            {!notifications.loading && notifications.items.length === 0 && (
+              <p className="helper">No notifications yet.</p>
+            )}
+            <div className="notification-list">
+              {notifications.items.map((item) => (
+                <div
+                  key={`notif-${item.id}`}
+                  className={`notification-item ${item.read_at ? "" : "unread"}`}
+                >
+                  <div>
+                    <strong>{item.title}</strong>
+                    {item.body && <p>{item.body}</p>}
+                  </div>
+                  <span className="notification-time">
+                    {formatNotificationTime(item.created_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </section>
       )}
@@ -7576,6 +8049,52 @@ export default function Home() {
             )}
             {modelApproved ? (
               <>
+                <div className="flow-card profile-summary">
+                  <div className="summary-head">
+                    <span className="avatar">
+                      {avatarUrl ? (
+                        <img src={avatarUrl} alt="Profile" />
+                      ) : (
+                        <span>{(profile?.model?.display_name || "M")[0]}</span>
+                      )}
+                    </span>
+                    <div>
+                      <strong>{profile?.model?.display_name || "Model"}</strong>
+                      <p className="muted">
+                        {profile?.model?.verification_status === "approved"
+                          ? "Verified creator"
+                          : "Verification pending"}
+                      </p>
+                    </div>
+                    <span className="pill success">Live</span>
+                  </div>
+                  <div className="summary-grid">
+                    <div>
+                      <span className="eyebrow">Availability</span>
+                      <strong>{profile?.model?.availability || "Flexible"}</strong>
+                    </div>
+                    <div>
+                      <span className="eyebrow">Followers</span>
+                      <strong>{followersStats?.total ?? 0}</strong>
+                    </div>
+                  </div>
+                  <div className="summary-actions">
+                    <button
+                      type="button"
+                      className="cta ghost"
+                      onClick={() => setModelTab("profile")}
+                    >
+                      Edit profile
+                    </button>
+                    <button
+                      type="button"
+                      className="cta primary"
+                      onClick={() => setModelTab("sessions")}
+                    >
+                      View bookings
+                    </button>
+                  </div>
+                </div>
                 <div className="dash-actions">
                   <label className="field tab-select">
                     Section
@@ -8109,7 +8628,23 @@ export default function Home() {
                   <div className="flow-card">
                     <h3>My Bookings</h3>
                     {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}
-                    {myBookingsLoading && <p className="helper">Loading bookings…</p>}
+                    {myBookingsLoading && (
+                      <div className="gallery-grid">
+                        {Array.from({ length: 2 }).map((_, index) => (
+                          <div key={`booking-skel-${index}`} className="gallery-card skeleton">
+                            <div className="gallery-body">
+                              <div className="skeleton-line wide" />
+                              <div className="skeleton-line" />
+                              <div className="skeleton-line short" />
+                              <div className="skeleton-row">
+                                <div className="skeleton-pill" />
+                                <div className="skeleton-pill" />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {!myBookingsStatus && !myBookingsLoading && myBookings.length === 0 && (
                       <p className="helper">No bookings yet.</p>
                     )}
@@ -8125,6 +8660,10 @@ export default function Home() {
                                 <div className="gallery-meta">
                                   <span>{item.client_label || "Client"}</span>
                                   <strong>{item.duration_minutes || "-"} mins</strong>
+                                </div>
+                                <div className="session-timeline">
+                                  <span className="timeline-dot" />
+                                  <span>{formatSessionTime(item)}</span>
                                 </div>
                               {item.status === "pending" && (
                                 <div className="gallery-actions">
@@ -8154,7 +8693,7 @@ export default function Home() {
                                 <div className="gallery-actions">
                                   <button
                                     type="button"
-                                    className={`cta ghost ${
+                                    className={`cta primary start ${
                                       sessionActionStatus[item.id]?.loading ? "loading" : ""
                                     }`}
                                     onClick={() => handleSessionJoin(item)}

@@ -69,6 +69,13 @@ export default function Admin() {
     call_setup_failure_rate_24h: 0,
     turn_token_errors_24h: 0,
   });
+  const [notifications, setNotifications] = useState({
+    open: false,
+    items: [],
+    unread: 0,
+    loading: false,
+    error: "",
+  });
 
   const formatNumber = (value) => Number(value || 0).toLocaleString();
   const formatCurrency = (value) => `₦${formatNumber(value)}`;
@@ -410,6 +417,17 @@ export default function Admin() {
   }, [loadQueue, loadMetrics, loadHealth]);
 
   useEffect(() => {
+    if (!initData) {
+      return;
+    }
+    loadNotifications(true).catch(() => null);
+    const interval = setInterval(() => {
+      loadNotifications(true).catch(() => null);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [initData]);
+
+  useEffect(() => {
     if (!liveQueue) {
       return;
     }
@@ -542,6 +560,95 @@ export default function Admin() {
     URL.revokeObjectURL(url);
   };
 
+  const loadNotifications = async (silent = false) => {
+    if (!initData) {
+      return;
+    }
+    if (!silent) {
+      setNotifications((prev) => ({ ...prev, loading: true, error: "" }));
+    }
+    try {
+      const res = await fetch("/api/admin/notifications", {
+        headers: { "x-telegram-init": initData },
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setNotifications((prev) => ({
+          ...prev,
+          loading: false,
+          error: `Unable to load notifications (HTTP ${res.status}).`,
+        }));
+        return;
+      }
+      const data = await res.json();
+      setNotifications((prev) => ({
+        ...prev,
+        items: data.items || [],
+        unread: Number(data.unread || 0),
+        loading: false,
+        error: "",
+      }));
+    } catch {
+      setNotifications((prev) => ({
+        ...prev,
+        loading: false,
+        error: "Unable to load notifications.",
+      }));
+    }
+  };
+
+  const markNotificationsRead = async (ids = []) => {
+    if (!initData) {
+      return;
+    }
+    try {
+      await fetch("/api/admin/notifications/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          initData,
+          ids: Array.isArray(ids) ? ids : [],
+        }),
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const openNotifications = () => {
+    setNotifications((prev) => ({ ...prev, open: true }));
+    loadNotifications(true).catch(() => null);
+  };
+
+  const closeNotifications = () => {
+    const unreadIds = (notifications.items || [])
+      .filter((item) => !item.read_at)
+      .map((item) => item.id)
+      .filter(Boolean);
+    if (unreadIds.length) {
+      markNotificationsRead(unreadIds).catch(() => null);
+    }
+    setNotifications((prev) => ({
+      ...prev,
+      open: false,
+      unread: 0,
+      items: (prev.items || []).map((item) =>
+        item.read_at ? item : { ...item, read_at: item.read_at || new Date().toISOString() }
+      ),
+    }));
+  };
+
+  const formatNotificationTime = (value) => {
+    if (!value) {
+      return "";
+    }
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return "";
+    }
+  };
+
   const openPreview = (url, type = "video") => {
     if (!url) {
       return;
@@ -638,6 +745,21 @@ export default function Admin() {
             Health
           </button>
         </div>
+        <button
+          type="button"
+          className="icon-btn notice-bell"
+          onClick={() => (notifications.open ? closeNotifications() : openNotifications())}
+          aria-label="Notifications"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 22a2.5 2.5 0 0 0 2.45-2H9.55A2.5 2.5 0 0 0 12 22zm6-6V11a6 6 0 1 0-12 0v5l-2 2v1h16v-1l-2-2z" />
+          </svg>
+          {notifications.unread > 0 && (
+            <span className="notify-badge">
+              {notifications.unread > 99 ? "99+" : notifications.unread}
+            </span>
+          )}
+        </button>
       </header>
 
       <section className="admin-hero">
@@ -1648,6 +1770,43 @@ export default function Admin() {
         </div>
         )}
       </section>
+
+      {notifications.open && (
+        <section className="notification-overlay" onClick={closeNotifications}>
+          <div className="notification-panel" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <div>
+                <p className="eyebrow">Inbox</p>
+                <h3>Notifications</h3>
+              </div>
+              <button type="button" className="cta ghost" onClick={closeNotifications}>
+                Close
+              </button>
+            </header>
+            {notifications.loading && <p className="helper">Loading notifications…</p>}
+            {notifications.error && <p className="helper error">{notifications.error}</p>}
+            {!notifications.loading && notifications.items.length === 0 && (
+              <p className="helper">No notifications yet.</p>
+            )}
+            <div className="notification-list">
+              {notifications.items.map((item) => (
+                <div
+                  key={`admin-notif-${item.id}`}
+                  className={`notification-item ${item.read_at ? "" : "unread"}`}
+                >
+                  <div>
+                    <strong>{item.title}</strong>
+                    {item.body && <p>{item.body}</p>}
+                  </div>
+                  <span className="notification-time">
+                    {formatNotificationTime(item.created_at)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

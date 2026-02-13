@@ -522,6 +522,79 @@ h1 {
   box-shadow: 0 24px 50px rgba(0, 0, 0, 0.4);
 }
 
+.notification-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 5, 12, 0.82);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 85;
+  padding: 24px 16px;
+}
+
+.notification-panel {
+  width: min(520px, 100%);
+  max-height: 80vh;
+  overflow: hidden;
+  background: rgba(18, 10, 16, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+  padding: 18px;
+  box-shadow: 0 26px 64px rgba(0, 0, 0, 0.52);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notification-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.notification-item {
+  border: 1px solid var(--line);
+  background: rgba(16, 7, 10, 0.75);
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.notification-item.unread {
+  border-color: rgba(255, 179, 71, 0.6);
+  box-shadow: 0 0 0 1px rgba(255, 179, 71, 0.3) inset;
+}
+
+.notification-item strong {
+  display: block;
+  font-size: 13px;
+}
+
+.notification-item p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.notification-time {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1037,6 +1110,122 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 16px;
   overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gallery-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.35);
+}
+
+.gallery-media {
+  position: relative;
+}
+
+.gallery-overlay {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.like-pill.active {
+  background: rgba(255, 71, 100, 0.2);
+  border-color: rgba(255, 71, 100, 0.6);
+  color: #ffd6de;
+  animation: likePulse 0.6s ease;
+}
+
+@keyframes likePulse {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.profile-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.summary-head .avatar {
+  width: 52px;
+  height: 52px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.session-timeline {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.timeline-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(255, 179, 71, 0.18);
+}
+
+.list-skeleton {
+  display: grid;
+  gap: 12px;
+}
+
+.list-row.skeleton {
+  position: relative;
+  overflow: hidden;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.list-row.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 45%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.cta.primary.start {
+  box-shadow: 0 14px 30px rgba(255, 179, 71, 0.25);
 }
 
 .gallery-card.skeleton {
@@ -1871,6 +2060,26 @@ h1 {
   transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
 }
 
+.notice-bell {
+  width: 40px;
+  height: 40px;
+  position: relative;
+  margin-left: 8px;
+}
+
+.notify-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #ffb347;
+  color: #2a1407;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
 .icon-btn svg {
   width: 22px;
   height: 22px;
@@ -1991,6 +2200,7 @@ h1 {
   gap: 16px;
   flex: 1;
   min-height: 0;
+  position: relative;
 }
 
 .call-card.chat-open .call-body {
@@ -2013,6 +2223,51 @@ h1 {
 
 .call-card.chat-only .chat-log {
   background: linear-gradient(180deg, rgba(22, 9, 13, 0.6) 0%, rgba(12, 5, 7, 0.95) 100%);
+}
+
+.call-card.chat-overlay .call-media {
+  display: none;
+}
+
+.call-card.chat-overlay .call-chat-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  border-radius: 20px;
+}
+
+.call-card.concluded .call-body {
+  opacity: 0.25;
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.call-conclusion {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(8, 4, 6, 0.9);
+  backdrop-filter: blur(6px);
+}
+
+.call-conclusion h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.call-conclusion p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .call-banner {
@@ -2123,6 +2378,27 @@ h1 {
   height: 100%;
   object-fit: cover;
   background: #090508;
+}
+
+.call-video.remote.connected {
+  box-shadow: 0 0 0 2px rgba(255, 179, 71, 0.4);
+}
+
+.video-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+  background: radial-gradient(
+    circle at 30% 20%,
+    rgba(255, 179, 71, 0.18),
+    rgba(10, 4, 7, 0.9) 60%
+  );
 }
 
 .call-video.local {
@@ -2255,6 +2531,13 @@ h1 {
   text-transform: uppercase;
 }
 
+.chat-time {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .chat-typing {
   display: flex;
   align-items: center;
@@ -2311,6 +2594,11 @@ h1 {
   padding: 10px 14px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--ink);
+}
+
+.chat-input input::placeholder {
+  color: var(--muted);
 }
 
 .call-controls {
@@ -2345,6 +2633,15 @@ h1 {
     padding: 16px;
     height: 100%;
     border-radius: 0;
+  }
+
+  .summary-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .summary-actions {
+    width: 100%;
   }
 
   .call-audio-grid {

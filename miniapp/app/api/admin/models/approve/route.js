@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -68,6 +69,14 @@ export async function POST(request) {
   if (telegramId) {
     await notifyModel(telegramId, "Your model verification has been approved ✅");
   }
+  await createNotification({
+    recipientId: userId,
+    recipientRole: "model",
+    title: "Verification approved",
+    body: "Your model verification has been approved. Welcome aboard.",
+    type: "verification_approved",
+    metadata: { status: "approved" },
+  });
 
   return NextResponse.json({ ok: true });
 }

@@ -5,6 +5,7 @@ import { ensureSessionColumns } from "../../_lib/sessions";
 import { createRequestContext, logError, withRequestId } from "../../_lib/observability";
 import { checkRateLimit } from "../../_lib/rate_limit";
 import { logAppEvent } from "../../_lib/metrics";
+import { createNotification, createAdminNotifications } from "../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -60,7 +61,7 @@ export async function POST(request) {
   await ensureSessionColumns();
 
   const sessionRes = await query(
-    `SELECT id, client_id, model_id, status
+    `SELECT id, client_id, model_id, status, scheduled_end
      FROM sessions WHERE id = $1`,
     [sessionId]
   );
@@ -91,6 +92,12 @@ export async function POST(request) {
     outcome = "dispute";
   } else if (reason === "completed_early") {
     outcome = "release";
+  }
+  const scheduledEndMs = session.scheduled_end ? new Date(session.scheduled_end).getTime() : null;
+  const isEarlyEnd =
+    scheduledEndMs && reason !== "time_elapsed" && Date.now() < scheduledEndMs - 30000;
+  if (isEarlyEnd) {
+    outcome = "dispute";
   }
   const shouldDispute = outcome === "dispute";
   const nextStatus = shouldDispute ? "disputed" : "completed";
@@ -152,6 +159,35 @@ export async function POST(request) {
     sessionId,
     payload: { reason, outcome, actor: endActor },
   });
+
+  const actorRes = await query(
+    `SELECT COALESCE(cp.display_name, mp.display_name, u.public_id) AS display_name
+     FROM users u
+     LEFT JOIN client_profiles cp ON cp.user_id = u.id
+     LEFT JOIN model_profiles mp ON mp.user_id = u.id
+     WHERE u.id = $1`,
+    [userId]
+  );
+  const actorLabel = actorRes.rows[0]?.display_name || "Your partner";
+  const recipientId = endActor === "client" ? session.model_id : session.client_id;
+  if (recipientId) {
+    await createNotification({
+      recipientId,
+      recipientRole: null,
+      title: "Session ended",
+      body: `${actorLabel} ended the session. Outcome: ${outcome}.`,
+      type: "session_end",
+      metadata: { session_id: sessionId, outcome, reason },
+    });
+  }
+  if (shouldDispute) {
+    await createAdminNotifications({
+      title: "Session dispute",
+      body: `Session ${sessionId} was marked disputed (${reason}).`,
+      type: "session_dispute",
+      metadata: { session_id: sessionId, reason },
+    });
+  }
 
   return NextResponse.json(
     withRequestId({ ok: true, status: nextStatus, end_actor: endActor, role: userRole, outcome }, ctx.requestId)

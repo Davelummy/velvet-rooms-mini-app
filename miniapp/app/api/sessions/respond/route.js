@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
+import { createNotification, createAdminNotifications } from "../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -87,6 +88,22 @@ export async function POST(request) {
     if (clientRes.rowCount) {
       await sendMessage(clientRes.rows[0].telegram_id, clientMsg);
     }
+    const modelLabelRes = await query(
+      `SELECT COALESCE(mp.display_name, u.public_id) AS display_name
+       FROM users u
+       LEFT JOIN model_profiles mp ON mp.user_id = u.id
+       WHERE u.id = $1`,
+      [session.model_id]
+    );
+    const modelLabel = modelLabelRes.rows[0]?.display_name || "the model";
+    await createNotification({
+      recipientId: session.client_id,
+      recipientRole: null,
+      title: "Booking accepted",
+      body: `Your ${typeLabel} booking with ${modelLabel} was accepted.`,
+      type: "session_accept",
+      metadata: { session_id: sessionId },
+    });
     await sendMessage(tgUser.id, modelMsg);
     return NextResponse.json({ ok: true, status: "accepted" });
   }
@@ -132,6 +149,22 @@ export async function POST(request) {
         "Your model declined the booking. Payment has been refunded."
       );
     }
+    const modelLabelRes = await query(
+      `SELECT COALESCE(mp.display_name, u.public_id) AS display_name
+       FROM users u
+       LEFT JOIN model_profiles mp ON mp.user_id = u.id
+       WHERE u.id = $1`,
+      [session.model_id]
+    );
+    const modelLabel = modelLabelRes.rows[0]?.display_name || "the model";
+    await createNotification({
+      recipientId: session.client_id,
+      recipientRole: null,
+      title: "Booking declined",
+      body: `Your booking with ${modelLabel} was declined. A refund is being processed.`,
+      type: "session_declined",
+      metadata: { session_id: sessionId },
+    });
     return NextResponse.json({ ok: true, status: "declined" });
   }
 
@@ -140,7 +173,12 @@ export async function POST(request) {
   }
   await query(
     `UPDATE sessions
-     SET status = 'cancelled_by_model', completed_at = NOW(), ended_at = NOW()
+     SET status = 'disputed',
+         completed_at = NOW(),
+         ended_at = NOW(),
+         end_reason = 'model_cancelled',
+         end_actor = 'model',
+         end_outcome = 'dispute'
      WHERE id = $1`,
     [sessionId]
   );
@@ -154,16 +192,10 @@ export async function POST(request) {
     const escrow = escrowRes.rows[0];
     await query(
       `UPDATE escrow_accounts
-       SET status = 'refunded', released_at = NOW(), release_condition_met = TRUE,
+       SET status = 'disputed',
            dispute_reason = 'model_cancelled'
        WHERE id = $1`,
       [escrow.id]
-    );
-    await query(
-      `UPDATE users
-       SET wallet_balance = COALESCE(wallet_balance, 0) + $1
-       WHERE id = $2`,
-      [escrow.amount, escrow.payer_id]
     );
   }
   const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
@@ -175,14 +207,36 @@ export async function POST(request) {
   if (clientRes.rowCount) {
     await sendMessage(
       clientRes.rows[0].telegram_id,
-      "Session cancelled by the model. Your payment has been refunded."
+      "Session cancelled by the model. Payment is under dispute review."
     );
   }
   if (modelRes.rowCount) {
     await sendMessage(
       modelRes.rows[0].telegram_id,
-      "You cancelled the session. The client has been refunded."
+      "You cancelled the session. Payment is under dispute review."
     );
   }
+  const modelLabelRes = await query(
+    `SELECT COALESCE(mp.display_name, u.public_id) AS display_name
+     FROM users u
+     LEFT JOIN model_profiles mp ON mp.user_id = u.id
+     WHERE u.id = $1`,
+    [session.model_id]
+  );
+  const modelLabel = modelLabelRes.rows[0]?.display_name || "the model";
+  await createNotification({
+    recipientId: session.client_id,
+    recipientRole: null,
+    title: "Session cancelled",
+    body: `Your session with ${modelLabel} was cancelled.`,
+    type: "session_cancelled",
+    metadata: { session_id: sessionId },
+  });
+  await createAdminNotifications({
+    title: "Session dispute",
+    body: `Model cancelled session ${sessionId}. Marked disputed.`,
+    type: "session_dispute",
+    metadata: { session_id: sessionId },
+  });
   return NextResponse.json({ ok: true, status: "cancelled" });
 }

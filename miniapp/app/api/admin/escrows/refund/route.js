@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -73,6 +74,16 @@ export async function POST(request) {
   ]);
   if (payerRes.rowCount) {
     await sendMessage(payerRes.rows[0].telegram_id, `Escrow ${escrowRef} has been refunded.`);
+  }
+  if (escrow.payer_id) {
+    await createNotification({
+      recipientId: escrow.payer_id,
+      recipientRole: null,
+      title: "Escrow refunded",
+      body: `Escrow ${escrowRef} was refunded to your wallet.`,
+      type: "escrow_refunded",
+      metadata: { escrow_ref: escrowRef },
+    });
   }
 
   return NextResponse.json({ ok: true });

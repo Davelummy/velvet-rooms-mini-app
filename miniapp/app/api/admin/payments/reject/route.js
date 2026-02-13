@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -44,7 +45,7 @@ export async function POST(request) {
   });
 
   const txRes = await query(
-    `SELECT id, metadata_json FROM transactions WHERE transaction_ref = $1`,
+    `SELECT id, user_id, metadata_json FROM transactions WHERE transaction_ref = $1`,
     [transactionRef]
   );
   if (!txRes.rowCount) {
@@ -108,6 +109,14 @@ export async function POST(request) {
           "Session booking was rejected by admin."
         );
       }
+      await createNotification({
+        recipientId: session.client_id,
+        recipientRole: "client",
+        title: "Session payment rejected",
+        body: "Your session payment was rejected by admin. Please try again.",
+        type: "payment_rejected",
+        metadata: { session_id: session.id, transaction_ref: transactionRef },
+      });
     }
   }
 
@@ -136,6 +145,14 @@ export async function POST(request) {
           "Session extension request was rejected."
         );
       }
+      await createNotification({
+        recipientId: session.client_id,
+        recipientRole: "client",
+        title: "Extension rejected",
+        body: "Your session extension request was rejected.",
+        type: "extension_rejected",
+        metadata: { session_id: metadata.session_id, transaction_ref: transactionRef },
+      });
     }
   }
 

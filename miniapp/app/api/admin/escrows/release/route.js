@@ -4,6 +4,7 @@ import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
 import { getSupabase } from "../../../_lib/supabase";
 import { getOrCreateInviteLink } from "../../../_lib/telegram_invites";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -198,6 +199,19 @@ export async function POST(request) {
       await sendMessage(payerRes.rows[0].telegram_id, message);
     }
   }
+  if (escrow.payer_id) {
+    await createNotification({
+      recipientId: escrow.payer_id,
+      recipientRole: null,
+      title: escrowType === "access_fee" ? "Gallery unlocked" : "Escrow released",
+      body:
+        escrowType === "access_fee"
+          ? "Your access fee was approved. Gallery unlocked."
+          : `Escrow ${escrowRef} has been released.`,
+      type: "escrow_released",
+      metadata: { escrow_ref: escrowRef, escrow_type: escrowType },
+    });
+  }
   if (escrow.receiver_id) {
     const receiverRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
       escrow.receiver_id,
@@ -208,6 +222,14 @@ export async function POST(request) {
         `Escrow ${escrowRef} has been released.`
       );
     }
+    await createNotification({
+      recipientId: escrow.receiver_id,
+      recipientRole: null,
+      title: "Escrow released",
+      body: `Escrow ${escrowRef} has been released to your wallet.`,
+      type: "escrow_released",
+      metadata: { escrow_ref: escrowRef, escrow_type: escrowType },
+    });
   }
 
   return NextResponse.json({ ok: true });

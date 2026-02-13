@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
+import { createNotification, createAdminNotifications } from "../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -57,37 +58,58 @@ export async function POST(request) {
   if (session.client_id !== userId) {
     return NextResponse.json({ error: "client_only" }, { status: 403 });
   }
-  if (!["pending_payment", "pending", "accepted", "active"].includes(session.status)) {
+  if (!["pending_payment", "pending", "accepted", "active", "awaiting_confirmation"].includes(session.status)) {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
+  const shouldDispute = ["pending", "accepted", "active", "awaiting_confirmation"].includes(
+    session.status
+  );
+  const nextStatus = shouldDispute ? "disputed" : "cancelled_by_client";
   await query(
-    `UPDATE sessions SET status = 'cancelled_by_client', completed_at = NOW() WHERE id = $1`,
-    [sessionId]
+    `UPDATE sessions
+     SET status = $2,
+         completed_at = NOW(),
+         ended_at = NOW(),
+         end_reason = 'client_cancelled',
+         end_actor = 'client',
+         end_outcome = $3
+     WHERE id = $1`,
+    [sessionId, nextStatus, shouldDispute ? "dispute" : "refund"]
   );
 
   const escrowRes = await query(
-    `SELECT id, amount, receiver_id
+    `SELECT id, amount, receiver_id, payer_id
      FROM escrow_accounts
      WHERE escrow_type IN ('session','extension') AND related_id = $1 AND status = 'held'`,
     [sessionId]
   );
   if (escrowRes.rowCount) {
     const escrow = escrowRes.rows[0];
-    await query(
-      `UPDATE escrow_accounts
-       SET status = 'released', released_at = NOW(), release_condition_met = TRUE,
-           dispute_reason = 'client_cancelled'
-       WHERE id = $1`,
-      [escrow.id]
-    );
-    if (escrow.receiver_id) {
+    if (shouldDispute) {
       await query(
-        `UPDATE users
-         SET wallet_balance = COALESCE(wallet_balance, 0) + $1
-         WHERE id = $2`,
-        [escrow.amount, escrow.receiver_id]
+        `UPDATE escrow_accounts
+         SET status = 'disputed',
+             dispute_reason = 'client_cancelled'
+         WHERE id = $1`,
+        [escrow.id]
       );
+    } else {
+      await query(
+        `UPDATE escrow_accounts
+         SET status = 'refunded', released_at = NOW(), release_condition_met = TRUE,
+             dispute_reason = 'client_cancelled'
+         WHERE id = $1`,
+        [escrow.id]
+      );
+      if (escrow.payer_id) {
+        await query(
+          `UPDATE users
+           SET wallet_balance = COALESCE(wallet_balance, 0) + $1
+           WHERE id = $2`,
+          [escrow.amount, escrow.payer_id]
+        );
+      }
     }
   }
 
@@ -100,14 +122,44 @@ export async function POST(request) {
   if (clientRes.rowCount) {
     await sendMessage(
       clientRes.rows[0].telegram_id,
-      "Session cancelled. Payment released to the model."
+      shouldDispute
+        ? "Session cancelled. Your payment is under dispute review."
+        : "Session cancelled. Payment refunded to your wallet."
     );
   }
   if (modelRes.rowCount) {
     await sendMessage(
       modelRes.rows[0].telegram_id,
-      "Client cancelled the session. Payment released to you."
+      shouldDispute
+        ? "Client cancelled the session. Payment is under dispute review."
+        : "Client cancelled the session. Payment refunded to the client."
     );
+  }
+  const clientLabelRes = await query(
+    `SELECT COALESCE(cp.display_name, u.public_id) AS display_name
+     FROM users u
+     LEFT JOIN client_profiles cp ON cp.user_id = u.id
+     WHERE u.id = $1`,
+    [session.client_id]
+  );
+  const clientLabel = clientLabelRes.rows[0]?.display_name || "A client";
+  await createNotification({
+    recipientId: session.model_id,
+    recipientRole: null,
+    title: "Session cancelled",
+    body: `${clientLabel} cancelled a session. Status: ${
+      shouldDispute ? "Disputed" : "Refunded"
+    }.`,
+    type: "session_cancelled",
+    metadata: { session_id: sessionId },
+  });
+  if (shouldDispute) {
+    await createAdminNotifications({
+      title: "Session dispute",
+      body: `Client cancelled session ${sessionId}. Marked disputed.`,
+      type: "session_dispute",
+      metadata: { session_id: sessionId },
+    });
   }
 
   return NextResponse.json({ ok: true });

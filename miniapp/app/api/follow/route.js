@@ -4,6 +4,7 @@ import { extractUser, verifyInitData } from "../_lib/telegram";
 import { ensureFollowTable } from "../_lib/follows";
 import { ensureBlockTable } from "../_lib/blocks";
 import { logUserAction } from "../_lib/user_actions";
+import { createNotification } from "../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -122,6 +123,17 @@ export async function POST(request) {
       } catch {
         // ignore notification failures
       }
+    }
+    if (follower) {
+      const handle = follower.display_name || `User ${follower.public_id || followerId}`;
+      await createNotification({
+        recipientId: targetId,
+        recipientRole: null,
+        title: "New follower",
+        body: `${handle} followed you.`,
+        type: "follow",
+        metadata: { follower_id: followerId },
+      });
     }
   }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureEngagementTables } from "../../_lib/engagement";
+import { createNotification } from "../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -103,6 +104,14 @@ export async function POST(request) {
       modelTelegramId,
       teaserTitle,
       likerName,
+    });
+    await createNotification({
+      recipientId: modelId,
+      recipientRole: null,
+      title: "New like",
+      body: `${likerName} liked ${teaserTitle ? `“${teaserTitle}”` : "your teaser"}.`,
+      type: "content_like",
+      metadata: { content_id: contentId, liker_id: userId },
     });
   }
 

@@ -119,5 +119,10 @@ export async function POST(request) {
   );
   const sessionState = stateRes.rows[0] || null;
 
-  return NextResponse.json(withRequestId({ ok: true, session: sessionState }, ctx.requestId));
+  return NextResponse.json(
+    withRequestId(
+      { ok: true, session: sessionState, server_time: Date.now() },
+      ctx.requestId
+    )
+  );
 }

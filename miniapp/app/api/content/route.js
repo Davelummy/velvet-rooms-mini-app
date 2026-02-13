@@ -7,6 +7,7 @@ import { ensureBlockTable } from "../_lib/blocks";
 import { ensureSessionColumns } from "../_lib/sessions";
 import { ensureEngagementTables } from "../_lib/engagement";
 import { ensureContentColumns } from "../_lib/content";
+import { createAdminNotifications } from "../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -151,6 +152,13 @@ export async function POST(request) {
       // avoid failing the submission if Telegram is unreachable
     }
   }
+
+  await createAdminNotifications({
+    title: "New teaser submitted",
+    body: `“${title}” is awaiting approval.`,
+    type: "content_submitted",
+    metadata: { content_id: insertRes.rows[0]?.id, model_id: userId },
+  });
 
   return NextResponse.json({ ok: true, id: insertRes.rows[0]?.id });
 }

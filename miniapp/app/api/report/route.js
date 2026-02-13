@@ -5,6 +5,7 @@ import { logUserAction } from "../_lib/user_actions";
 import { ensureContentReportsTable } from "../_lib/moderation";
 import { createRequestContext, withRequestId } from "../_lib/observability";
 import { checkRateLimit } from "../_lib/rate_limit";
+import { createAdminNotifications } from "../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -134,6 +135,16 @@ export async function POST(request) {
       // ignore notify failures
     }
   }
+
+  await createAdminNotifications({
+    title: targetType === "content" ? "Content report" : "Profile report",
+    body:
+      targetType === "content"
+        ? `Content ${contentId} was reported. ${reason ? `Reason: ${reason}` : ""}`
+        : `User ${targetId} was reported. ${reason ? `Reason: ${reason}` : ""}`,
+    type: "report",
+    metadata: { target_type: targetType, target_id: targetType === "content" ? contentId : targetId },
+  });
 
   return NextResponse.json(withRequestId({ ok: true }, ctx.requestId));
 }

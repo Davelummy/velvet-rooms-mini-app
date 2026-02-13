@@ -8,6 +8,7 @@ import { ensureBlockTable } from "../../../_lib/blocks";
 import { ensureIdempotencyTable, readIdempotencyRecord, writeIdempotencyRecord } from "../../../_lib/idempotency";
 import { createRequestContext, logError, withRequestId } from "../../../_lib/observability";
 import { checkRateLimit } from "../../../_lib/rate_limit";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -51,6 +52,14 @@ async function notifyModelBooking({
   } catch {
     // ignore notification failures
   }
+  await createNotification({
+    recipientId: modelId,
+    recipientRole: "model",
+    title: "New booking request",
+    body: `Booking from ${clientLabel} · ${sessionType} · ${durationMinutes} min · ${when}.`,
+    type: "booking_request",
+    metadata: { client_id: clientId, session_type: sessionType },
+  });
 }
 
 function generateTransactionRef() {

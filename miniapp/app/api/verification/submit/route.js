@@ -5,6 +5,7 @@ import { ensureUser } from "../../_lib/users";
 import { ensureSessionColumns } from "../../_lib/sessions";
 import { ensureModelProfileColumns } from "../../_lib/models";
 import { logConsent } from "../../_lib/consent";
+import { createAdminNotifications } from "../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -150,6 +151,12 @@ export async function POST(request) {
     `New model verification submitted: ${displayName} (ID ${publicId}). Review in admin console.`,
     null
   );
+  await createAdminNotifications({
+    title: "New model verification",
+    body: `${displayName} submitted verification (ID ${publicId}).`,
+    type: "verification_submitted",
+    metadata: { user_id: userId },
+  });
   await query(
     "UPDATE users SET disclaimer_accepted_at = NOW(), disclaimer_version = $2 WHERE id = $1",
     [userId, disclaimerVersion]

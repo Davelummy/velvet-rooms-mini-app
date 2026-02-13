@@ -3,6 +3,7 @@ import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
 import { getOrCreateInviteLink } from "../../../_lib/telegram_invites";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -162,6 +163,14 @@ export async function POST(request) {
         `Access granted ✅ Your gallery is unlocked.${link}`
       );
     }
+    await createNotification({
+      recipientId: transaction.user_id,
+      recipientRole: "client",
+      title: "Gallery unlocked",
+      body: "Your access fee was approved. You can now view the gallery.",
+      type: "access_fee_approved",
+      metadata: { transaction_ref: transactionRef },
+    });
     return NextResponse.json({ ok: true, access_granted: true });
   }
 
@@ -280,6 +289,14 @@ export async function POST(request) {
         [relatedId, transaction.user_id, transaction.id, amount, escrowId]
       );
     }
+    await createNotification({
+      recipientId: transaction.user_id,
+      recipientRole: "client",
+      title: "Content unlocked",
+      body: "Your content purchase was approved. You can view it now.",
+      type: "content_unlocked",
+      metadata: { content_id: relatedId, transaction_ref: transactionRef },
+    });
   }
 
   await query(
@@ -306,6 +323,14 @@ export async function POST(request) {
         `New booking approved. Please review and accept the session.${link}`
       );
     }
+    await createNotification({
+      recipientId: receiverId,
+      recipientRole: "model",
+      title: "New booking approved",
+      body: "A new booking was approved. Open the mini app to accept the session.",
+      type: "session_approved",
+      metadata: { session_id: relatedId, transaction_ref: transactionRef },
+    });
   }
 
   if (escrowType === "extension" && receiverId) {
@@ -324,6 +349,14 @@ export async function POST(request) {
           "Extension approved ✅ Your session has been extended by 5 minutes."
         );
       }
+      await createNotification({
+        recipientId: clientId,
+        recipientRole: "client",
+        title: "Session extended",
+        body: "Your session extension was approved.",
+        type: "session_extension",
+        metadata: { session_id: relatedId },
+      });
     }
     const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
       receiverId,
@@ -334,6 +367,14 @@ export async function POST(request) {
         "Extension approved ✅ Your session has been extended by 5 minutes."
       );
     }
+    await createNotification({
+      recipientId: receiverId,
+      recipientRole: "model",
+      title: "Session extended",
+      body: "The session extension was approved.",
+      type: "session_extension",
+      metadata: { session_id: relatedId },
+    });
   }
 
   return NextResponse.json({ ok: true, escrow_ref: escrowRef });

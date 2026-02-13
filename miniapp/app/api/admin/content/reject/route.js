@@ -3,6 +3,7 @@ import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
 import { getSupabase } from "../../../_lib/supabase";
+import { createNotification } from "../../../_lib/notifications";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ export async function POST(request) {
   });
 
   const contentRes = await query(
-    "SELECT preview_file_id FROM digital_content WHERE id = $1",
+    "SELECT preview_file_id, model_id, title FROM digital_content WHERE id = $1",
     [contentId]
   );
   await query("UPDATE digital_content SET is_active = FALSE WHERE id = $1", [contentId]);
@@ -47,6 +48,18 @@ export async function POST(request) {
       "teaser content bucket";
     const supabase = getSupabase();
     await supabase.storage.from(bucket).remove([previewPath]);
+  }
+
+  if (contentRes.rowCount) {
+    const content = contentRes.rows[0];
+    await createNotification({
+      recipientId: content.model_id,
+      recipientRole: "model",
+      title: "Teaser rejected",
+      body: `Your teaser "${content.title || "Untitled"}" was rejected.`,
+      type: "content_rejected",
+      metadata: { content_id: contentId },
+    });
   }
 
   return NextResponse.json({ ok: true });
