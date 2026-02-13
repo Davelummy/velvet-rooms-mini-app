@@ -13,6 +13,46 @@ export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
+async function notifyModelBooking({
+  modelId,
+  clientId,
+  sessionType,
+  durationMinutes,
+  scheduledFor,
+}) {
+  const token = BOT_TOKEN;
+  if (!token || !modelId || !clientId) {
+    return;
+  }
+  const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [modelId]);
+  const clientRes = await query(
+    `SELECT u.public_id,
+            COALESCE(cp.display_name, mp.display_name, u.public_id) AS display_name
+     FROM users u
+     LEFT JOIN client_profiles cp ON cp.user_id = u.id
+     LEFT JOIN model_profiles mp ON mp.user_id = u.id
+     WHERE u.id = $1`,
+    [clientId]
+  );
+  const modelTelegramId = modelRes.rows[0]?.telegram_id || null;
+  const clientLabel =
+    clientRes.rows[0]?.display_name || `Client ${clientRes.rows[0]?.public_id || clientId}`;
+  if (!modelTelegramId) {
+    return;
+  }
+  const when = scheduledFor ? new Date(scheduledFor).toLocaleString() : "Soon";
+  const text = `New booking: ${clientLabel} · ${sessionType} · ${durationMinutes} min · ${when}.`;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: modelTelegramId, text }),
+    });
+  } catch {
+    // ignore notification failures
+  }
+}
+
 function generateTransactionRef() {
   const random = crypto.randomBytes(4).toString("hex").toUpperCase();
   return `WAL-${Date.now()}-${random}`;
@@ -299,6 +339,7 @@ export async function POST(request) {
       }
 
       let relatedId = null;
+      let sessionBooking = null;
       if (sessionPayload) {
         const sessionRef = generateTransactionRef().replace("WAL", "SES");
         const sessionRes = await client.query(
@@ -317,6 +358,13 @@ export async function POST(request) {
         );
         relatedId = sessionRes.rows[0]?.id || null;
         metadata = { ...metadata, session_id: relatedId };
+        sessionBooking = {
+          modelId: sessionPayload.modelId,
+          clientId: userId,
+          sessionType: sessionPayload.sessionType,
+          durationMinutes: sessionPayload.durationMinutes,
+          scheduledFor: sessionPayload.scheduledFor,
+        };
       }
 
       if (extensionPayload) {
@@ -394,7 +442,7 @@ export async function POST(request) {
         response,
       });
 
-      return { response };
+      return { response, sessionBooking };
     });
 
     if (result?.cached) {
@@ -407,6 +455,9 @@ export async function POST(request) {
     }
     if (result?.error) {
       return NextResponse.json(withRequestId({ error: result.error }, ctx.requestId), { status: 400 });
+    }
+    if (result?.sessionBooking) {
+      notifyModelBooking(result.sessionBooking).catch(() => null);
     }
     return NextResponse.json(withRequestId(result.response, ctx.requestId));
   } catch (err) {

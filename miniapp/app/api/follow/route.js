@@ -84,20 +84,22 @@ export async function POST(request) {
 
   if (shouldNotify) {
     const userRes = await query(
-      "SELECT telegram_id, username, public_id FROM users WHERE id = $1",
+      `SELECT u.telegram_id, u.public_id,
+              COALESCE(cp.display_name, mp.display_name, u.public_id) AS display_name
+       FROM users u
+       LEFT JOIN client_profiles cp ON cp.user_id = u.id
+       LEFT JOIN model_profiles mp ON mp.user_id = u.id
+       WHERE u.id = $1`,
       [followerId]
     );
-    const targetRes = await query(
-      "SELECT telegram_id FROM users WHERE id = $1",
-      [targetId]
-    );
+    const targetRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+      targetId,
+    ]);
     const follower = userRes.rows[0];
     const target = targetRes.rows[0];
     const token = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
     if (token && target?.telegram_id && follower) {
-      const handle = follower.username
-        ? `@${follower.username}`
-        : `User ${follower.public_id || followerId}`;
+      const handle = follower.display_name || `User ${follower.public_id || followerId}`;
       const webapp = (process.env.WEBAPP_URL || "").replace(/\/$/, "");
       const keyboard =
         webapp

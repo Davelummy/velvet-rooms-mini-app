@@ -15,6 +15,48 @@ const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 const ACCESS_FEE_AMOUNT = 5000;
 const PENDING_WINDOW_HOURS = 2;
 
+async function notifyModelBooking({
+  modelId,
+  clientId,
+  sessionType,
+  durationMinutes,
+  scheduledFor,
+  statusLabel,
+}) {
+  const token = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
+  if (!token || !modelId || !clientId) {
+    return;
+  }
+  const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [modelId]);
+  const clientRes = await query(
+    `SELECT u.public_id,
+            COALESCE(cp.display_name, mp.display_name, u.public_id) AS display_name
+     FROM users u
+     LEFT JOIN client_profiles cp ON cp.user_id = u.id
+     LEFT JOIN model_profiles mp ON mp.user_id = u.id
+     WHERE u.id = $1`,
+    [clientId]
+  );
+  const modelTelegramId = modelRes.rows[0]?.telegram_id || null;
+  const clientLabel =
+    clientRes.rows[0]?.display_name || `Client ${clientRes.rows[0]?.public_id || clientId}`;
+  if (!modelTelegramId) {
+    return;
+  }
+  const when = scheduledFor ? new Date(scheduledFor).toLocaleString() : "Soon";
+  const label = statusLabel ? ` (${statusLabel})` : "";
+  const text = `New booking${label}: ${clientLabel} · ${sessionType} · ${durationMinutes} min · ${when}.`;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: modelTelegramId, text }),
+    });
+  } catch {
+    // ignore notification failures
+  }
+}
+
 function normalizeToken(value) {
   return (value || "").toString().trim().toUpperCase();
 }
@@ -316,6 +358,14 @@ export async function POST(request) {
       [sessionRef, userId, modelId, sessionType, amount, durationMinutes, scheduledFor]
     );
     metadata.session_id = sessionRes.rows[0]?.id;
+    await notifyModelBooking({
+      modelId,
+      clientId: userId,
+      sessionType,
+      durationMinutes,
+      scheduledFor,
+      statusLabel: "pending payment",
+    });
   }
 
   if (escrowType === "extension") {

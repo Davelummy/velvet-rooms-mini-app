@@ -297,6 +297,11 @@ export default function Home() {
   const callFailureLoggedRef = useRef(false);
   const callSuccessLoggedRef = useRef(false);
   const callSessionRef = useRef({ id: null, type: null });
+  const callLocalReadyRef = useRef(false);
+  const callRemoteReadyRef = useRef(false);
+  const callRemoteRoleRef = useRef("");
+  const callRoleRef = useRef("");
+  const pendingOfferRef = useRef(null);
   const walletIdempotencyRef = useRef({});
   const callWarningRef = useRef({ twoMin: false, thirtySec: false, ended: false });
   const clientDraftTimerRef = useRef(null);
@@ -1088,6 +1093,7 @@ export default function Home() {
         },
       }));
       await refreshBookings();
+      await refreshProfile();
     } catch {
       setBookingActionStatus((prev) => ({
         ...prev,
@@ -1105,6 +1111,46 @@ export default function Home() {
       const next = [...prev, message];
       return next.length > 100 ? next.slice(next.length - 100) : next;
     });
+  };
+
+  const isCallOfferer = () => {
+    const localRole = callRoleRef.current;
+    const remoteRole = callRemoteRoleRef.current;
+    if (localRole && remoteRole) {
+      if (localRole === "client" && remoteRole === "model") {
+        return true;
+      }
+      if (localRole === "model" && remoteRole === "client") {
+        return false;
+      }
+    }
+    const localUserId = callUserIdRef.current;
+    const remoteUserId = callRemoteIdRef.current;
+    if (!localUserId || !remoteUserId) {
+      return false;
+    }
+    return Number(localUserId) < Number(remoteUserId);
+  };
+
+  const maybeStartOffer = async () => {
+    if (!callLocalReadyRef.current || !callRemoteReadyRef.current) {
+      return;
+    }
+    if (offerSentRef.current) {
+      return;
+    }
+    if (!isCallOfferer()) {
+      return;
+    }
+    const pc = callPcRef.current;
+    if (!pc) {
+      return;
+    }
+    offerSentRef.current = true;
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await sendCallSignal({ type: "offer", sdp: pc.localDescription, role: callRoleRef.current });
+    scheduleTurnFallback("initial-offer");
   };
 
   const updateCallMessageStatus = (id, status) => {
@@ -1178,6 +1224,11 @@ export default function Home() {
     callRemoteIdRef.current = null;
     callUserIdRef.current = null;
     callSessionRef.current = { id: null, type: null };
+    callLocalReadyRef.current = false;
+    callRemoteReadyRef.current = false;
+    callRemoteRoleRef.current = "";
+    callRoleRef.current = "";
+    pendingOfferRef.current = null;
     if (callReadyTimerRef.current) {
       clearInterval(callReadyTimerRef.current);
       callReadyTimerRef.current = null;
@@ -1253,6 +1304,8 @@ export default function Home() {
     }
     if (payload.type === "ready") {
       callRemoteIdRef.current = payload.userId || null;
+      callRemoteRoleRef.current = payload.role || "";
+      callRemoteReadyRef.current = true;
       if (callReadyTimerRef.current) {
         clearInterval(callReadyTimerRef.current);
         callReadyTimerRef.current = null;
@@ -1262,16 +1315,7 @@ export default function Home() {
         peerReady: true,
         status: prev.status || "Partner connected.",
       }));
-      const pc = callPcRef.current;
-      if (pc && localUserId && payload.userId && localUserId < payload.userId) {
-        if (!offerSentRef.current) {
-          offerSentRef.current = true;
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          await sendCallSignal({ type: "offer", sdp: pc.localDescription });
-          scheduleTurnFallback("initial-offer");
-        }
-      }
+      await maybeStartOffer();
       return;
     }
     if (payload.type === "hangup") {
@@ -1287,10 +1331,15 @@ export default function Home() {
       if (payload.userId) {
         callRemoteIdRef.current = payload.userId;
       }
+      callRemoteRoleRef.current = payload.role || callRemoteRoleRef.current;
+      if (!callLocalReadyRef.current) {
+        pendingOfferRef.current = payload;
+        return;
+      }
       await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      await sendCallSignal({ type: "answer", sdp: pc.localDescription });
+      await sendCallSignal({ type: "answer", sdp: pc.localDescription, role: callRoleRef.current });
       scheduleTurnFallback("answer-sent");
       return;
     }
@@ -1525,6 +1574,11 @@ export default function Home() {
     }
     callUserIdRef.current = userId;
     callSessionRef.current = { id: sessionId, type: sessionType };
+    callLocalReadyRef.current = false;
+    callRemoteReadyRef.current = false;
+    callRemoteRoleRef.current = "";
+    callRoleRef.current = role || "";
+    pendingOfferRef.current = null;
     setCallState((prev) => ({
       ...prev,
       connecting: true,
@@ -1590,12 +1644,12 @@ export default function Home() {
 
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
-        sendCallSignal({ type: "ready" }).catch(() => null);
+        sendCallSignal({ type: "ready", role: callRoleRef.current }).catch(() => null);
         if (callReadyTimerRef.current) {
           clearInterval(callReadyTimerRef.current);
         }
         callReadyTimerRef.current = setInterval(() => {
-          sendCallSignal({ type: "ready" }).catch(() => null);
+          sendCallSignal({ type: "ready", role: callRoleRef.current }).catch(() => null);
         }, 3000);
         if (sessionType === "chat") {
           setCallState((prev) => ({
@@ -1635,6 +1689,9 @@ export default function Home() {
       if (event.candidate) {
         sendCallSignal({ type: "ice", candidate: event.candidate }).catch(() => null);
       }
+    };
+    pc.onnegotiationneeded = () => {
+      maybeStartOffer().catch(() => null);
     };
     pc.oniceconnectionstatechange = () => {
       const state = pc.iceConnectionState;
@@ -1699,6 +1756,26 @@ export default function Home() {
       applySenderBitrateCaps(pc);
       if (sessionType === "video" && localVideoRef.current) {
         localVideoRef.current.srcObject = localStream;
+      }
+      callLocalReadyRef.current = true;
+      if (pendingOfferRef.current?.sdp) {
+        const pending = pendingOfferRef.current;
+        pendingOfferRef.current = null;
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(pending.sdp));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await sendCallSignal({
+            type: "answer",
+            sdp: pc.localDescription,
+            role: callRoleRef.current,
+          });
+          scheduleTurnFallback("answer-sent");
+        } catch {
+          // ignore pending offer errors
+        }
+      } else {
+        await maybeStartOffer();
       }
       setCallState((prev) => ({
         ...prev,
@@ -1987,6 +2064,8 @@ export default function Home() {
         setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false });
       }
       showCallToast("Session ended.", "neutral");
+      await refreshBookings();
+      await refreshProfile();
       cleanupCall(true);
     } catch {
       if (!auto) {
@@ -2053,6 +2132,7 @@ export default function Home() {
         },
       }));
       await refreshBookings();
+      await refreshProfile();
     } catch {
       setSessionActionStatus((prev) => ({
         ...prev,
@@ -3395,6 +3475,9 @@ export default function Home() {
         [modelId]: { loading: false, error: "" },
       }));
       await refreshProfile();
+      if (role === "client") {
+        await refreshBookings();
+      }
     } catch {
       setFollowState((prev) => ({
         ...prev,
@@ -3449,6 +3532,7 @@ export default function Home() {
             }
           : prev
       );
+      await refreshProfile();
     } catch {
       // ignore
     }
@@ -4315,6 +4399,8 @@ export default function Home() {
       });
       if (ok) {
         setExtensionSheet((prev) => ({ ...prev, open: false, loading: false }));
+        await refreshBookings();
+        await refreshProfile();
       }
       return;
     }
@@ -4326,6 +4412,8 @@ export default function Home() {
       });
       if (ok) {
         setExtensionSheet((prev) => ({ ...prev, open: false, loading: false }));
+        await refreshBookings();
+        await refreshProfile();
       }
       return;
     }
@@ -4336,6 +4424,8 @@ export default function Home() {
     });
     if (ok) {
       setExtensionSheet((prev) => ({ ...prev, open: false, loading: false }));
+      await refreshBookings();
+      await refreshProfile();
     } else {
       setExtensionSheet((prev) => ({ ...prev, loading: false }));
     }
@@ -4380,6 +4470,8 @@ export default function Home() {
       });
       if (ok) {
         setBookingSheet((prev) => ({ ...prev, open: false, loading: false }));
+        await refreshBookings();
+        await refreshProfile();
       }
       return;
     }
@@ -4391,6 +4483,8 @@ export default function Home() {
       });
       if (ok) {
         setBookingSheet((prev) => ({ ...prev, open: false, loading: false }));
+        await refreshBookings();
+        await refreshProfile();
       }
       return;
     }
@@ -4401,6 +4495,8 @@ export default function Home() {
     });
     if (ok) {
       setBookingSheet((prev) => ({ ...prev, open: false, loading: false }));
+      await refreshBookings();
+      await refreshProfile();
     } else {
       setBookingSheet((prev) => ({ ...prev, loading: false }));
     }
@@ -4441,6 +4537,12 @@ export default function Home() {
         submitting: false,
         status: "Payment submitted ✅ Await admin approval.",
       }));
+      if (paymentState.mode === "access") {
+        await refreshClientAccess(true);
+      } else if (paymentState.mode === "session" || paymentState.mode === "extension") {
+        await refreshBookings();
+      }
+      await refreshProfile();
     } catch {
       setPaymentState((prev) => ({
         ...prev,

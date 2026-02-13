@@ -8,11 +8,11 @@ export const runtime = "nodejs";
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 const ADMIN_BOT_TOKEN = process.env.ADMIN_BOT_TOKEN || "";
 
-async function notifyModelLike({ modelTelegramId, teaserTitle, likerUsername }) {
+async function notifyModelLike({ modelTelegramId, teaserTitle, likerName }) {
   if (!BOT_TOKEN || !modelTelegramId) {
     return;
   }
-  const actorLabel = likerUsername ? `@${likerUsername}` : "Someone";
+  const actorLabel = likerName || "Someone";
   const title = teaserTitle ? `“${teaserTitle}”` : "your teaser";
   const text = `${actorLabel} liked ${title}.`;
   try {
@@ -84,15 +84,25 @@ export async function POST(request) {
     liked = true;
 
     // Notify model (only on like, not on unlike).
-    const modelTelegramRes = await query(
-      "SELECT telegram_id FROM users WHERE id = $1",
-      [modelId]
-    );
+    const modelTelegramRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
+      modelId,
+    ]);
     const modelTelegramId = modelTelegramRes.rows[0]?.telegram_id || null;
+    const likerRes = await query(
+      `SELECT u.public_id,
+              COALESCE(cp.display_name, mp.display_name, u.public_id) AS display_name
+       FROM users u
+       LEFT JOIN client_profiles cp ON cp.user_id = u.id
+       LEFT JOIN model_profiles mp ON mp.user_id = u.id
+       WHERE u.id = $1`,
+      [userId]
+    );
+    const likerName =
+      likerRes.rows[0]?.display_name || `User ${likerRes.rows[0]?.public_id || userId}`;
     await notifyModelLike({
       modelTelegramId,
       teaserTitle,
-      likerUsername: tgUser.username || "",
+      likerName,
     });
   }
 
@@ -110,4 +120,3 @@ export async function POST(request) {
     views_count: counts.rows[0]?.views ?? 0,
   });
 }
-

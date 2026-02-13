@@ -2223,6 +2223,7 @@ h1 {
   padding: 10px 12px;
   align-self: flex-start;
   max-width: 90%;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
 .chat-bubble.self {
@@ -2301,10 +2302,15 @@ h1 {
   gap: 10px;
   padding: 12px;
   border-top: 1px solid var(--line);
+  background: rgba(8, 4, 6, 0.55);
 }
 
 .chat-input input {
   flex: 1;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .call-controls {
@@ -2312,8 +2318,13 @@ h1 {
   gap: clamp(10px, 3vw, 18px);
   flex-wrap: wrap;
   justify-content: center;
-  padding-top: 4px;
+  padding: 10px 14px;
   margin-top: auto;
+  align-self: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(10, 4, 7, 0.7);
+  backdrop-filter: blur(6px);
 }
 
 .call-controls.chat-controls {
