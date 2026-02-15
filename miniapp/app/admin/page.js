@@ -15,8 +15,9 @@ export default function Admin() {
   const [paymentView, setPaymentView] = useState("pending");
   const [paymentProvider, setPaymentProvider] = useState("all");
   const [paymentRange, setPaymentRange] = useState("all");
-  const [escrowView, setEscrowView] = useState("pending");
+  const [escrowView, setEscrowView] = useState("held");
   const [escrowRange, setEscrowRange] = useState("all");
+  const [disputeView, setDisputeView] = useState("open");
   const [clientView, setClientView] = useState("pending");
   const [userQuery, setUserQuery] = useState("");
   const [userRole, setUserRole] = useState("all");
@@ -35,6 +36,15 @@ export default function Admin() {
   const [savedFilters, setSavedFilters] = useState([]);
   const [syncTicker, setSyncTicker] = useState(0);
   const [pendingHighlight, setPendingHighlight] = useState(null);
+  const [resolveModal, setResolveModal] = useState({
+    open: false,
+    item: null,
+    resolution: "release",
+    template: "",
+    details: "",
+    busy: false,
+    error: "",
+  });
   const [metrics, setMetrics] = useState({
     pending_models: 0,
     approved_models: 0,
@@ -262,6 +272,10 @@ export default function Admin() {
       { label: "Type", value: selectedItem.escrow_type || "-" },
       { label: "Amount", value: selectedItem.amount ? `₦${selectedItem.amount}` : "-" },
       { label: "Status", value: selectedItem.status || "-" },
+      { label: "Dispute reason", value: selectedItem.dispute_reason || "-" },
+      { label: "Opened", value: selectedItem.dispute_opened_at || "-" },
+      { label: "Resolved", value: selectedItem.dispute_resolved_at || "-" },
+      { label: "Resolution", value: selectedItem.dispute_resolution || "-" },
       {
         label: "Payer",
         value: selectedItem.payer_display_name || selectedItem.payer_public_id || "-",
@@ -342,6 +356,56 @@ export default function Admin() {
     return items;
   }, [items, queueTriage, section]);
 
+  const disputeResolutionTemplates = useMemo(
+    () => ({
+      release: [
+        {
+          value: "service_completed",
+          label: "Session was completed with sufficient evidence",
+        },
+        {
+          value: "client_breach",
+          label: "Client breached session terms / policy",
+        },
+        {
+          value: "client_no_show",
+          label: "Client no-show confirmed by logs",
+        },
+        {
+          value: "delivered_content",
+          label: "Content/service delivered as agreed",
+        },
+        {
+          value: "other_release",
+          label: "Other (release in creator favor)",
+        },
+      ],
+      refund: [
+        {
+          value: "model_no_show",
+          label: "Model no-show confirmed by logs",
+        },
+        {
+          value: "failed_connection_start",
+          label: "Session could not start due to technical failure",
+        },
+        {
+          value: "safety_concern_upheld",
+          label: "Safety concern upheld after investigation",
+        },
+        {
+          value: "misrepresentation",
+          label: "Service/content misrepresentation confirmed",
+        },
+        {
+          value: "other_refund",
+          label: "Other (refund in client favor)",
+        },
+      ],
+    }),
+    []
+  );
+
   const saveCurrentFilter = () => {
     if (typeof window === "undefined") {
       return;
@@ -358,6 +422,7 @@ export default function Admin() {
         paymentRange,
         escrowView,
         escrowRange,
+        disputeView,
         clientView,
         userRole,
         userStatus,
@@ -381,8 +446,9 @@ export default function Admin() {
     setPaymentView(value.paymentView || "pending");
     setPaymentProvider(value.paymentProvider || "all");
     setPaymentRange(value.paymentRange || "all");
-    setEscrowView(value.escrowView || "pending");
+    setEscrowView(value.escrowView || "held");
     setEscrowRange(value.escrowRange || "all");
+    setDisputeView(value.disputeView || "open");
     setClientView(value.clientView || "pending");
     setUserRole(value.userRole || "all");
     setUserStatus(value.userStatus || "all");
@@ -508,16 +574,17 @@ export default function Admin() {
     }
     if (section === "escrows") {
       const params = new URLSearchParams();
-      if (escrowView === "released") {
-        params.set("status", "released");
-      }
+      params.set("status", escrowView || "held");
       if (escrowRange !== "all") {
         params.set("range", escrowRange);
       }
       endpoint = `/api/admin/escrows?${params.toString()}`;
     }
     if (section === "disputes") {
-      endpoint = "/api/admin/escrows?status=disputed";
+      endpoint =
+        disputeView === "resolved"
+          ? "/api/admin/escrows?status=resolved"
+          : "/api/admin/escrows?status=disputed";
     }
     if (section === "clients" && clientView === "approved") {
       endpoint = "/api/admin/clients?status=approved";
@@ -546,6 +613,7 @@ export default function Admin() {
     paymentRange,
     escrowView,
     escrowRange,
+    disputeView,
     clientView,
     userQuery,
     userRole,
@@ -641,6 +709,15 @@ export default function Admin() {
     setSelectedItem(null);
     setPreview({ open: false, url: "", type: "video" });
     setSelectedKeys([]);
+    setResolveModal({
+      open: false,
+      item: null,
+      resolution: "release",
+      template: "",
+      details: "",
+      busy: false,
+      error: "",
+    });
   }, [
     section,
     modelView,
@@ -650,6 +727,7 @@ export default function Admin() {
     paymentRange,
     escrowView,
     escrowRange,
+    disputeView,
     clientView,
     userQuery,
     userRole,
@@ -701,6 +779,100 @@ export default function Admin() {
     setSelectedItem(null);
     await loadQueue();
     await loadMetrics();
+  };
+
+  const resolveEscrowAction = async (action, item, resolutionNote = "") => {
+    if (!item?.escrow_ref) {
+      return false;
+    }
+    const needsResolutionNote = item.status === "disputed";
+    const note = (resolutionNote || "").trim();
+    if (needsResolutionNote && !note) {
+      setError("Add a resolution note before settling a disputed escrow.");
+      setSelectedItem(item);
+      return false;
+    }
+    const ok = await performAction(action, {
+      escrow_ref: item.escrow_ref,
+      ...(needsResolutionNote ? { resolution_note: note } : {}),
+    });
+    if (!ok) {
+      return false;
+    }
+    setSelectedItem(null);
+    await loadQueue();
+    await loadMetrics();
+    return true;
+  };
+
+  const openResolveModal = (item, resolution) => {
+    if (!item?.escrow_ref) {
+      return;
+    }
+    setResolveModal({
+      open: true,
+      item,
+      resolution: resolution === "refund" ? "refund" : "release",
+      template: "",
+      details: "",
+      busy: false,
+      error: "",
+    });
+  };
+
+  const closeResolveModal = () => {
+    setResolveModal({
+      open: false,
+      item: null,
+      resolution: "release",
+      template: "",
+      details: "",
+      busy: false,
+      error: "",
+    });
+  };
+
+  const submitResolveModal = async () => {
+    if (!resolveModal.item?.escrow_ref) {
+      closeResolveModal();
+      return;
+    }
+    if (!resolveModal.template) {
+      setResolveModal((prev) => ({ ...prev, error: "Select a resolution template." }));
+      return;
+    }
+    const templates = disputeResolutionTemplates[resolveModal.resolution] || [];
+    const selectedTemplate = templates.find((item) => item.value === resolveModal.template);
+    if (!selectedTemplate) {
+      setResolveModal((prev) => ({ ...prev, error: "Select a valid resolution template." }));
+      return;
+    }
+    const details = (resolveModal.details || "").trim();
+    if (resolveModal.template.startsWith("other_") && details.length < 10) {
+      setResolveModal((prev) => ({
+        ...prev,
+        error: "Add at least 10 characters of details for an 'Other' resolution.",
+      }));
+      return;
+    }
+    const note = `[${selectedTemplate.value}] ${selectedTemplate.label}${
+      details ? ` — ${details}` : ""
+    }`;
+    setResolveModal((prev) => ({ ...prev, busy: true, error: "" }));
+    const action =
+      resolveModal.resolution === "refund"
+        ? "/api/admin/escrows/refund"
+        : "/api/admin/escrows/release";
+    const ok = await resolveEscrowAction(action, resolveModal.item, note);
+    if (ok) {
+      closeResolveModal();
+      return;
+    }
+    setResolveModal((prev) => ({
+      ...prev,
+      busy: false,
+      error: prev.error || "Resolution failed. Please retry.",
+    }));
   };
 
   const runBulkAction = async (action, payloadBuilder) => {
@@ -772,17 +944,34 @@ export default function Admin() {
             transaction_ref: selectedItem.transaction_ref,
           });
         }
-      } else if (section === "escrows" && escrowView === "pending") {
+      } else if (section === "escrows" && ["held", "disputed"].includes(escrowView)) {
         if (key === "a") {
-          handleAction("/api/admin/escrows/release", { escrow_ref: selectedItem.escrow_ref });
+          if (selectedItem.status === "disputed") {
+            openResolveModal(selectedItem, "release");
+          } else {
+            resolveEscrowAction("/api/admin/escrows/release", selectedItem);
+          }
         } else {
-          handleAction("/api/admin/escrows/refund", { escrow_ref: selectedItem.escrow_ref });
+          if (selectedItem.status === "disputed") {
+            openResolveModal(selectedItem, "refund");
+          } else {
+            resolveEscrowAction("/api/admin/escrows/refund", selectedItem);
+          }
         }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selectedItem, section, modelView, contentView, paymentView, escrowView, handleAction]);
+  }, [
+    selectedItem,
+    section,
+    modelView,
+    contentView,
+    paymentView,
+    escrowView,
+    resolveEscrowAction,
+    openResolveModal,
+  ]);
 
   const exportAuditLog = () => {
     const payload = {
@@ -798,6 +987,42 @@ export default function Admin() {
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `velvet-rooms-${section}-audit.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportResolvedDisputes = () => {
+    const rows = (filteredItems || []).map((item) => ({
+      escrow_ref: item.escrow_ref,
+      status: item.status,
+      amount: item.amount,
+      escrow_type: item.escrow_type,
+      payer: item.payer_display_name || item.payer_public_id || null,
+      receiver: item.receiver_display_name || item.receiver_public_id || null,
+      dispute_reason: item.dispute_reason || item.opened_reason || null,
+      dispute_opened_at: item.dispute_opened_at || item.dispute_entry_opened_at || null,
+      dispute_resolved_at: item.dispute_resolved_at || item.dispute_entry_resolved_at || null,
+      dispute_resolution: item.dispute_resolution || null,
+      dispute_winner: item.dispute_winner || null,
+      dispute_resolved_by: item.dispute_resolved_by || null,
+      resolved_note: item.resolved_note || null,
+    }));
+    const payload = {
+      generated_at: new Date().toISOString(),
+      total: rows.length,
+      items: rows,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `velvet-rooms-disputes-resolved-${new Date()
+      .toISOString()
+      .slice(0, 10)}.json`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
@@ -1409,14 +1634,14 @@ export default function Admin() {
                 className={`cta ${clientView === "pending" ? "primary" : "ghost"}`}
                 onClick={() => setClientView("pending")}
               >
-                Pending access
+                Pending clients
               </button>
               <button
                 type="button"
                 className={`cta ${clientView === "approved" ? "primary" : "ghost"}`}
                 onClick={() => setClientView("approved")}
               >
-                Unlocked clients
+                Approved clients
               </button>
             </div>
           )}
@@ -1424,10 +1649,10 @@ export default function Admin() {
             <div className="panel-actions">
               <button
                 type="button"
-                className={`cta ${escrowView === "pending" ? "primary" : "ghost"}`}
-                onClick={() => setEscrowView("pending")}
+                className={`cta ${escrowView === "held" ? "primary" : "ghost"}`}
+                onClick={() => setEscrowView("held")}
               >
-                Pending escrows
+                Held escrows
               </button>
               <button
                 type="button"
@@ -1435,6 +1660,13 @@ export default function Admin() {
                 onClick={() => setEscrowView("released")}
               >
                 Released escrows
+              </button>
+              <button
+                type="button"
+                className={`cta ${escrowView === "refunded" ? "primary" : "ghost"}`}
+                onClick={() => setEscrowView("refunded")}
+              >
+                Refunded escrows
               </button>
               <div className="filter-row">
                 <button
@@ -1459,6 +1691,24 @@ export default function Admin() {
                   Last 7 days
                 </button>
               </div>
+            </div>
+          )}
+          {section === "disputes" && (
+            <div className="panel-actions">
+              <button
+                type="button"
+                className={`cta ${disputeView === "open" ? "primary" : "ghost"}`}
+                onClick={() => setDisputeView("open")}
+              >
+                Open disputes
+              </button>
+              <button
+                type="button"
+                className={`cta ${disputeView === "resolved" ? "primary" : "ghost"}`}
+                onClick={() => setDisputeView("resolved")}
+              >
+                Resolved disputes
+              </button>
             </div>
           )}
           {section === "users" && (
@@ -1516,6 +1766,11 @@ export default function Admin() {
               <button type="button" className="cta ghost" onClick={saveCurrentFilter}>
                 Save filter
               </button>
+              {section === "disputes" && disputeView === "resolved" && (
+                <button type="button" className="cta ghost" onClick={exportResolvedDisputes}>
+                  Export resolved
+                </button>
+              )}
               {savedFilters.length > 0 && (
                 <label className="field">
                   Saved filter
@@ -1722,7 +1977,7 @@ export default function Admin() {
                       key={itemKey}
                       className={`queue-card ${selectedKey === itemKey ? "selected" : ""}`}
                     >
-                      <label className="pill">
+                      <label className="pill queue-select">
                         <input
                           type="checkbox"
                           checked={selectedKeys.includes(String(itemKey))}
@@ -1773,7 +2028,7 @@ export default function Admin() {
                               "ref pending"
                             }`}
                           {section === "escrows" &&
-                            `${escrowView === "released" ? "Released" : "Held"} escrow · ${
+                            `${(item.status || escrowView || "held").toUpperCase()} escrow · ${
                               item.amount
                             }`}
                           {section === "clients" &&
@@ -1899,15 +2154,15 @@ export default function Admin() {
                         )}
                         {section === "escrows" && (
                           <>
-                            {escrowView === "pending" && (
+                            {["held", "disputed"].includes(escrowView) && (
                               <>
                                 <button
                                   type="button"
                                   className="cta primary"
                                   onClick={() =>
-                                    handleAction("/api/admin/escrows/release", {
-                                      escrow_ref: item.escrow_ref,
-                                    })
+                                    item.status === "disputed"
+                                      ? openResolveModal(item, "release")
+                                      : resolveEscrowAction("/api/admin/escrows/release", item)
                                   }
                                 >
                                   Release
@@ -1916,9 +2171,9 @@ export default function Admin() {
                                   type="button"
                                   className="cta primary alt"
                                   onClick={() =>
-                                    handleAction("/api/admin/escrows/refund", {
-                                      escrow_ref: item.escrow_ref,
-                                    })
+                                    item.status === "disputed"
+                                      ? openResolveModal(item, "refund")
+                                      : resolveEscrowAction("/api/admin/escrows/refund", item)
                                   }
                                 >
                                   Refund
@@ -1927,29 +2182,21 @@ export default function Admin() {
                             )}
                           </>
                         )}
-                        {section === "disputes" && (
+                        {section === "disputes" && disputeView === "open" && (
                           <>
                             <button
                               type="button"
                               className="cta primary"
-                              onClick={() =>
-                                handleAction("/api/admin/escrows/release", {
-                                  escrow_ref: item.escrow_ref,
-                                })
-                              }
+                              onClick={() => openResolveModal(item, "release")}
                             >
-                              Release
+                              Resolve: Release
                             </button>
                             <button
                               type="button"
                               className="cta primary alt"
-                              onClick={() =>
-                                handleAction("/api/admin/escrows/refund", {
-                                  escrow_ref: item.escrow_ref,
-                                })
-                              }
+                              onClick={() => openResolveModal(item, "refund")}
                             >
-                              Refund
+                              Resolve: Refund
                             </button>
                           </>
                         )}
@@ -2048,7 +2295,7 @@ export default function Admin() {
                           "ref pending"
                         }`}
                       {(section === "escrows" || section === "disputes") &&
-                        `${selectedItem.status === "held" ? "Held" : "Released"} escrow · ${selectedItem.amount}`}
+                        `${(selectedItem.status || "held").toUpperCase()} escrow · ${selectedItem.amount}`}
                       {section === "users" &&
                         `${selectedItem.role || "user"} · ${selectedItem.status || "status"}`}
                       {section === "activity" && `${selectedItem.action_type || "activity"} logged`}
@@ -2149,15 +2396,17 @@ export default function Admin() {
                     )}
                     {(section === "escrows" || section === "disputes") && (
                       <>
-                        {(section === "disputes" || escrowView === "pending") && (
+                        {(section === "disputes"
+                          ? disputeView === "open"
+                          : ["held", "disputed"].includes(escrowView)) && (
                           <>
                             <button
                               type="button"
                               className="cta primary"
                               onClick={() =>
-                                handleAction("/api/admin/escrows/release", {
-                                  escrow_ref: selectedItem.escrow_ref,
-                                })
+                                selectedItem.status === "disputed"
+                                  ? openResolveModal(selectedItem, "release")
+                                  : resolveEscrowAction("/api/admin/escrows/release", selectedItem)
                               }
                             >
                               Release
@@ -2166,9 +2415,9 @@ export default function Admin() {
                               type="button"
                               className="cta primary alt"
                               onClick={() =>
-                                handleAction("/api/admin/escrows/refund", {
-                                  escrow_ref: selectedItem.escrow_ref,
-                                })
+                                selectedItem.status === "disputed"
+                                  ? openResolveModal(selectedItem, "refund")
+                                  : resolveEscrowAction("/api/admin/escrows/refund", selectedItem)
                               }
                             >
                               Refund
@@ -2212,6 +2461,44 @@ export default function Admin() {
                     )}
                   </div>
                 </div>
+                {(section === "escrows" || section === "disputes") &&
+                  (selectedItem.dispute_opened_at ||
+                    selectedItem.opened_reason ||
+                    selectedItem.dispute_resolution) && (
+                    <div className="admin-dispute-timeline">
+                      <h4>Dispute timeline</h4>
+                      <ol>
+                        <li>
+                          Opened:{" "}
+                          {selectedItem.dispute_opened_at ||
+                            selectedItem.dispute_entry_opened_at ||
+                            "-"}
+                        </li>
+                        <li>
+                          Reason:{" "}
+                          {selectedItem.dispute_reason || selectedItem.opened_reason || "-"}
+                        </li>
+                        <li>
+                          Opened by: {selectedItem.dispute_opened_by || "-"}
+                        </li>
+                        <li>
+                          Resolution: {selectedItem.dispute_resolution || "Pending"}
+                        </li>
+                        <li>
+                          Winner: {selectedItem.dispute_winner || "-"}
+                        </li>
+                        <li>
+                          Resolved by: {selectedItem.dispute_resolved_by || "-"}
+                        </li>
+                        <li>
+                          Resolved at:{" "}
+                          {selectedItem.dispute_resolved_at ||
+                            selectedItem.dispute_entry_resolved_at ||
+                            "-"}
+                        </li>
+                      </ol>
+                    </div>
+                  )}
                 <div className="admin-detail-grid">
                   {detailFields.map((field) => (
                     <div key={field.label} className="admin-detail-card">
@@ -2226,6 +2513,86 @@ export default function Admin() {
         </div>
         )}
       </section>
+
+      {resolveModal.open && (
+        <section className="admin-resolve-overlay" onClick={closeResolveModal}>
+          <div className="admin-resolve-modal" onClick={(event) => event.stopPropagation()}>
+            <header className="admin-resolve-header">
+              <div>
+                <p className="eyebrow">Resolve dispute</p>
+                <h3>
+                  {resolveModal.resolution === "refund"
+                    ? "Refund to client"
+                    : "Release to creator"}
+                </h3>
+              </div>
+              <button type="button" className="cta ghost" onClick={closeResolveModal}>
+                Close
+              </button>
+            </header>
+            <p className="helper">
+              Escrow: {resolveModal.item?.escrow_ref || "-"} · Status:{" "}
+              {(resolveModal.item?.status || "disputed").toUpperCase()}
+            </p>
+            <label className="field">
+              Resolution template
+              <select
+                value={resolveModal.template}
+                onChange={(event) =>
+                  setResolveModal((prev) => ({
+                    ...prev,
+                    template: event.target.value,
+                    error: "",
+                  }))
+                }
+                disabled={resolveModal.busy}
+              >
+                <option value="">Select template</option>
+                {(disputeResolutionTemplates[resolveModal.resolution] || []).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Investigation details (optional)
+              <textarea
+                rows={4}
+                value={resolveModal.details}
+                onChange={(event) =>
+                  setResolveModal((prev) => ({
+                    ...prev,
+                    details: event.target.value,
+                    error: "",
+                  }))
+                }
+                placeholder="Add concise evidence summary (logs, timestamps, observed behavior)."
+                disabled={resolveModal.busy}
+              />
+            </label>
+            {resolveModal.error && <p className="helper error">{resolveModal.error}</p>}
+            <div className="admin-resolve-actions">
+              <button
+                type="button"
+                className="cta ghost"
+                onClick={closeResolveModal}
+                disabled={resolveModal.busy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`cta primary ${resolveModal.busy ? "loading" : ""}`}
+                onClick={submitResolveModal}
+                disabled={resolveModal.busy}
+              >
+                Confirm resolution
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {notifications.open && (
         <section className="notification-overlay" onClick={closeNotifications}>

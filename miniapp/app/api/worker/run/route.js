@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
+import { ensureRateLimitTable } from "../../_lib/rate_limit";
+import { ensureIdempotencyTable } from "../../_lib/idempotency";
 
 export const runtime = "nodejs";
 
@@ -27,6 +29,20 @@ async function recordHeartbeat() {
   );
 }
 
+async function cleanupOperationalTables() {
+  // Keep operational tables bounded to avoid unbounded growth under high traffic.
+  await ensureRateLimitTable();
+  await ensureIdempotencyTable();
+  await query(
+    `DELETE FROM api_rate_limits
+     WHERE window_start < NOW() - INTERVAL '2 days'`
+  );
+  await query(
+    `DELETE FROM idempotency_keys
+     WHERE created_at < NOW() - INTERVAL '30 days'`
+  );
+}
+
 async function sendMessage(chatId, text) {
   if (!BOT_TOKEN || !chatId) {
     return;
@@ -47,6 +63,7 @@ export async function POST(request) {
 
   await ensureHeartbeatTable();
   await recordHeartbeat();
+  await cleanupOperationalTables();
 
   const stats = { sessionsMarked: 0, escrowsReleased: 0 };
 

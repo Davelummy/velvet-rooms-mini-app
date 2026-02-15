@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
+import { openEscrowDispute } from "../../_lib/disputes";
 
 export const runtime = "nodejs";
 
@@ -65,12 +66,23 @@ export async function POST(request) {
      WHERE id = $1`,
     [sessionId]
   );
-  await query(
-    `UPDATE escrow_accounts
-     SET status = 'disputed', dispute_reason = $2
-     WHERE escrow_type IN ('session','extension') AND related_id = $1`,
-    [sessionId, reason]
+  const escrowRes = await query(
+    `SELECT id
+     FROM escrow_accounts
+     WHERE escrow_type IN ('session','extension')
+       AND related_id = $1
+       AND status IN ('held', 'disputed')`,
+    [sessionId]
   );
+  for (const row of escrowRes.rows || []) {
+    await openEscrowDispute({
+      escrowId: row.id,
+      sessionId,
+      openedByUserId: userId,
+      reason,
+      note: "client_reported_dispute",
+    });
+  }
 
   const modelRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
     session.model_id,

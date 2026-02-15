@@ -75,6 +75,16 @@ export default function Home() {
     return sessionActionIdempotencyRef.current[key];
   };
 
+  const getPaymentInitIdempotencyKey = ({ mode, contentId, session }) => {
+    const key = `${mode || "payment"}:${contentId || "none"}:${
+      session?.sessionId || session?.modelId || "none"
+    }:${session?.duration || session?.extensionMinutes || "na"}`;
+    if (!paymentInitIdempotencyRef.current[key]) {
+      paymentInitIdempotencyRef.current[key] = generateIdempotencyKey();
+    }
+    return paymentInitIdempotencyRef.current[key];
+  };
+
   const [geoLib, setGeoLib] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -270,6 +280,7 @@ export default function Home() {
     open: false,
     sessionId: null,
     sessionType: "",
+    channelName: "",
     status: "",
     connecting: false,
     micMuted: false,
@@ -360,7 +371,7 @@ export default function Home() {
   const callReactionTimersRef = useRef([]);
   const callPrivacyGuardTimerRef = useRef(null);
   const callPrivacyEndingRef = useRef(false);
-  const callSessionRef = useRef({ id: null, type: null });
+  const callSessionRef = useRef({ id: null, type: null, channel: null });
   const callChatOpenRef = useRef(false);
   const callLocalReadyRef = useRef(false);
   const callRemoteReadyRef = useRef(false);
@@ -370,6 +381,7 @@ export default function Home() {
   const callTimingSyncRef = useRef(false);
   const walletIdempotencyRef = useRef({});
   const sessionActionIdempotencyRef = useRef({});
+  const paymentInitIdempotencyRef = useRef({});
   const callWarningRef = useRef({ twoMin: false, thirtySec: false, ended: false });
   const clientDraftTimerRef = useRef(null);
   const modelDraftTimerRef = useRef(null);
@@ -702,6 +714,13 @@ export default function Home() {
       if (data?.session) {
         setCallTiming(resolveCallTiming(data.session));
       }
+      if (data?.call_channel) {
+        setCallState((prev) =>
+          prev.sessionId === callState.sessionId
+            ? { ...prev, channelName: data.call_channel }
+            : prev
+        );
+      }
     } catch {
       // ignore sync errors
     }
@@ -740,8 +759,7 @@ export default function Home() {
           "Adult-only access with creator verification, discreet profiles, and protected data practices.",
         cta: "Continue",
         visual: "trust",
-        image:
-          "https://images.pexels.com/photos/29771553/pexels-photo-29771553.jpeg?cs=srgb&dl=pexels-pedrofurtadoo-29771553.jpg&fm=jpg",
+        image: "/onboarding/trust.png",
         points: [
           "18+ only, consent-first",
           "Privacy-led profiles",
@@ -755,8 +773,7 @@ export default function Home() {
           "One-time access fee. Admin approval unlocks the gallery.",
         cta: "Get Started",
         visual: "access",
-        image:
-          "https://images.pexels.com/photos/5645105/pexels-photo-5645105.jpeg?cs=srgb&dl=pexels-cottonbro-5645105.jpg&fm=jpg",
+        image: "/onboarding/access.png",
         points: [
           "Admin approval required",
           "Instant access after approval",
@@ -2101,7 +2118,7 @@ export default function Home() {
     callChannelSubscribedRef.current = false;
     callRemoteIdRef.current = null;
     callUserIdRef.current = null;
-    callSessionRef.current = { id: null, type: null };
+    callSessionRef.current = { id: null, type: null, channel: null };
     callLocalReadyRef.current = false;
     callRemoteReadyRef.current = false;
     callRemoteRoleRef.current = "";
@@ -2161,6 +2178,7 @@ export default function Home() {
         open: false,
         sessionId: null,
         sessionType: "",
+        channelName: "",
         status: "",
         connecting: false,
         micMuted: false,
@@ -2496,6 +2514,8 @@ export default function Home() {
 
   const startCall = async (sessionId, sessionType, options = {}) => {
     const audioOnly = Boolean(options.audioOnly);
+    const channelName =
+      options.channelName || callState.channelName || `vr-call-${sessionId}`;
     if (!supabaseClient) {
       setCallState((prev) => ({
         ...prev,
@@ -2522,7 +2542,7 @@ export default function Home() {
       return;
     }
     callUserIdRef.current = userId;
-    callSessionRef.current = { id: sessionId, type: sessionType };
+    callSessionRef.current = { id: sessionId, type: sessionType, channel: channelName };
     callLocalReadyRef.current = false;
     callRemoteReadyRef.current = false;
     callRemoteRoleRef.current = "";
@@ -2538,7 +2558,7 @@ export default function Home() {
     }));
     setCallConnectionStatus("connecting");
 
-    const channel = supabaseClient.channel(`vr-call-${sessionId}`, {
+    const channel = supabaseClient.channel(channelName, {
       config: { broadcast: { self: false } },
     });
     callChannelRef.current = channel;
@@ -2816,6 +2836,7 @@ export default function Home() {
     callSuccessLoggedRef.current = false;
     const resolvedType = sessionType || "video";
     const peerLabel = options.label || "";
+    const channelName = options.channelName || `vr-call-${sessionId}`;
     if (options.session) {
       setCallTiming(resolveCallTiming(options.session));
     }
@@ -2823,6 +2844,7 @@ export default function Home() {
       open: true,
       sessionId,
       sessionType: resolvedType,
+      channelName,
       status: "",
       connecting: resolvedType === "chat",
       micMuted: false,
@@ -2839,7 +2861,7 @@ export default function Home() {
     setCallInput("");
     setCallChatOpen(resolvedType === "chat");
     if (resolvedType === "chat") {
-      await startCall(sessionId, resolvedType);
+      await startCall(sessionId, resolvedType, { channelName });
       return;
     }
     setCallPreflight({
@@ -2860,6 +2882,7 @@ export default function Home() {
     setCallState((prev) => ({ ...prev, connecting: true, status: "Connecting…" }));
     await startCall(callState.sessionId, callState.sessionType, {
       audioOnly: callPreflight.audioOnly,
+      channelName: callState.channelName,
     });
   };
 
@@ -2870,6 +2893,7 @@ export default function Home() {
       open: true,
       sessionId: null,
       sessionType: resolvedType,
+      channelName: "",
       status: "",
       connecting: false,
       micMuted: false,
@@ -3088,6 +3112,7 @@ export default function Home() {
           setCallTimeOffset(serverMs - Date.now());
         }
       }
+      const callChannel = (data?.call_channel || "").toString().trim();
       const fallbackSession = {
         duration_minutes: typeof session === "object" ? session?.duration_minutes : null,
       };
@@ -3105,6 +3130,7 @@ export default function Home() {
       await startSessionCall(sessionId, sessionType, {
         session: { ...fallbackSession, ...data?.session },
         label: peerLabel,
+        channelName: callChannel || `vr-call-${sessionId}`,
       });
     } catch {
       setSessionActionStatus((prev) => ({
@@ -4176,6 +4202,11 @@ export default function Home() {
     }
     const loadProfile = async () => {
       try {
+        await fetch("/api/me/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData }),
+        }).catch(() => null);
         const res = await fetch("/api/me", {
           headers: { "x-telegram-init": initData },
         });
@@ -4411,6 +4442,11 @@ export default function Home() {
       return;
     }
     try {
+      await fetch("/api/me/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      }).catch(() => null);
       const res = await fetch("/api/me", {
         headers: { "x-telegram-init": initData },
       });
@@ -4439,6 +4475,11 @@ export default function Home() {
       return;
     }
     try {
+      await fetch("/api/me/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ initData }),
+      }).catch(() => null);
       const res = await fetch("/api/me", {
         headers: { "x-telegram-init": initData },
       });
@@ -5475,12 +5516,14 @@ export default function Home() {
       }
       return false;
     }
+    const idempotencyKey = getPaymentInitIdempotencyKey({ mode, contentId, session });
     try {
       const res = await fetch("/api/payments/flutterwave/initiate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
           initData,
+          idempotency_key: idempotencyKey,
           escrow_type: mode === "access" ? "access_fee" : mode,
           content_id: contentId,
           model_id: session?.modelId,
@@ -5493,9 +5536,12 @@ export default function Home() {
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        const message = data?.error
-          ? `Flutterwave init failed: ${data.error}`
-          : `Flutterwave init failed (HTTP ${res.status}).`;
+        const message =
+          data?.error === "idempotency_in_progress"
+            ? "Payment request is still processing. Please wait a moment."
+            : data?.error
+            ? `Flutterwave init failed: ${data.error}`
+            : `Flutterwave init failed (HTTP ${res.status}).`;
         if (onError) {
           onError(message);
         } else {
@@ -5581,17 +5627,22 @@ export default function Home() {
       payload.session_type = session.sessionType;
       payload.extension_minutes = session.extensionMinutes;
     }
+    const idempotencyKey = getPaymentInitIdempotencyKey({ mode, contentId, session });
+    payload.idempotency_key = idempotencyKey;
     try {
       const res = await fetch("/api/payments/crypto/initiate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        const message = data?.error
-          ? `Payment init failed: ${data.error}`
-          : `Payment init failed (HTTP ${res.status}).`;
+        const message =
+          data?.error === "idempotency_in_progress"
+            ? "Payment request is still processing. Please wait a moment."
+            : data?.error
+            ? `Payment init failed: ${data.error}`
+            : `Payment init failed (HTTP ${res.status}).`;
         if (onError) {
           onError(message);
           return false;
@@ -6818,16 +6869,6 @@ export default function Home() {
                   </button>
                   <button
                     type="button"
-                    className={`cta ${clientTab === "sessions" && sessionListMode === "chat" ? "primary" : "ghost"}`}
-                    onClick={() => {
-                      setClientTab("sessions");
-                      setSessionListMode("chat");
-                    }}
-                  >
-                    Messages
-                  </button>
-                  <button
-                    type="button"
                     className={`cta ${clientTab === "profile" ? "primary" : "ghost"}`}
                     onClick={() => setClientTab("profile")}
                   >
@@ -7520,7 +7561,7 @@ export default function Home() {
                         className={`pill ${sessionListMode === "chat" ? "active" : ""}`}
                         onClick={() => setSessionListMode("chat")}
                       >
-                        Messages
+                        Chat sessions
                       </button>
                     </div>
                     {clientSessionsStatus && (
@@ -9333,18 +9374,6 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="dash-actions">
-                  <label className="field tab-select">
-                    Section
-                    <select value={modelTab} onChange={(event) => setModelTab(event.target.value)}>
-                      <option value="content">Home</option>
-                      <option value="sessions">Sessions</option>
-                      <option value="profile">Profile</option>
-                      <option value="earnings">Wallet</option>
-                      <option value="followers">Followers</option>
-                    </select>
-                  </label>
-                </div>
                 <div className="dash-actions tabs primary-nav">
                   <button
                     type="button"
@@ -9362,16 +9391,6 @@ export default function Home() {
                     }}
                   >
                     Sessions
-                  </button>
-                  <button
-                    type="button"
-                    className={`cta ${modelTab === "sessions" && sessionListMode === "chat" ? "primary" : "ghost"}`}
-                    onClick={() => {
-                      setModelTab("sessions");
-                      setSessionListMode("chat");
-                    }}
-                  >
-                    Messages
                   </button>
                   <button
                     type="button"
@@ -9917,7 +9936,7 @@ export default function Home() {
                         className={`pill ${sessionListMode === "chat" ? "active" : ""}`}
                         onClick={() => setSessionListMode("chat")}
                       >
-                        Messages
+                        Chat sessions
                       </button>
                     </div>
                     {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}

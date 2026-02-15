@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query, withTransaction } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { createNotification, createAdminNotifications } from "../../_lib/notifications";
+import { openEscrowDispute } from "../../_lib/disputes";
 import {
   ensureIdempotencyTable,
   readIdempotencyRecord,
@@ -108,13 +109,13 @@ export async function POST(request) {
   );
   if (escrowRes.rowCount) {
     const escrow = escrowRes.rows[0];
-    await query(
-      `UPDATE escrow_accounts
-       SET status = 'disputed',
-           dispute_reason = 'client_cancelled'
-       WHERE id = $1`,
-      [escrow.id]
-    );
+    await openEscrowDispute({
+      escrowId: escrow.id,
+      sessionId,
+      openedByUserId: userId,
+      reason: "client_cancelled",
+      note: "client_cancel_confirmed",
+    });
   }
 
   const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [

@@ -11,6 +11,7 @@ import {
   readIdempotencyRecord,
   writeIdempotencyRecord,
 } from "../../_lib/idempotency";
+import { openEscrowDispute } from "../../_lib/disputes";
 
 export const runtime = "nodejs";
 
@@ -137,15 +138,23 @@ export async function POST(request) {
 
   try {
     if (shouldDispute) {
-      await query(
-        `UPDATE escrow_accounts
-         SET status = 'disputed',
-             dispute_reason = $2
+      const escrowRes = await query(
+        `SELECT id
+         FROM escrow_accounts
          WHERE escrow_type IN ('session','extension')
            AND related_id = $1
-           AND status = 'held'`,
-        [sessionId, reason]
+           AND status IN ('held', 'disputed')`,
+        [sessionId]
       );
+      for (const escrow of escrowRes.rows || []) {
+        await openEscrowDispute({
+          escrowId: escrow.id,
+          sessionId,
+          openedByUserId: userId,
+          reason,
+          note: note || "session_ended_early",
+        });
+      }
     } else if (outcome === "refund") {
       await query(
         `UPDATE escrow_accounts

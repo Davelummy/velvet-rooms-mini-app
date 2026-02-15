@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { query } from "../../../_lib/db";
+import { query, withTransaction } from "../../../_lib/db";
 import { extractUser, verifyInitData } from "../../../_lib/telegram";
 import { ensureUser } from "../../../_lib/users";
 import { getCryptoCurrencies, getCryptoNetworks, getCryptoWallets } from "../../../_lib/crypto";
@@ -9,6 +9,12 @@ import { ensureBlockTable } from "../../../_lib/blocks";
 import { createRequestContext, withRequestId } from "../../../_lib/observability";
 import { checkRateLimit } from "../../../_lib/rate_limit";
 import { createNotification } from "../../../_lib/notifications";
+import {
+  clearIdempotencyKey,
+  ensureIdempotencyTable,
+  finalizeIdempotencyKey,
+  reserveIdempotencyKey,
+} from "../../../_lib/idempotency";
 
 export const runtime = "nodejs";
 
@@ -167,6 +173,61 @@ export async function POST(request) {
   let amount = ACCESS_FEE_AMOUNT;
   const metadata = { escrow_type: escrowType };
   let existingTx = null;
+  const idempotencyKey = (
+    request.headers.get("idempotency-key") ||
+    body?.idempotency_key ||
+    ""
+  )
+    .toString()
+    .trim();
+  let idempotencyReserved = false;
+
+  const maybeReserveIdempotency = async () => {
+    if (!idempotencyKey || idempotencyReserved) {
+      return null;
+    }
+    await ensureIdempotencyTable();
+    const reservation = await withTransaction((client) =>
+      reserveIdempotencyKey(client, {
+        key: idempotencyKey,
+        userId,
+        scope: "crypto_payment_initiate",
+      })
+    );
+    if (reservation.cached) {
+      return NextResponse.json(withRequestId({ ...reservation.cached, cached: true }, ctx.requestId));
+    }
+    if (reservation.pending) {
+      return NextResponse.json(
+        withRequestId({ error: "idempotency_in_progress" }, ctx.requestId),
+        { status: 409 }
+      );
+    }
+    idempotencyReserved = reservation.reserved;
+    return null;
+  };
+
+  const finalizeIdempotency = async (response) => {
+    if (!idempotencyKey || !idempotencyReserved) {
+      return;
+    }
+    await withTransaction((client) =>
+      finalizeIdempotencyKey(client, {
+        key: idempotencyKey,
+        userId,
+        scope: "crypto_payment_initiate",
+        response,
+      })
+    );
+  };
+
+  const clearIdempotency = async () => {
+    if (!idempotencyKey || !idempotencyReserved) {
+      return;
+    }
+    await withTransaction((client) => clearIdempotencyKey(client, idempotencyKey));
+    idempotencyReserved = false;
+  };
 
   if (escrowType === "access_fee") {
     const profileRes = await query(
@@ -344,21 +405,32 @@ export async function POST(request) {
       existingTx = existingRes.rows[0];
     }
     if (existingTx) {
+      const reservationResponse = await maybeReserveIdempotency();
+      if (reservationResponse) {
+        return reservationResponse;
+      }
       const wallets = getCryptoWallets();
       if (!Object.keys(wallets).length) {
+        await clearIdempotency();
         return NextResponse.json(
           withRequestId({ error: "wallets_not_configured" }, ctx.requestId),
           { status: 500 }
         );
       }
-      return NextResponse.json({
+      const response = {
         ok: true,
         transaction_ref: existingTx.transaction_ref,
         amount: existingTx.amount,
         wallets,
         networks: getCryptoNetworks(),
         currencies: getCryptoCurrencies(),
-      });
+      };
+      await finalizeIdempotency(response);
+      return NextResponse.json(withRequestId(response, ctx.requestId));
+    }
+    const reservationResponse = await maybeReserveIdempotency();
+    if (reservationResponse) {
+      return reservationResponse;
     }
     const sessionRef = generateTransactionRef().replace("CRYPTO", "SES");
     const sessionRes = await query(
@@ -454,28 +526,34 @@ export async function POST(request) {
   }
 
   if (existingTx) {
+    const reservationResponse = await maybeReserveIdempotency();
+    if (reservationResponse) {
+      return reservationResponse;
+    }
     const wallets = getCryptoWallets();
     if (!Object.keys(wallets).length) {
+      await clearIdempotency();
       return NextResponse.json(
         withRequestId({ error: "wallets_not_configured" }, ctx.requestId),
         { status: 500 }
       );
     }
-    return NextResponse.json(
-      withRequestId(
-        {
-          ok: true,
-          transaction_ref: existingTx.transaction_ref,
-          amount: existingTx.amount,
-          wallets,
-          networks: getCryptoNetworks(),
-          currencies: getCryptoCurrencies(),
-        },
-        ctx.requestId
-      )
-    );
+    const response = {
+      ok: true,
+      transaction_ref: existingTx.transaction_ref,
+      amount: existingTx.amount,
+      wallets,
+      networks: getCryptoNetworks(),
+      currencies: getCryptoCurrencies(),
+    };
+    await finalizeIdempotency(response);
+    return NextResponse.json(withRequestId(response, ctx.requestId));
   }
 
+  const reservationResponse = await maybeReserveIdempotency();
+  if (reservationResponse) {
+    return reservationResponse;
+  }
   const transactionRef = generateTransactionRef();
   await query(
     `INSERT INTO transactions (transaction_ref, user_id, transaction_type, amount, payment_provider, status, metadata_json, created_at)
@@ -501,23 +579,21 @@ export async function POST(request) {
 
   const wallets = getCryptoWallets();
   if (!Object.keys(wallets).length) {
+    await clearIdempotency();
     return NextResponse.json(
       withRequestId({ error: "wallets_not_configured" }, ctx.requestId),
       { status: 500 }
     );
   }
 
-  return NextResponse.json(
-    withRequestId(
-      {
-        ok: true,
-        transaction_ref: transactionRef,
-        amount,
-        wallets,
-        networks: getCryptoNetworks(),
-        currencies: getCryptoCurrencies(),
-      },
-      ctx.requestId
-    )
-  );
+  const response = {
+    ok: true,
+    transaction_ref: transactionRef,
+    amount,
+    wallets,
+    networks: getCryptoNetworks(),
+    currencies: getCryptoCurrencies(),
+  };
+  await finalizeIdempotency(response);
+  return NextResponse.json(withRequestId(response, ctx.requestId));
 }

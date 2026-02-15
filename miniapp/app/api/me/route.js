@@ -92,49 +92,19 @@ export async function GET(request) {
   const shouldGrantAccess = accessTxCompleted || accessEscrowReleased;
 
   if (!client && (accessTx || accessEscrow)) {
-    if (shouldGrantAccess) {
-      await query(
-        `INSERT INTO client_profiles (user_id, access_fee_paid, access_granted_at, access_fee_escrow_id)
-         VALUES ($1, TRUE, NOW(), $2)`,
-        [user.id, accessEscrow?.id || null]
-      );
-      client = {
-        access_fee_paid: true,
-        access_granted_at: new Date().toISOString(),
-        access_fee_escrow_id: accessEscrow?.id || null,
-        display_name: null,
-        location: null,
-        birth_month: null,
-        birth_year: null,
-      };
-    } else {
-      await query(
-        `INSERT INTO client_profiles (user_id, access_fee_paid, access_fee_escrow_id)
-         VALUES ($1, FALSE, $2)`,
-        [user.id, accessEscrow?.id || null]
-      );
-      client = {
-        access_fee_paid: false,
-        access_granted_at: null,
-        access_fee_escrow_id: accessEscrow?.id || null,
-        display_name: null,
-        location: null,
-        birth_month: null,
-        birth_year: null,
-      };
-    }
+    client = {
+      access_fee_paid: shouldGrantAccess,
+      access_granted_at: shouldGrantAccess ? new Date().toISOString() : null,
+      access_fee_escrow_id: accessEscrow?.id || null,
+      display_name: null,
+      location: null,
+      birth_month: null,
+      birth_year: null,
+    };
   }
 
   if (client && !client.access_fee_paid && shouldGrantAccess) {
     const escrowId = accessEscrowReleased ? accessEscrow.id : null;
-    await query(
-      `UPDATE client_profiles
-       SET access_fee_paid = TRUE,
-           access_granted_at = COALESCE(access_granted_at, NOW()),
-           access_fee_escrow_id = COALESCE(access_fee_escrow_id, $1)
-       WHERE user_id = $2`,
-      [escrowId, user.id]
-    );
     client = {
       ...client,
       access_fee_paid: true,
@@ -169,26 +139,18 @@ export async function GET(request) {
       avatarUrl = null;
     }
   }
-  if (model?.verification_status === "approved" && user.role !== "model") {
-    await query("UPDATE users SET role = 'model', status = 'active' WHERE id = $1", [
-      user.id,
-    ]);
-    user.role = "model";
-    user.status = "active";
-  } else if (!model && user.role === "model") {
-    await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [
-      user.id,
-    ]);
-    user.role = "client";
-    user.status = "active";
+  let effectiveRole = user.role;
+  let effectiveStatus = user.status;
+  if (model?.verification_status === "approved") {
+    effectiveRole = "model";
+    effectiveStatus = "active";
+  } else if (!model && effectiveRole === "model") {
+    effectiveRole = "client";
+    effectiveStatus = "active";
   }
-
-  if (client && user.role !== "model" && user.role !== "admin" && user.role !== "client") {
-    await query("UPDATE users SET role = 'client', status = 'active' WHERE id = $1", [
-      user.id,
-    ]);
-    user.role = "client";
-    user.status = "active";
+  if (client && !["model", "admin", "client"].includes(effectiveRole || "")) {
+    effectiveRole = "client";
+    effectiveStatus = "active";
   }
 
   const clientProfile = client
@@ -199,10 +161,6 @@ export async function GET(request) {
     : null;
 
   if (clientProfile && !clientProfile.display_name && user.username) {
-    await query(
-      "UPDATE client_profiles SET display_name = $1 WHERE user_id = $2",
-      [user.username, user.id]
-    );
     clientProfile.display_name = user.username;
   }
 
@@ -224,8 +182,8 @@ export async function GET(request) {
       following_count: followingCount,
       privacy_hide_email: Boolean(user.privacy_hide_email),
       privacy_hide_location: Boolean(user.privacy_hide_location),
-      role: user.role,
-      status: user.status,
+      role: effectiveRole,
+      status: effectiveStatus,
     },
     model,
     client: clientProfile,

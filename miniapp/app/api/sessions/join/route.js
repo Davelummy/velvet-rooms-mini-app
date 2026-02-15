@@ -4,6 +4,7 @@ import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureSessionColumns } from "../../_lib/sessions";
 import { createRequestContext, withRequestId } from "../../_lib/observability";
 import { checkRateLimit } from "../../_lib/rate_limit";
+import { getCallChannelName } from "../../_lib/call_channel";
 
 export const runtime = "nodejs";
 
@@ -113,15 +114,19 @@ export async function POST(request) {
   }
 
   const stateRes = await query(
-    `SELECT status, duration_minutes, actual_start, scheduled_end
+    `SELECT status, duration_minutes, actual_start, scheduled_end, session_ref
      FROM sessions WHERE id = $1`,
     [sessionId]
   );
   const sessionState = stateRes.rows[0] || null;
+  const callChannel = getCallChannelName({
+    sessionId,
+    sessionRef: sessionState?.session_ref || session.session_ref,
+  });
 
   return NextResponse.json(
     withRequestId(
-      { ok: true, session: sessionState, server_time: Date.now() },
+      { ok: true, session: sessionState, server_time: Date.now(), call_channel: callChannel },
       ctx.requestId
     )
   );
