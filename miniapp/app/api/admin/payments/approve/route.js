@@ -190,12 +190,17 @@ export async function POST(request) {
     if (!relatedId || !receiverId) {
       return NextResponse.json({ error: "session_metadata_missing" }, { status: 400 });
     }
-    await query(
+    const sessionUpdate = await query(
       `UPDATE sessions
        SET status = 'pending', package_price = $1, duration_minutes = $2
-       WHERE id = $3`,
+       WHERE id = $3
+         AND status IN ('pending_payment', 'pending')
+       RETURNING id`,
       [transaction.amount, metadata.duration_minutes || null, relatedId]
     );
+    if (!sessionUpdate.rowCount) {
+      return NextResponse.json({ error: "session_not_bookable" }, { status: 409 });
+    }
   }
 
   if (escrowType === "extension") {

@@ -84,11 +84,15 @@ export async function POST(request) {
   if (session.client_id !== userId) {
     return NextResponse.json({ error: "client_only" }, { status: 403 });
   }
-  if (!["pending_payment", "pending", "accepted", "active", "awaiting_confirmation"].includes(session.status)) {
+  const preAcceptance = ["pending_payment", "pending"].includes(session.status);
+  const postAcceptance = ["accepted", "active", "awaiting_confirmation"].includes(
+    session.status
+  );
+  if (!preAcceptance && !postAcceptance) {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
-  const nextStatus = "disputed";
+  const nextStatus = preAcceptance ? "cancelled_by_client" : "disputed";
   await query(
     `UPDATE sessions
      SET status = $2,
@@ -96,26 +100,47 @@ export async function POST(request) {
          ended_at = NOW(),
          end_reason = 'client_cancelled',
          end_actor = 'client',
-         end_outcome = 'dispute'
+         end_outcome = $3
      WHERE id = $1`,
-    [sessionId, nextStatus]
+    [sessionId, nextStatus, preAcceptance ? "cancelled" : "dispute"]
   );
 
   const escrowRes = await query(
-    `SELECT id
+    `SELECT id, amount, payer_id
      FROM escrow_accounts
      WHERE escrow_type IN ('session','extension') AND related_id = $1 AND status = 'held'`,
     [sessionId]
   );
-  if (escrowRes.rowCount) {
-    const escrow = escrowRes.rows[0];
-    await openEscrowDispute({
-      escrowId: escrow.id,
-      sessionId,
-      openedByUserId: userId,
-      reason: "client_cancelled",
-      note: "client_cancel_confirmed",
-    });
+  if (escrowRes.rowCount && preAcceptance) {
+    for (const escrow of escrowRes.rows) {
+      await query(
+        `UPDATE escrow_accounts
+         SET status = 'refunded',
+             released_at = NOW(),
+             release_condition_met = TRUE,
+             dispute_reason = 'client_cancelled_before_acceptance'
+         WHERE id = $1`,
+        [escrow.id]
+      );
+      if (escrow.payer_id && escrow.amount) {
+        await query(
+          `UPDATE users
+           SET wallet_balance = COALESCE(wallet_balance, 0) + $1
+           WHERE id = $2`,
+          [escrow.amount, escrow.payer_id]
+        );
+      }
+    }
+  } else if (escrowRes.rowCount) {
+    for (const escrow of escrowRes.rows) {
+      await openEscrowDispute({
+        escrowId: escrow.id,
+        sessionId,
+        openedByUserId: userId,
+        reason: "client_cancelled",
+        note: "client_cancel_confirmed",
+      });
+    }
   }
 
   const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
@@ -127,13 +152,17 @@ export async function POST(request) {
   if (clientRes.rowCount) {
     await sendMessage(
       clientRes.rows[0].telegram_id,
-      "Session cancelled. Payment is under dispute review."
+      preAcceptance
+        ? "Session cancelled before acceptance. Any held funds were refunded to your wallet."
+        : "Session cancelled. Payment is under dispute review."
     );
   }
   if (modelRes.rowCount) {
     await sendMessage(
       modelRes.rows[0].telegram_id,
-      "Client cancelled the session. Payment is under dispute review."
+      preAcceptance
+        ? "Client cancelled the booking before acceptance."
+        : "Client cancelled the session. Payment is under dispute review."
     );
   }
   const clientLabelRes = await query(
@@ -148,15 +177,19 @@ export async function POST(request) {
     recipientId: session.model_id,
     recipientRole: null,
     title: "Session cancelled",
-    body: `${clientLabel} cancelled a session. Marked disputed.`,
+    body: preAcceptance
+      ? `${clientLabel} cancelled the booking before acceptance.`
+      : `${clientLabel} cancelled a session. Marked disputed.`,
     type: "session_cancelled",
     metadata: { session_id: sessionId },
   });
   await createAdminNotifications({
-    title: "Session dispute",
-    body: `Client cancelled session ${sessionId}. Marked disputed.`,
-    type: "session_dispute",
-    metadata: { session_id: sessionId },
+    title: preAcceptance ? "Session cancelled" : "Session dispute",
+    body: preAcceptance
+      ? `Client cancelled session ${sessionId} before model acceptance.`
+      : `Client cancelled session ${sessionId}. Marked disputed.`,
+    type: preAcceptance ? "session_cancelled" : "session_dispute",
+    metadata: { session_id: sessionId, outcome: nextStatus },
   });
 
   const response = { ok: true, status: nextStatus };

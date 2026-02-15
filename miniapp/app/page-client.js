@@ -383,6 +383,7 @@ export default function Home() {
   const sessionActionIdempotencyRef = useRef({});
   const paymentInitIdempotencyRef = useRef({});
   const callWarningRef = useRef({ twoMin: false, thirtySec: false, ended: false });
+  const overlaySwipeRef = useRef({ active: false, startX: 0, startY: 0 });
   const clientDraftTimerRef = useRef(null);
   const modelDraftTimerRef = useRef(null);
   const [clientDeleteStatus, setClientDeleteStatus] = useState("");
@@ -577,6 +578,39 @@ export default function Home() {
       return "Server error. Try again shortly or contact support if it continues.";
     }
     return fallback;
+  };
+
+  const handleOverlayTouchStart = (event) => {
+    if (event.target !== event.currentTarget) {
+      overlaySwipeRef.current = { active: false, startX: 0, startY: 0 };
+      return;
+    }
+    const touch = event.touches?.[0];
+    if (!touch) {
+      return;
+    }
+    overlaySwipeRef.current = {
+      active: true,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+  };
+
+  const handleOverlayTouchEnd = (event, onClose) => {
+    const swipe = overlaySwipeRef.current;
+    overlaySwipeRef.current = { active: false, startX: 0, startY: 0 };
+    if (!swipe.active || typeof onClose !== "function") {
+      return;
+    }
+    const touch = event.changedTouches?.[0];
+    if (!touch) {
+      return;
+    }
+    const deltaY = touch.clientY - swipe.startY;
+    const deltaX = Math.abs(touch.clientX - swipe.startX);
+    if (deltaY > 90 && deltaY > deltaX * 1.2) {
+      onClose();
+    }
   };
 
   const toggleCallChat = () => {
@@ -3336,7 +3370,10 @@ export default function Home() {
         [sessionId]: {
           loading: false,
           error: "",
-          info: "Session cancelled. Moved to dispute review.",
+          info:
+            nextStatus === "disputed"
+              ? "Session cancelled. Moved to dispute review."
+              : "Session cancelled before acceptance.",
         },
       }));
       setClientSessions((prev) =>
@@ -3356,11 +3393,13 @@ export default function Home() {
     }
   };
 
-  const requestSessionCancel = (sessionId) => {
+  const requestSessionCancel = (sessionId, sessionStatus = "") => {
+    const preAcceptance = ["pending_payment", "pending"].includes(sessionStatus);
     openConfirmDialog({
       title: "Cancel this session?",
-      message:
-        "This action is final. The session will be moved straight to dispute and cannot be rejoined.",
+      message: preAcceptance
+        ? "This action is final. The booking will be cancelled before acceptance and cannot be rejoined."
+        : "This action is final. The session will be moved straight to dispute and cannot be rejoined.",
       confirmText: "Yes, cancel",
       danger: true,
       action: { type: "session_cancel", sessionId },
@@ -7648,7 +7687,7 @@ export default function Home() {
                               className={`cta danger ${
                                 sessionActionStatus[item.id]?.loading ? "loading" : ""
                               }`}
-                              onClick={() => requestSessionCancel(item.id)}
+                              onClick={() => requestSessionCancel(item.id, item.status)}
                               disabled={sessionActionStatus[item.id]?.loading}
                             >
                               Cancel
@@ -7781,8 +7820,29 @@ export default function Home() {
       )}
 
       {paymentState.open && (
-        <section className="payment-sheet">
-          <div className="payment-card">
+        <section
+          className="payment-sheet"
+          onClick={() =>
+            setPaymentState((prev) => ({
+              ...prev,
+              open: false,
+              status: "",
+              submitting: false,
+            }))
+          }
+          onTouchStart={handleOverlayTouchStart}
+          onTouchEnd={(event) =>
+            handleOverlayTouchEnd(event, () =>
+              setPaymentState((prev) => ({
+                ...prev,
+                open: false,
+                status: "",
+                submitting: false,
+              }))
+            )
+          }
+        >
+          <div className="payment-card" onClick={(event) => event.stopPropagation()}>
             <header>
               <h3>Crypto payment (BTC / USDT)</h3>
               <button
@@ -7873,8 +7933,31 @@ export default function Home() {
       )}
 
       {disputeState.open && (
-        <section className="payment-sheet">
-          <div className="payment-card">
+        <section
+          className="payment-sheet"
+          onClick={() =>
+            setDisputeState({
+              open: false,
+              sessionId: null,
+              reason: "",
+              status: "",
+              loading: false,
+            })
+          }
+          onTouchStart={handleOverlayTouchStart}
+          onTouchEnd={(event) =>
+            handleOverlayTouchEnd(event, () =>
+              setDisputeState({
+                open: false,
+                sessionId: null,
+                reason: "",
+                status: "",
+                loading: false,
+              })
+            )
+          }
+        >
+          <div className="payment-card" onClick={(event) => event.stopPropagation()}>
             <header>
               <h3>Open a dispute</h3>
               <button
@@ -8568,7 +8651,12 @@ export default function Home() {
       )}
 
       {notifications.open && (
-        <section className="notification-overlay" onClick={closeNotifications}>
+        <section
+          className="notification-overlay"
+          onClick={closeNotifications}
+          onTouchStart={handleOverlayTouchStart}
+          onTouchEnd={(event) => handleOverlayTouchEnd(event, closeNotifications)}
+        >
           <div className="notification-panel" onClick={(event) => event.stopPropagation()}>
             <header>
               <div>
@@ -8623,7 +8711,12 @@ export default function Home() {
       )}
 
       {previewOverlay.open && previewOverlay.item && (
-        <section className="preview-overlay" onClick={closePreview}>
+        <section
+          className="preview-overlay"
+          onClick={closePreview}
+          onTouchStart={handleOverlayTouchStart}
+          onTouchEnd={(event) => handleOverlayTouchEnd(event, closePreview)}
+        >
           <div className="preview-card" onClick={(event) => event.stopPropagation()}>
             <header>
               <div>
@@ -8667,7 +8760,12 @@ export default function Home() {
       )}
 
       {creatorOverlay.open && creatorOverlay.creator && (
-        <section className="preview-overlay" onClick={closeCreator}>
+        <section
+          className="preview-overlay"
+          onClick={closeCreator}
+          onTouchStart={handleOverlayTouchStart}
+          onTouchEnd={(event) => handleOverlayTouchEnd(event, closeCreator)}
+        >
           <div className="preview-card" onClick={(event) => event.stopPropagation()}>
             <header>
               <div className="creator-header">
@@ -9125,8 +9223,17 @@ export default function Home() {
       )}
 
       {bookingSheet.open && (
-        <section className="payment-sheet">
-          <div className="payment-card">
+        <section
+          className="payment-sheet"
+          onClick={() => setBookingSheet((prev) => ({ ...prev, open: false }))}
+          onTouchStart={handleOverlayTouchStart}
+          onTouchEnd={(event) =>
+            handleOverlayTouchEnd(event, () =>
+              setBookingSheet((prev) => ({ ...prev, open: false }))
+            )
+          }
+        >
+          <div className="payment-card" onClick={(event) => event.stopPropagation()}>
             <header>
               <h3>Book a session</h3>
               <button
@@ -9224,8 +9331,17 @@ export default function Home() {
       )}
 
       {extensionSheet.open && (
-        <section className="payment-sheet">
-          <div className="payment-card">
+        <section
+          className="payment-sheet"
+          onClick={() => setExtensionSheet((prev) => ({ ...prev, open: false }))}
+          onTouchStart={handleOverlayTouchStart}
+          onTouchEnd={(event) =>
+            handleOverlayTouchEnd(event, () =>
+              setExtensionSheet((prev) => ({ ...prev, open: false }))
+            )
+          }
+        >
+          <div className="payment-card" onClick={(event) => event.stopPropagation()}>
             <header>
               <h3>Extend session</h3>
               <button
