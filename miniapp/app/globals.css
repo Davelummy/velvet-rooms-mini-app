@@ -10,7 +10,7 @@
   --accent-3: #ffb703;
   --card: #1c0e11;
   --line: #3b1a20;
-  --tap-min: 44px;
+  --tap-min: 40px;
 }
 
 * {
@@ -410,12 +410,12 @@ h1 {
 
 .cta {
   border: none;
-  padding: 12px 22px;
+  padding: 10px 16px;
   min-height: var(--tap-min);
   border-radius: 999px;
   font-family: "Space Grotesk", sans-serif;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(10px);
@@ -1787,6 +1787,66 @@ h1 {
   color: var(--muted);
 }
 
+.admin-dispute-timeline {
+  border: 1px solid rgba(255, 179, 71, 0.35);
+  background: rgba(255, 179, 71, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.admin-dispute-timeline h4 {
+  margin: 0 0 10px;
+}
+
+.admin-dispute-timeline ol {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: #ffddb5;
+}
+
+.admin-resolve-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(8, 4, 6, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.admin-resolve-modal {
+  width: min(620px, 96vw);
+  max-height: 88vh;
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(15, 7, 10, 0.98);
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.48);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.admin-resolve-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-resolve-header h3 {
+  margin: 0;
+}
+
+.admin-resolve-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .admin-preview {
   position: fixed;
   inset: 0;
@@ -1828,6 +1888,18 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 16px;
+}
+
+.queue-select {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 12px;
+}
+
+.queue-select input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
 .queue-card.selected {
@@ -2185,8 +2257,8 @@ h1 {
 }
 
 .icon-btn {
-  width: clamp(42px, 6vw, 56px);
-  height: clamp(42px, 6vw, 56px);
+  width: clamp(40px, 6vw, 50px);
+  height: clamp(40px, 6vw, 50px);
   min-width: var(--tap-min);
   min-height: var(--tap-min);
   border-radius: 50%;

@@ -113,7 +113,15 @@ export async function POST(request) {
             ],
           }
         : undefined;
-    const reporterLabel = tgUser.username ? `@${tgUser.username}` : `User ${actorId}`;
+    const reporterRes = await query(
+      `SELECT COALESCE(cp.display_name, mp.display_name, u.username, u.public_id) AS display_name
+       FROM users u
+       LEFT JOIN client_profiles cp ON cp.user_id = u.id
+       LEFT JOIN model_profiles mp ON mp.user_id = u.id
+       WHERE u.id = $1`,
+      [actorId]
+    );
+    const reporterLabel = reporterRes.rows[0]?.display_name || `User ${actorId}`;
     try {
       for (const adminId of adminIds) {
         await fetch(`https://api.telegram.org/bot${adminToken}/sendMessage`, {

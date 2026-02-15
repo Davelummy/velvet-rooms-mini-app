@@ -3,6 +3,7 @@ import { query } from "../../../_lib/db";
 import { requireAdmin } from "../../../_lib/admin_auth";
 import { ensureUser } from "../../../_lib/users";
 import { createNotification } from "../../../_lib/notifications";
+import { resolveEscrowDispute } from "../../../_lib/disputes";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,7 @@ export async function POST(request) {
   }
   const body = await request.json();
   const escrowRef = body?.escrow_ref;
+  const resolutionNote = (body?.resolution_note || "").toString().trim();
   if (!escrowRef) {
     return NextResponse.json({ error: "missing_escrow" }, { status: 400 });
   }
@@ -40,7 +42,7 @@ export async function POST(request) {
   });
 
   const escrowRes = await query(
-    `SELECT id, escrow_type, payer_id, amount
+    `SELECT id, escrow_type, payer_id, amount, status
      FROM escrow_accounts WHERE escrow_ref = $1`,
     [escrowRef]
   );
@@ -48,6 +50,15 @@ export async function POST(request) {
     return NextResponse.json({ error: "escrow_missing" }, { status: 404 });
   }
   const escrow = escrowRes.rows[0];
+  if (!["held", "disputed"].includes(escrow.status)) {
+    return NextResponse.json({ error: "invalid_status" }, { status: 409 });
+  }
+  if (escrow.status === "disputed" && !resolutionNote) {
+    return NextResponse.json(
+      { error: "resolution_note_required" },
+      { status: 400 }
+    );
+  }
 
   await query(
     `UPDATE escrow_accounts
@@ -55,6 +66,15 @@ export async function POST(request) {
      WHERE id = $1`,
     [escrow.id]
   );
+  if (escrow.status === "disputed") {
+    await resolveEscrowDispute({
+      escrowId: escrow.id,
+      resolution: "refunded_to_payer",
+      winnerUserId: escrow.payer_id || null,
+      resolvedByAdminId: adminUserId,
+      note: resolutionNote || "admin_refund_after_dispute_review",
+    });
+  }
 
   if (escrow.payer_id) {
     await query(
@@ -73,16 +93,24 @@ export async function POST(request) {
     escrow.payer_id,
   ]);
   if (payerRes.rowCount) {
-    await sendMessage(payerRes.rows[0].telegram_id, `Escrow ${escrowRef} has been refunded.`);
+    await sendMessage(
+      payerRes.rows[0].telegram_id,
+      escrow.status === "disputed"
+        ? `Dispute resolved ✅ Escrow ${escrowRef} refunded to your wallet.`
+        : `Escrow ${escrowRef} has been refunded.`
+    );
   }
   if (escrow.payer_id) {
     await createNotification({
       recipientId: escrow.payer_id,
       recipientRole: null,
       title: "Escrow refunded",
-      body: `Escrow ${escrowRef} was refunded to your wallet.`,
+      body:
+        escrow.status === "disputed"
+          ? `Dispute resolved in your favor. Escrow ${escrowRef} refunded to your wallet.`
+          : `Escrow ${escrowRef} was refunded to your wallet.`,
       type: "escrow_refunded",
-      metadata: { escrow_ref: escrowRef },
+      metadata: { escrow_ref: escrowRef, dispute_resolved: escrow.status === "disputed" },
     });
   }
 

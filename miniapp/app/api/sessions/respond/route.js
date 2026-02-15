@@ -3,6 +3,7 @@ import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { createNotification, createAdminNotifications } from "../../_lib/notifications";
 import { checkRateLimit } from "../../_lib/rate_limit";
+import { openEscrowDispute } from "../../_lib/disputes";
 
 export const runtime = "nodejs";
 
@@ -199,13 +200,13 @@ export async function POST(request) {
   );
   if (escrowRes.rowCount) {
     const escrow = escrowRes.rows[0];
-    await query(
-      `UPDATE escrow_accounts
-       SET status = 'disputed',
-           dispute_reason = 'model_cancelled'
-       WHERE id = $1`,
-      [escrow.id]
-    );
+    await openEscrowDispute({
+      escrowId: escrow.id,
+      sessionId,
+      openedByUserId: userId,
+      reason: "model_cancelled",
+      note: "model_cancelled_after_acceptance",
+    });
   }
   const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
     session.client_id,

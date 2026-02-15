@@ -5,6 +5,7 @@ import { ensureUser } from "../../../_lib/users";
 import { getSupabase } from "../../../_lib/supabase";
 import { getOrCreateInviteLink } from "../../../_lib/telegram_invites";
 import { createNotification } from "../../../_lib/notifications";
+import { resolveEscrowDispute } from "../../../_lib/disputes";
 
 export const runtime = "nodejs";
 
@@ -75,6 +76,7 @@ export async function POST(request) {
   }
   const body = await request.json();
   const escrowRef = body?.escrow_ref;
+  const resolutionNote = (body?.resolution_note || "").toString().trim();
   if (!escrowRef) {
     return NextResponse.json({ error: "missing_escrow" }, { status: 400 });
   }
@@ -89,7 +91,7 @@ export async function POST(request) {
   });
 
   const escrowRes = await query(
-    `SELECT id, escrow_type, payer_id, receiver_id, amount, receiver_payout, related_id
+    `SELECT id, escrow_type, payer_id, receiver_id, amount, receiver_payout, related_id, status
      FROM escrow_accounts WHERE escrow_ref = $1`,
     [escrowRef]
   );
@@ -97,6 +99,15 @@ export async function POST(request) {
     return NextResponse.json({ error: "escrow_missing" }, { status: 404 });
   }
   const escrow = escrowRes.rows[0];
+  if (!["held", "disputed"].includes(escrow.status)) {
+    return NextResponse.json({ error: "invalid_status" }, { status: 409 });
+  }
+  if (escrow.status === "disputed" && !resolutionNote) {
+    return NextResponse.json(
+      { error: "resolution_note_required" },
+      { status: 400 }
+    );
+  }
   const escrowType = escrow.escrow_type === "access" ? "access_fee" : escrow.escrow_type;
 
   if (escrowType === "content") {
@@ -160,6 +171,15 @@ export async function POST(request) {
      WHERE id = $1`,
     [escrow.id]
   );
+  if (escrow.status === "disputed") {
+    await resolveEscrowDispute({
+      escrowId: escrow.id,
+      resolution: "released_to_receiver",
+      winnerUserId: escrow.receiver_id || null,
+      resolvedByAdminId: adminUserId,
+      note: resolutionNote || "admin_release_after_dispute_review",
+    });
+  }
 
   if (escrow.receiver_id && escrow.receiver_payout) {
     await query(
@@ -193,7 +213,9 @@ export async function POST(request) {
       await sendMessage(payerRes.rows[0].telegram_id, message);
     } else {
       const message =
-        escrowType === "session"
+        escrow.status === "disputed"
+          ? `Dispute resolved ✅ Escrow ${escrowRef} released to the session winner.`
+          : escrowType === "session"
           ? `Session completed ✅ Escrow ${escrowRef} released.`
           : `Escrow ${escrowRef} has been released.`;
       await sendMessage(payerRes.rows[0].telegram_id, message);
@@ -207,9 +229,15 @@ export async function POST(request) {
       body:
         escrowType === "access_fee"
           ? "Your access fee was approved. Gallery unlocked."
+          : escrow.status === "disputed"
+          ? `Dispute resolved. Escrow ${escrowRef} released after review.`
           : `Escrow ${escrowRef} has been released.`,
       type: "escrow_released",
-      metadata: { escrow_ref: escrowRef, escrow_type: escrowType },
+      metadata: {
+        escrow_ref: escrowRef,
+        escrow_type: escrowType,
+        dispute_resolved: escrow.status === "disputed",
+      },
     });
   }
   if (escrow.receiver_id) {
@@ -226,9 +254,16 @@ export async function POST(request) {
       recipientId: escrow.receiver_id,
       recipientRole: null,
       title: "Escrow released",
-      body: `Escrow ${escrowRef} has been released to your wallet.`,
+      body:
+        escrow.status === "disputed"
+          ? `Dispute resolved in your favor. Escrow ${escrowRef} released to your wallet.`
+          : `Escrow ${escrowRef} has been released to your wallet.`,
       type: "escrow_released",
-      metadata: { escrow_ref: escrowRef, escrow_type: escrowType },
+      metadata: {
+        escrow_ref: escrowRef,
+        escrow_type: escrowType,
+        dispute_resolved: escrow.status === "disputed",
+      },
     });
   }
 
