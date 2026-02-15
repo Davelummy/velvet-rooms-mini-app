@@ -8,10 +8,13 @@ export async function ensureUserColumns() {
     return;
   }
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path TEXT");
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_online BOOLEAN DEFAULT FALSE");
+  await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_hide_email BOOLEAN DEFAULT FALSE");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS privacy_hide_location BOOLEAN DEFAULT FALSE");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS disclaimer_accepted_at TIMESTAMPTZ");
   await query("ALTER TABLE users ADD COLUMN IF NOT EXISTS disclaimer_version TEXT");
+  await query("CREATE INDEX IF NOT EXISTS idx_users_last_seen_at ON users(last_seen_at)");
   ensuredColumns = true;
 }
 

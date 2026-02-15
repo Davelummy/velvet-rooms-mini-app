@@ -46,6 +46,13 @@ export async function GET(request) {
   const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const res = await query(
     `SELECT u.id, u.public_id, u.username, u.role, u.status, u.email, u.created_at, u.avatar_path,
+            u.last_seen_at,
+            CASE
+              WHEN u.last_seen_at IS NOT NULL
+               AND u.last_seen_at >= NOW() - interval '5 minutes'
+              THEN TRUE
+              ELSE FALSE
+            END AS is_online,
             COALESCE(cp.display_name, mp.display_name, u.username, u.public_id) AS display_name,
             (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id) AS followers,
             (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id) AS following,

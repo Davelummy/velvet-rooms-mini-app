@@ -26,6 +26,7 @@ const PENDING_WINDOW_HOURS = 2;
 async function notifyModelBooking({
   modelId,
   clientId,
+  sessionId,
   sessionType,
   durationMinutes,
   scheduledFor,
@@ -69,7 +70,7 @@ async function notifyModelBooking({
     title: "New booking request",
     body: `Booking from ${clientLabel} · ${sessionType} · ${durationMinutes} min · ${when}.`,
     type: "booking_request",
-    metadata: { client_id: clientId, session_type: sessionType },
+    metadata: { client_id: clientId, session_id: sessionId || null, session_type: sessionType },
   });
 }
 
@@ -321,6 +322,7 @@ export async function POST(request) {
     await notifyModelBooking({
       modelId,
       clientId: userId,
+      sessionId: metadata.session_id,
       sessionType,
       durationMinutes,
       scheduledFor,

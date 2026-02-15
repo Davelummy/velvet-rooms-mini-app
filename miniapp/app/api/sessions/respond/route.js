@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { createNotification, createAdminNotifications } from "../../_lib/notifications";
+import { checkRateLimit } from "../../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,14 @@ export async function POST(request) {
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
+  }
+  const allowed = await checkRateLimit({
+    key: `session_respond:${tgUser.id}`,
+    limit: 8,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   const sessionId = Number(body?.session_id || 0);
@@ -238,5 +247,5 @@ export async function POST(request) {
     type: "session_dispute",
     metadata: { session_id: sessionId },
   });
-  return NextResponse.json({ ok: true, status: "cancelled" });
+  return NextResponse.json({ ok: true, status: "disputed" });
 }

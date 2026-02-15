@@ -3,8 +3,10 @@ import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
 import { ensureBlockTable } from "../_lib/blocks";
 import { ensureFollowTable } from "../_lib/follows";
+import { ensureUserColumns } from "../_lib/users";
 import { logUserAction } from "../_lib/user_actions";
 import { getSupabase } from "../_lib/supabase";
+import { checkRateLimit } from "../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -32,7 +34,16 @@ export async function GET(request) {
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
   }
+  const allowed = await checkRateLimit({
+    key: `block_list:${tgUser.id}`,
+    limit: 30,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
   await ensureBlockTable();
+  await ensureUserColumns();
 
   const userRes = await query("SELECT id FROM users WHERE telegram_id = $1", [
     tgUser.id,
@@ -54,8 +65,13 @@ export async function GET(request) {
         u.avatar_path,
         mp.display_name AS model_display_name,
         mp.verification_status,
-        mp.is_online,
-        mp.last_seen_at
+        u.last_seen_at,
+        CASE
+          WHEN u.last_seen_at IS NOT NULL
+           AND u.last_seen_at >= NOW() - interval '5 minutes'
+          THEN TRUE
+          ELSE FALSE
+        END AS is_online
      FROM blocks b
      JOIN users u ON u.id = b.blocked_id
      LEFT JOIN model_profiles mp ON mp.user_id = u.id
@@ -95,6 +111,14 @@ export async function POST(request) {
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
+  }
+  const allowed = await checkRateLimit({
+    key: `block_toggle:${tgUser.id}`,
+    limit: 20,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
   const targetId = Number(body?.target_id);
   if (!targetId) {

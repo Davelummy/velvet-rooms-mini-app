@@ -5,6 +5,7 @@ import { ensureFollowTable } from "../_lib/follows";
 import { ensureBlockTable } from "../_lib/blocks";
 import { logUserAction } from "../_lib/user_actions";
 import { createNotification } from "../_lib/notifications";
+import { checkRateLimit } from "../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -19,6 +20,14 @@ export async function POST(request) {
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
+  }
+  const allowed = await checkRateLimit({
+    key: `follow_toggle:${tgUser.id}`,
+    limit: 20,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
   const targetId = Number(body?.target_id);
   if (!targetId) {

@@ -6,6 +6,7 @@ import { ensureUserColumns } from "../_lib/users";
 import { ensureBlockTable } from "../_lib/blocks";
 import { getSupabase } from "../_lib/supabase";
 import { ensureClientProfileColumns } from "../_lib/clients";
+import { checkRateLimit } from "../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,14 @@ export async function GET(request) {
   if (!tgUser || !tgUser.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
   }
+  const allowed = await checkRateLimit({
+    key: `me:${tgUser.id}`,
+    limit: 40,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
 
   const userRes = await query(
     `SELECT id, telegram_id, public_id, username, role, status, email, created_at, wallet_balance, first_name, last_name, avatar_path, privacy_hide_email, privacy_hide_location
@@ -36,8 +45,18 @@ export async function GET(request) {
   const user = userRes.rows[0];
 
   const modelRes = await query(
-    `SELECT display_name, verification_status, is_online, last_seen_at, tags, availability, bio, location
-     FROM model_profiles WHERE user_id = $1`,
+    `SELECT mp.display_name, mp.verification_status,
+            CASE
+              WHEN u.last_seen_at IS NOT NULL
+               AND u.last_seen_at >= NOW() - interval '5 minutes'
+              THEN TRUE
+              ELSE FALSE
+            END AS is_online,
+            u.last_seen_at,
+            mp.tags, mp.availability, mp.bio, mp.location
+     FROM model_profiles mp
+     JOIN users u ON u.id = mp.user_id
+     WHERE mp.user_id = $1`,
     [user.id]
   );
   const model = modelRes.rowCount ? modelRes.rows[0] : null;

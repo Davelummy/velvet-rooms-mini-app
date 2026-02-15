@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  EmptyState,
+  ErrorState,
+  NotificationPriorityBadge,
+  SyncIndicator,
+} from "../_components/ui-kit";
 
 export default function Admin() {
   const [section, setSection] = useState("models");
@@ -24,6 +30,11 @@ export default function Admin() {
   const [selectedItem, setSelectedItem] = useState(null);
   const [preview, setPreview] = useState({ open: false, url: "", type: "video" });
   const [pageHidden, setPageHidden] = useState(false);
+  const [queueTriage, setQueueTriage] = useState("all");
+  const [selectedKeys, setSelectedKeys] = useState([]);
+  const [savedFilters, setSavedFilters] = useState([]);
+  const [syncTicker, setSyncTicker] = useState(0);
+  const [pendingHighlight, setPendingHighlight] = useState(null);
   const [metrics, setMetrics] = useState({
     pending_models: 0,
     approved_models: 0,
@@ -79,6 +90,29 @@ export default function Admin() {
 
   const formatNumber = (value) => Number(value || 0).toLocaleString();
   const formatCurrency = (value) => `₦${formatNumber(value)}`;
+  const formatPresence = (isOnline, lastSeenAt) => {
+    if (isOnline) {
+      return "Online";
+    }
+    if (!lastSeenAt) {
+      return "Offline";
+    }
+    const seenMs = new Date(lastSeenAt).getTime();
+    if (Number.isNaN(seenMs)) {
+      return "Offline";
+    }
+    const diffSec = Math.max(0, Math.floor((Date.now() - seenMs) / 1000));
+    if (diffSec < 60) {
+      return "Seen just now";
+    }
+    if (diffSec < 3600) {
+      return `Seen ${Math.floor(diffSec / 60)}m ago`;
+    }
+    if (diffSec < 86400) {
+      return `Seen ${Math.floor(diffSec / 3600)}h ago`;
+    }
+    return `Seen ${Math.floor(diffSec / 86400)}d ago`;
+  };
   const resolveName = (item, fallback = "User") =>
     item?.display_name || item?.username || item?.public_id || fallback;
   const revenueSeries = metrics.escrow_inflow_7d || [];
@@ -132,7 +166,10 @@ export default function Admin() {
         { label: "Status", value: selectedItem.verification_status || "-" },
         { label: "Submitted", value: selectedItem.verification_submitted_at || "-" },
         { label: "Approved at", value: selectedItem.approved_at || "-" },
-        { label: "Online", value: selectedItem.is_online ? "Online" : "Offline" },
+        {
+          label: "Online",
+          value: formatPresence(selectedItem.is_online, selectedItem.last_seen_at),
+        },
       ];
     }
     if (section === "content") {
@@ -236,6 +273,122 @@ export default function Admin() {
     ];
   }, [section, selectedItem]);
 
+  const getItemKey = (item) =>
+    item?.user_id || item?.id || item?.escrow_ref || item?.transaction_ref || null;
+
+  const getItemTimestamp = (item) => {
+    const candidates = [
+      item?.created_at,
+      item?.verification_submitted_at,
+      item?.submitted_at,
+      item?.updated_at,
+      item?.access_granted_at,
+    ];
+    for (const value of candidates) {
+      if (!value) continue;
+      const ms = new Date(value).getTime();
+      if (!Number.isNaN(ms)) {
+        return ms;
+      }
+    }
+    return 0;
+  };
+
+  const filteredItems = useMemo(() => {
+    if (queueTriage === "all") {
+      return items;
+    }
+    const now = Date.now();
+    if (queueTriage === "aging") {
+      return (items || []).filter((item) => {
+        const ts = getItemTimestamp(item);
+        return ts && now - ts > 24 * 60 * 60 * 1000;
+      });
+    }
+    if (queueTriage === "urgent") {
+      return (items || []).filter((item) => {
+        if (section === "disputes") {
+          return true;
+        }
+        if (section === "payments") {
+          return Number(item.amount || 0) >= 10000 || item.status === "pending";
+        }
+        if (section === "escrows") {
+          return item.status === "held";
+        }
+        if (section === "clients") {
+          return !item.access_fee_paid;
+        }
+        if (section === "models") {
+          return item.verification_status !== "approved";
+        }
+        return false;
+      });
+    }
+    if (queueTriage === "high_risk") {
+      return (items || []).filter((item) => {
+        if (Number(item.risk_score || 0) >= 70) {
+          return true;
+        }
+        const details = JSON.stringify(item?.details || {}).toLowerCase();
+        return (
+          details.includes("dispute") ||
+          details.includes("refund") ||
+          details.includes("report") ||
+          details.includes("fraud")
+        );
+      });
+    }
+    return items;
+  }, [items, queueTriage, section]);
+
+  const saveCurrentFilter = () => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const entry = {
+      id: `filter-${Date.now()}`,
+      label: `${section} · ${new Date().toLocaleTimeString()}`,
+      value: {
+        section,
+        modelView,
+        contentView,
+        paymentView,
+        paymentProvider,
+        paymentRange,
+        escrowView,
+        escrowRange,
+        clientView,
+        userRole,
+        userStatus,
+        queueTriage,
+      },
+    };
+    const next = [entry, ...savedFilters].slice(0, 8);
+    setSavedFilters(next);
+    window.localStorage.setItem("vr_admin_saved_filters", JSON.stringify(next));
+  };
+
+  const applySavedFilter = (id) => {
+    const entry = savedFilters.find((item) => item.id === id);
+    const value = entry?.value;
+    if (!value) {
+      return;
+    }
+    setSection(value.section || "models");
+    setModelView(value.modelView || "pending");
+    setContentView(value.contentView || "pending");
+    setPaymentView(value.paymentView || "pending");
+    setPaymentProvider(value.paymentProvider || "all");
+    setPaymentRange(value.paymentRange || "all");
+    setEscrowView(value.escrowView || "pending");
+    setEscrowRange(value.escrowRange || "all");
+    setClientView(value.clientView || "pending");
+    setUserRole(value.userRole || "all");
+    setUserStatus(value.userStatus || "all");
+    setQueueTriage(value.queueTriage || "all");
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -286,6 +439,27 @@ export default function Admin() {
     handler();
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSyncTicker((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem("vr_admin_saved_filters") || "[]");
+      if (Array.isArray(parsed)) {
+        setSavedFilters(parsed);
+      }
+    } catch {
+      // ignore parse errors
+    }
   }, []);
 
   const loadQueue = useCallback(async () => {
@@ -450,8 +624,23 @@ export default function Admin() {
   }, [liveQueue, livePaused, loadQueue, loadMetrics, loadHealth]);
 
   useEffect(() => {
+    if (!initData || liveQueue || livePaused) {
+      return;
+    }
+    if (!["models", "users"].includes(section)) {
+      return;
+    }
+    const interval = setInterval(() => {
+      loadQueue();
+      loadMetrics();
+    }, 20000);
+    return () => clearInterval(interval);
+  }, [initData, liveQueue, livePaused, section, loadQueue, loadMetrics]);
+
+  useEffect(() => {
     setSelectedItem(null);
     setPreview({ open: false, url: "", type: "video" });
+    setSelectedKeys([]);
   }, [
     section,
     modelView,
@@ -467,10 +656,29 @@ export default function Admin() {
     userStatus,
   ]);
 
-  const handleAction = async (action, payload) => {
+  useEffect(() => {
+    if (!pendingHighlight || !filteredItems.length) {
+      return;
+    }
+    const match = filteredItems.find((item) => {
+      if (pendingHighlight.sessionId && Number(item.related_id || item.id) === Number(pendingHighlight.sessionId)) {
+        return true;
+      }
+      if (pendingHighlight.contentId && Number(item.id) === Number(pendingHighlight.contentId)) {
+        return true;
+      }
+      return false;
+    });
+    if (match) {
+      setSelectedItem(match);
+      setPendingHighlight(null);
+    }
+  }, [filteredItems, pendingHighlight]);
+
+  const performAction = async (action, payload) => {
     if (!initData) {
       setError("Open the admin console inside Telegram.");
-      return;
+      return false;
     }
     const res = await fetch(action, {
       method: "POST",
@@ -479,12 +687,48 @@ export default function Admin() {
     });
     if (!res.ok) {
       setError(`Action failed (HTTP ${res.status}).`);
-      return;
+      return false;
     }
     setError("");
+    return true;
+  };
+
+  const handleAction = async (action, payload) => {
+    const ok = await performAction(action, payload);
+    if (!ok) {
+      return;
+    }
     setSelectedItem(null);
     await loadQueue();
     await loadMetrics();
+  };
+
+  const runBulkAction = async (action, payloadBuilder) => {
+    if (!selectedKeys.length) {
+      return;
+    }
+    let successCount = 0;
+    for (const key of selectedKeys) {
+      const item = filteredItems.find((entry) => String(getItemKey(entry)) === String(key));
+      if (!item) {
+        continue;
+      }
+      const payload = payloadBuilder(item);
+      if (!payload) {
+        continue;
+      }
+      // Run sequentially to preserve API ordering and avoid burst limits.
+      const ok = await performAction(action, payload);
+      if (ok) {
+        successCount += 1;
+      }
+    }
+    if (successCount > 0) {
+      setError("");
+      setSelectedKeys([]);
+      await loadQueue();
+      await loadMetrics();
+    }
   };
 
   useEffect(() => {
@@ -647,6 +891,85 @@ export default function Admin() {
     } catch {
       return "";
     }
+  };
+
+  const parseNotificationMetadata = (metadata) => {
+    if (!metadata) {
+      return {};
+    }
+    if (typeof metadata === "object") {
+      return metadata;
+    }
+    if (typeof metadata === "string") {
+      try {
+        return JSON.parse(metadata);
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  };
+
+  const notificationGroups = useMemo(() => {
+    const groups = [];
+    for (const item of notifications.items || []) {
+      const date = item?.created_at ? new Date(item.created_at) : null;
+      const label = date && !Number.isNaN(date.getTime()) ? date.toDateString() : "Recent";
+      const bucket = groups.find((entry) => entry.label === label);
+      if (bucket) {
+        bucket.items.push(item);
+      } else {
+        groups.push({ label, items: [item] });
+      }
+    }
+    return groups;
+  }, [notifications.items]);
+
+  const notificationContext = (item) => {
+    const meta = parseNotificationMetadata(item?.metadata);
+    if (meta?.session_id) {
+      return `Session #${meta.session_id}`;
+    }
+    if (meta?.content_id) {
+      return `Content #${meta.content_id}`;
+    }
+    if (meta?.amount) {
+      return `Amount: ₦${Number(meta.amount || 0).toLocaleString()}`;
+    }
+    return item?.type ? item.type.replace(/_/g, " ") : "General";
+  };
+
+  const handleNotificationClick = async (item) => {
+    if (item?.id) {
+      await markNotificationsRead([item.id]);
+      setNotifications((prev) => ({
+        ...prev,
+        unread: Math.max(0, (prev.unread || 0) - (item?.read_at ? 0 : 1)),
+        items: (prev.items || []).map((entry) =>
+          entry.id === item.id ? { ...entry, read_at: entry.read_at || new Date().toISOString() } : entry
+        ),
+      }));
+    }
+    const type = (item?.type || "").toLowerCase();
+    const meta = parseNotificationMetadata(item?.metadata);
+    if (type.includes("dispute")) {
+      setSection("disputes");
+      if (meta?.session_id) {
+        setPendingHighlight({ sessionId: meta.session_id });
+      }
+    } else if (type.includes("content")) {
+      setSection("content");
+      if (meta?.content_id) {
+        setPendingHighlight({ contentId: meta.content_id });
+      }
+    } else if (type.includes("payment") || type.includes("escrow")) {
+      setSection("payments");
+    } else if (type.includes("model") || type.includes("verification")) {
+      setSection("models");
+    } else if (type.includes("client")) {
+      setSection("clients");
+    }
+    closeNotifications();
   };
 
   const openPreview = (url, type = "video") => {
@@ -1190,11 +1513,59 @@ export default function Admin() {
               <button type="button" className="cta ghost" onClick={exportAuditLog}>
                 Export audit log
               </button>
+              <button type="button" className="cta ghost" onClick={saveCurrentFilter}>
+                Save filter
+              </button>
+              {savedFilters.length > 0 && (
+                <label className="field">
+                  Saved filter
+                  <select defaultValue="" onChange={(event) => applySavedFilter(event.target.value)}>
+                    <option value="">Load saved…</option>
+                    {savedFilters.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
           ) : (
             <div className="panel-actions">
               <button type="button" className="cta ghost" onClick={loadHealth}>
                 Refresh health
+              </button>
+            </div>
+          )}
+          {section !== "health" && (
+            <div className="panel-actions">
+              <button
+                type="button"
+                className={`pill ${queueTriage === "all" ? "active" : ""}`}
+                onClick={() => setQueueTriage("all")}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                className={`pill ${queueTriage === "urgent" ? "active" : ""}`}
+                onClick={() => setQueueTriage("urgent")}
+              >
+                Urgent
+              </button>
+              <button
+                type="button"
+                className={`pill ${queueTriage === "aging" ? "active" : ""}`}
+                onClick={() => setQueueTriage("aging")}
+              >
+                Aging
+              </button>
+              <button
+                type="button"
+                className={`pill ${queueTriage === "high_risk" ? "active" : ""}`}
+                onClick={() => setQueueTriage("high_risk")}
+              >
+                High risk
               </button>
             </div>
           )}
@@ -1210,6 +1581,9 @@ export default function Admin() {
           {lastRefreshAt && (
             <p className="helper">Last refresh: {new Date(lastRefreshAt).toLocaleString()}</p>
           )}
+          <div data-sync-tick={syncTicker}>
+            <SyncIndicator lastSyncedAt={lastRefreshAt} active={liveQueue && !livePaused} />
+          </div>
           <div className="admin-pill">Manual approvals only • 18+ content</div>
         </aside>
 
@@ -1265,13 +1639,76 @@ export default function Admin() {
         ) : (
           <div className={`admin-queue ${selectedItem ? "has-detail" : ""}`}>
             <div className="admin-list">
-              {error && <div className="empty">{error}</div>}
+              <div className="panel-actions">
+                <button
+                  type="button"
+                  className="cta ghost"
+                  onClick={() =>
+                    setSelectedKeys(
+                      filteredItems
+                        .map((item) => getItemKey(item))
+                        .filter(Boolean)
+                        .map((key) => String(key))
+                    )
+                  }
+                >
+                  Select all
+                </button>
+                <button type="button" className="cta ghost" onClick={() => setSelectedKeys([])}>
+                  Clear
+                </button>
+                {selectedKeys.length > 0 && section === "models" && modelView === "pending" && (
+                  <>
+                    <button
+                      type="button"
+                      className="cta primary"
+                      onClick={() =>
+                        runBulkAction("/api/admin/models/approve", (item) => ({ user_id: item.user_id }))
+                      }
+                    >
+                      Bulk approve ({selectedKeys.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="cta primary alt"
+                      onClick={() =>
+                        runBulkAction("/api/admin/models/reject", (item) => ({ user_id: item.user_id }))
+                      }
+                    >
+                      Bulk reject
+                    </button>
+                  </>
+                )}
+                {selectedKeys.length > 0 && section === "content" && contentView === "pending" && (
+                  <>
+                    <button
+                      type="button"
+                      className="cta primary"
+                      onClick={() =>
+                        runBulkAction("/api/admin/content/approve", (item) => ({ content_id: item.id }))
+                      }
+                    >
+                      Bulk approve ({selectedKeys.length})
+                    </button>
+                    <button
+                      type="button"
+                      className="cta primary alt"
+                      onClick={() =>
+                        runBulkAction("/api/admin/content/reject", (item) => ({ content_id: item.id }))
+                      }
+                    >
+                      Bulk reject
+                    </button>
+                  </>
+                )}
+              </div>
+              {error && <ErrorState message={error} onRetry={loadQueue} />}
               {!error && (
                 <div className="empty subtle">Live queue updates when new submissions arrive.</div>
               )}
-              {!error && items.length === 0 && <div className="empty">Queue is empty.</div>}
+              {!error && filteredItems.length === 0 && <EmptyState title="Queue is empty." />}
               {!error &&
-                items.map((item) => {
+                filteredItems.map((item) => {
                   const itemKey =
                     item.user_id || item.id || item.escrow_ref || item.transaction_ref;
                   const selectedKey = selectedItem
@@ -1285,6 +1722,22 @@ export default function Admin() {
                       key={itemKey}
                       className={`queue-card ${selectedKey === itemKey ? "selected" : ""}`}
                     >
+                      <label className="pill">
+                        <input
+                          type="checkbox"
+                          checked={selectedKeys.includes(String(itemKey))}
+                          onChange={(event) => {
+                            setSelectedKeys((prev) => {
+                              const key = String(itemKey);
+                              if (event.target.checked) {
+                                return prev.includes(key) ? prev : [...prev, key];
+                              }
+                              return prev.filter((entry) => entry !== key);
+                            });
+                          }}
+                        />
+                        Select
+                      </label>
                       <div>
                         <p className="queue-id">
                           {(section === "payments" && resolveName(item)) ||
@@ -1346,7 +1799,7 @@ export default function Admin() {
                         {section === "models" && modelView === "pending" && (
                           <>
                             <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
-                              {item.is_online ? "Online" : "Offline"}
+                              {formatPresence(item.is_online, item.last_seen_at)}
                             </div>
                             <button
                               type="button"
@@ -1384,7 +1837,7 @@ export default function Admin() {
                         {section === "models" && modelView === "approved" && (
                           <>
                             <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
-                              {item.is_online ? "Online" : "Offline"}
+                              {formatPresence(item.is_online, item.last_seen_at)}
                             </div>
                             <div className="status-pill live">Verified</div>
                           </>
@@ -1539,6 +1992,9 @@ export default function Admin() {
                               className={`status-pill ${item.status === "active" ? "live" : "idle"}`}
                             >
                               {item.status || "status"}
+                            </div>
+                            <div className={`status-pill ${item.is_online ? "live" : "idle"}`}>
+                              {formatPresence(item.is_online, item.last_seen_at)}
                             </div>
                           </>
                         )}
@@ -1789,18 +2245,36 @@ export default function Admin() {
               <p className="helper">No notifications yet.</p>
             )}
             <div className="notification-list">
-              {notifications.items.map((item) => (
-                <div
-                  key={`admin-notif-${item.id}`}
-                  className={`notification-item ${item.read_at ? "" : "unread"}`}
-                >
-                  <div>
-                    <strong>{item.title}</strong>
-                    {item.body && <p>{item.body}</p>}
-                  </div>
-                  <span className="notification-time">
-                    {formatNotificationTime(item.created_at)}
-                  </span>
+              {notificationGroups.map((group) => (
+                <div key={`admin-notif-group-${group.label}`} className="notification-group">
+                  <p className="notification-group-label">{group.label}</p>
+                  {group.items.map((item) => (
+                    <div
+                      key={`admin-notif-${item.id}`}
+                      className={`notification-item ${item.read_at ? "" : "unread"}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleNotificationClick(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleNotificationClick(item).catch(() => null);
+                        }
+                      }}
+                    >
+                      <div>
+                        <div className="notification-title-row">
+                          <strong>{item.title}</strong>
+                          <NotificationPriorityBadge type={item.type || ""} />
+                        </div>
+                        {item.body && <p>{item.body}</p>}
+                        <p className="notification-context">{notificationContext(item)}</p>
+                      </div>
+                      <span className="notification-time">
+                        {formatNotificationTime(item.created_at)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>

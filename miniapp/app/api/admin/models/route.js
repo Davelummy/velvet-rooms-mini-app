@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { requireAdmin } from "../../_lib/admin_auth";
 import { getSupabase } from "../../_lib/supabase";
+import { ensureUserColumns } from "../../_lib/users";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ export async function GET(request) {
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: 401 });
   }
+  await ensureUserColumns();
 
   const url = new URL(request.url);
   const status = (url.searchParams.get("status") || "submitted").toLowerCase();
@@ -19,10 +21,10 @@ export async function GET(request) {
   const res = await query(
     `SELECT mp.user_id, mp.display_name, mp.verification_status, mp.verification_submitted_at,
             mp.approved_at, mp.verification_video_url, mp.verification_video_path,
-            u.telegram_id, u.public_id,
+            u.telegram_id, u.public_id, u.last_seen_at,
             CASE
-              WHEN mp.last_seen_at IS NOT NULL
-                AND mp.last_seen_at >= NOW() - interval '2 minutes'
+              WHEN u.last_seen_at IS NOT NULL
+                AND u.last_seen_at >= NOW() - interval '5 minutes'
               THEN TRUE
               ELSE FALSE
             END AS is_online

@@ -4,6 +4,7 @@ import { extractUser, verifyInitData } from "../_lib/telegram";
 import { ensureFollowTable } from "../_lib/follows";
 import { ensureUserColumns } from "../_lib/users";
 import { getSupabase } from "../_lib/supabase";
+import { checkRateLimit } from "../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -17,6 +18,14 @@ export async function GET(request) {
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
+  }
+  const allowed = await checkRateLimit({
+    key: `following_list:${tgUser.id}`,
+    limit: 30,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   await ensureFollowTable();
@@ -32,7 +41,14 @@ export async function GET(request) {
 
   const res = await query(
     `SELECT u.id, u.public_id, u.username, u.role, u.avatar_path,
-            mp.display_name, mp.is_online, mp.verification_status, mp.bio, mp.tags, mp.availability
+            mp.display_name, mp.verification_status, mp.bio, mp.tags, mp.availability,
+            u.last_seen_at,
+            CASE
+              WHEN u.last_seen_at IS NOT NULL
+               AND u.last_seen_at >= NOW() - interval '5 minutes'
+              THEN TRUE
+              ELSE FALSE
+            END AS is_online
      FROM follows f
      JOIN users u ON u.id = f.followee_id
      LEFT JOIN model_profiles mp ON mp.user_id = u.id

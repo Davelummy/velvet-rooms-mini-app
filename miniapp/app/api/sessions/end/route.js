@@ -1,16 +1,26 @@
 import { NextResponse } from "next/server";
-import { query } from "../../_lib/db";
+import { query, withTransaction } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { ensureSessionColumns } from "../../_lib/sessions";
 import { createRequestContext, logError, withRequestId } from "../../_lib/observability";
 import { checkRateLimit } from "../../_lib/rate_limit";
 import { logAppEvent } from "../../_lib/metrics";
 import { createNotification, createAdminNotifications } from "../../_lib/notifications";
+import {
+  ensureIdempotencyTable,
+  readIdempotencyRecord,
+  writeIdempotencyRecord,
+} from "../../_lib/idempotency";
 
 export const runtime = "nodejs";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
-const DISPUTE_REASONS = new Set(["safety_concern", "connection_issue", "other"]);
+const DISPUTE_REASONS = new Set([
+  "safety_concern",
+  "connection_issue",
+  "screen_recording_detected",
+  "other",
+]);
 
 export async function POST(request) {
   const ctx = createRequestContext(request, "sessions/end");
@@ -41,10 +51,20 @@ export async function POST(request) {
   const sessionId = Number(body?.session_id || 0);
   const reason = (body?.reason || "").toString().trim();
   const note = (body?.note || "").toString().trim();
+  const idempotencyKey = (body?.idempotency_key || "").toString().trim();
   if (!sessionId || !reason) {
     return NextResponse.json(withRequestId({ error: "invalid_request" }, ctx.requestId), {
       status: 400,
     });
+  }
+  if (idempotencyKey) {
+    await ensureIdempotencyTable();
+    const cached = await withTransaction(async (client) =>
+      readIdempotencyRecord(client, idempotencyKey)
+    );
+    if (cached) {
+      return NextResponse.json(withRequestId({ ...cached, cached: true }, ctx.requestId));
+    }
   }
 
   const userRes = await query("SELECT id, role FROM users WHERE telegram_id = $1", [
@@ -189,7 +209,17 @@ export async function POST(request) {
     });
   }
 
-  return NextResponse.json(
-    withRequestId({ ok: true, status: nextStatus, end_actor: endActor, role: userRole, outcome }, ctx.requestId)
-  );
+  const response = { ok: true, status: nextStatus, end_actor: endActor, role: userRole, outcome };
+  if (idempotencyKey) {
+    await withTransaction(async (client) =>
+      writeIdempotencyRecord(client, {
+        key: idempotencyKey,
+        userId,
+        scope: "session_end",
+        response,
+      })
+    );
+  }
+
+  return NextResponse.json(withRequestId(response, ctx.requestId));
 }

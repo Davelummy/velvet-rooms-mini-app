@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
+import { ensureUserColumns } from "../_lib/users";
+import { checkRateLimit } from "../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -17,6 +19,16 @@ export async function POST(request) {
     if (!tgUser || !tgUser.id) {
       return NextResponse.json({ error: "user_missing" }, { status: 400 });
     }
+    const allowed = await checkRateLimit({
+      key: `presence:${tgUser.id}`,
+      limit: 30,
+      windowSeconds: 60,
+    });
+    if (!allowed) {
+      return NextResponse.json({ ok: true });
+    }
+
+    await ensureUserColumns();
 
     const userRes = await query("SELECT id, role FROM users WHERE telegram_id = $1", [
       tgUser.id,
@@ -25,11 +37,13 @@ export async function POST(request) {
       return NextResponse.json({ ok: true });
     }
     const userId = userRes.rows[0].id;
-    const role = userRes.rows[0].role;
-    if (role !== "model") {
-      return NextResponse.json({ ok: true });
-    }
 
+    await query(
+      `UPDATE users
+       SET is_online = TRUE, last_seen_at = NOW()
+       WHERE id = $1`,
+      [userId]
+    );
     await query(
       `UPDATE model_profiles
        SET is_online = TRUE, last_seen_at = NOW()

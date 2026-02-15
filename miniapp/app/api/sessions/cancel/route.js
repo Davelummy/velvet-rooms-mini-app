@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
-import { query } from "../../_lib/db";
+import { query, withTransaction } from "../../_lib/db";
 import { extractUser, verifyInitData } from "../../_lib/telegram";
 import { createNotification, createAdminNotifications } from "../../_lib/notifications";
+import {
+  ensureIdempotencyTable,
+  readIdempotencyRecord,
+  writeIdempotencyRecord,
+} from "../../_lib/idempotency";
+import { checkRateLimit } from "../../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -31,6 +37,25 @@ export async function POST(request) {
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
+  }
+  const allowed = await checkRateLimit({
+    key: `session_cancel:${tgUser.id}`,
+    limit: 6,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
+
+  const idempotencyKey = (body?.idempotency_key || "").toString().trim();
+  if (idempotencyKey) {
+    await ensureIdempotencyTable();
+    const cached = await withTransaction(async (client) =>
+      readIdempotencyRecord(client, idempotencyKey)
+    );
+    if (cached) {
+      return NextResponse.json({ ...cached, cached: true });
+    }
   }
 
   const sessionId = Number(body?.session_id || 0);
@@ -62,10 +87,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "invalid_status" }, { status: 409 });
   }
 
-  const shouldDispute = ["pending", "accepted", "active", "awaiting_confirmation"].includes(
-    session.status
-  );
-  const nextStatus = shouldDispute ? "disputed" : "cancelled_by_client";
+  const nextStatus = "disputed";
   await query(
     `UPDATE sessions
      SET status = $2,
@@ -73,44 +95,26 @@ export async function POST(request) {
          ended_at = NOW(),
          end_reason = 'client_cancelled',
          end_actor = 'client',
-         end_outcome = $3
+         end_outcome = 'dispute'
      WHERE id = $1`,
-    [sessionId, nextStatus, shouldDispute ? "dispute" : "refund"]
+    [sessionId, nextStatus]
   );
 
   const escrowRes = await query(
-    `SELECT id, amount, receiver_id, payer_id
+    `SELECT id
      FROM escrow_accounts
      WHERE escrow_type IN ('session','extension') AND related_id = $1 AND status = 'held'`,
     [sessionId]
   );
   if (escrowRes.rowCount) {
     const escrow = escrowRes.rows[0];
-    if (shouldDispute) {
-      await query(
-        `UPDATE escrow_accounts
-         SET status = 'disputed',
-             dispute_reason = 'client_cancelled'
-         WHERE id = $1`,
-        [escrow.id]
-      );
-    } else {
-      await query(
-        `UPDATE escrow_accounts
-         SET status = 'refunded', released_at = NOW(), release_condition_met = TRUE,
-             dispute_reason = 'client_cancelled'
-         WHERE id = $1`,
-        [escrow.id]
-      );
-      if (escrow.payer_id) {
-        await query(
-          `UPDATE users
-           SET wallet_balance = COALESCE(wallet_balance, 0) + $1
-           WHERE id = $2`,
-          [escrow.amount, escrow.payer_id]
-        );
-      }
-    }
+    await query(
+      `UPDATE escrow_accounts
+       SET status = 'disputed',
+           dispute_reason = 'client_cancelled'
+       WHERE id = $1`,
+      [escrow.id]
+    );
   }
 
   const clientRes = await query("SELECT telegram_id FROM users WHERE id = $1", [
@@ -122,17 +126,13 @@ export async function POST(request) {
   if (clientRes.rowCount) {
     await sendMessage(
       clientRes.rows[0].telegram_id,
-      shouldDispute
-        ? "Session cancelled. Your payment is under dispute review."
-        : "Session cancelled. Payment refunded to your wallet."
+      "Session cancelled. Payment is under dispute review."
     );
   }
   if (modelRes.rowCount) {
     await sendMessage(
       modelRes.rows[0].telegram_id,
-      shouldDispute
-        ? "Client cancelled the session. Payment is under dispute review."
-        : "Client cancelled the session. Payment refunded to the client."
+      "Client cancelled the session. Payment is under dispute review."
     );
   }
   const clientLabelRes = await query(
@@ -147,20 +147,28 @@ export async function POST(request) {
     recipientId: session.model_id,
     recipientRole: null,
     title: "Session cancelled",
-    body: `${clientLabel} cancelled a session. Status: ${
-      shouldDispute ? "Disputed" : "Refunded"
-    }.`,
+    body: `${clientLabel} cancelled a session. Marked disputed.`,
     type: "session_cancelled",
     metadata: { session_id: sessionId },
   });
-  if (shouldDispute) {
-    await createAdminNotifications({
-      title: "Session dispute",
-      body: `Client cancelled session ${sessionId}. Marked disputed.`,
-      type: "session_dispute",
-      metadata: { session_id: sessionId },
-    });
+  await createAdminNotifications({
+    title: "Session dispute",
+    body: `Client cancelled session ${sessionId}. Marked disputed.`,
+    type: "session_dispute",
+    metadata: { session_id: sessionId },
+  });
+
+  const response = { ok: true, status: nextStatus };
+  if (idempotencyKey) {
+    await withTransaction(async (client) =>
+      writeIdempotencyRecord(client, {
+        key: idempotencyKey,
+        userId,
+        scope: "session_cancel",
+        response,
+      })
+    );
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(response);
 }

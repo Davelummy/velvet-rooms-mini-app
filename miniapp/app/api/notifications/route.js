@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { query } from "../_lib/db";
 import { extractUser, verifyInitData } from "../_lib/telegram";
 import { listNotifications } from "../_lib/notifications";
+import { checkRateLimit } from "../_lib/rate_limit";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,14 @@ export async function GET(request) {
   const tgUser = extractUser(initData);
   if (!tgUser?.id) {
     return NextResponse.json({ error: "user_missing" }, { status: 400 });
+  }
+  const allowed = await checkRateLimit({
+    key: `notifications_list:${tgUser.id}`,
+    limit: 30,
+    windowSeconds: 60,
+  });
+  if (!allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
   const userRes = await query("SELECT id, role FROM users WHERE telegram_id = $1", [
     tgUser.id,

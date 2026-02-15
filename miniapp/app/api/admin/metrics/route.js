@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { query } from "../../_lib/db";
 import { requireAdmin } from "../../_lib/admin_auth";
+import { ensureUserColumns } from "../../_lib/users";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,7 @@ export async function GET(request) {
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: 401 });
   }
+  await ensureUserColumns();
 
   const [
     pendingModels,
@@ -50,7 +52,14 @@ export async function GET(request) {
     query("SELECT COUNT(*)::int AS count FROM model_profiles WHERE verification_status = 'submitted'"),
     query("SELECT COUNT(*)::int AS count FROM model_profiles WHERE verification_status = 'approved'"),
     query("SELECT COUNT(*)::int AS count FROM model_profiles"),
-    query("SELECT COUNT(*)::int AS count FROM model_profiles WHERE is_online = TRUE"),
+    query(
+      `SELECT COUNT(*)::int AS count
+       FROM model_profiles mp
+       JOIN users u ON u.id = mp.user_id
+       WHERE mp.verification_status = 'approved'
+         AND u.last_seen_at IS NOT NULL
+         AND u.last_seen_at >= NOW() - INTERVAL '5 minutes'`
+    ),
     query(
       `SELECT COUNT(*)::int AS count
        FROM digital_content dc
