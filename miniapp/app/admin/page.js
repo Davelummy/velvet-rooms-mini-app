@@ -125,6 +125,26 @@ export default function Admin() {
   };
   const resolveName = (item, fallback = "User") =>
     item?.display_name || item?.username || item?.public_id || fallback;
+  const formatActivityDetails = (details) => {
+    if (!details) {
+      return "-";
+    }
+    if (typeof details === "string") {
+      return details;
+    }
+    try {
+      return JSON.stringify(details, null, 2);
+    } catch {
+      return String(details);
+    }
+  };
+  const summarizeActivityDetails = (details) => {
+    const text = formatActivityDetails(details);
+    if (text.length <= 90) {
+      return text;
+    }
+    return `${text.slice(0, 90)}…`;
+  };
   const revenueSeries = metrics.escrow_inflow_7d || [];
   const approvalsSeries = metrics.approvals_7d || [];
   const maxRevenue = Math.max(
@@ -263,7 +283,7 @@ export default function Admin() {
         { label: "Action", value: selectedItem.action_type || "-" },
         { label: "Actor", value: selectedItem.actor_display_name || selectedItem.actor_public_id || "-" },
         { label: "Target", value: selectedItem.target_display_name || selectedItem.target_public_id || "-" },
-        { label: "Details", value: selectedItem.details ? JSON.stringify(selectedItem.details) : "-" },
+        { label: "Details", value: formatActivityDetails(selectedItem.details) },
         { label: "Created", value: selectedItem.created_at || "-" },
       ];
     }
@@ -665,7 +685,7 @@ export default function Admin() {
     loadNotifications(true).catch(() => null);
     const interval = setInterval(() => {
       loadNotifications(true).catch(() => null);
-    }, 30000);
+    }, 12000);
     return () => clearInterval(interval);
   }, [initData]);
 
@@ -779,6 +799,7 @@ export default function Admin() {
     setSelectedItem(null);
     await loadQueue();
     await loadMetrics();
+    await loadNotifications(true);
   };
 
   const resolveEscrowAction = async (action, item, resolutionNote = "") => {
@@ -802,6 +823,7 @@ export default function Admin() {
     setSelectedItem(null);
     await loadQueue();
     await loadMetrics();
+    await loadNotifications(true);
     return true;
   };
 
@@ -900,6 +922,7 @@ export default function Admin() {
       setSelectedKeys([]);
       await loadQueue();
       await loadMetrics();
+      await loadNotifications(true);
     }
   };
 
@@ -2042,6 +2065,12 @@ export default function Admin() {
                               item.target_display_name || item.target_public_id || "Target"
                             }`}
                         </p>
+                        {section === "activity" && (
+                          <details className="activity-log-collapse">
+                            <summary>{summarizeActivityDetails(item.details)}</summary>
+                            <pre>{formatActivityDetails(item.details)}</pre>
+                          </details>
+                        )}
                       </div>
                       <div className="queue-actions">
                         <button
@@ -2503,7 +2532,14 @@ export default function Admin() {
                   {detailFields.map((field) => (
                     <div key={field.label} className="admin-detail-card">
                       <span>{field.label}</span>
-                      <strong>{field.value}</strong>
+                      {section === "activity" && field.label === "Details" ? (
+                        <details className="activity-log-collapse">
+                          <summary>Open details</summary>
+                          <pre>{field.value}</pre>
+                        </details>
+                      ) : (
+                        <strong>{field.value}</strong>
+                      )}
                     </div>
                   ))}
                 </div>

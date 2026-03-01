@@ -23,7 +23,6 @@ export async function GET(request) {
   const limit = Math.min(Number(url.searchParams.get("limit") || 30), 50);
   const data = await listNotifications({
     recipientId: adminUserId,
-    recipientRole: "admin",
     limit,
   });
   return NextResponse.json({ items: data.items || [], unread: data.unreadCount || 0 });

@@ -23,7 +23,6 @@ export async function POST(request) {
   const ids = Array.isArray(body?.ids) ? body.ids.map((val) => Number(val)).filter(Boolean) : [];
   await markNotificationsRead({
     recipientId: adminUserId,
-    recipientRole: "admin",
     ids,
   });
   return NextResponse.json({ ok: true });

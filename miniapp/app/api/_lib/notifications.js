@@ -60,7 +60,7 @@ export async function createAdminNotifications({ title, body, type, metadata }) 
   let adminRes;
   if (adminIds.length) {
     adminRes = await query(
-      "SELECT id FROM users WHERE telegram_id = ANY($1::text[])",
+      "SELECT id FROM users WHERE telegram_id::text = ANY($1::text[])",
       [adminIds]
     );
   } else {

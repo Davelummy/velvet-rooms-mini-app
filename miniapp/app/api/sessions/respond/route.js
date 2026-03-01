@@ -114,6 +114,12 @@ export async function POST(request) {
       type: "session_accept",
       metadata: { session_id: sessionId },
     });
+    await createAdminNotifications({
+      title: "Booking accepted",
+      body: `Session ${sessionId} was accepted by the model.`,
+      type: "session_accept",
+      metadata: { session_id: sessionId },
+    });
     await sendMessage(tgUser.id, modelMsg);
     return NextResponse.json({ ok: true, status: "accepted" });
   }
@@ -172,6 +178,12 @@ export async function POST(request) {
       recipientRole: null,
       title: "Booking declined",
       body: `Your booking with ${modelLabel} was declined. A refund is being processed.`,
+      type: "session_declined",
+      metadata: { session_id: sessionId },
+    });
+    await createAdminNotifications({
+      title: "Booking declined",
+      body: `Session ${sessionId} was declined by the model.`,
       type: "session_declined",
       metadata: { session_id: sessionId },
     });

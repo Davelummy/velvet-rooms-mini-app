@@ -7,7 +7,7 @@ import { ensureSessionColumns } from "../../../_lib/sessions";
 import { ensureBlockTable } from "../../../_lib/blocks";
 import { createRequestContext, withRequestId } from "../../../_lib/observability";
 import { checkRateLimit } from "../../../_lib/rate_limit";
-import { createNotification } from "../../../_lib/notifications";
+import { createAdminNotifications, createNotification } from "../../../_lib/notifications";
 import {
   clearIdempotencyKey,
   ensureIdempotencyTable,
@@ -77,6 +77,18 @@ async function notifyModelBooking({
     body: `Booking from ${clientLabel} · ${sessionType} · ${durationMinutes} min · ${when}.`,
     type: "booking_request",
     metadata: { client_id: clientId, session_id: sessionId || null, session_type: sessionType },
+  });
+  await createAdminNotifications({
+    title: "New session booking",
+    body: `${clientLabel} booked ${sessionType} (${durationMinutes} min).`,
+    type: "session_booking",
+    metadata: {
+      session_id: sessionId || null,
+      session_type: sessionType,
+      duration_minutes: durationMinutes,
+      model_id: modelId,
+      client_id: clientId,
+    },
   });
 }
 

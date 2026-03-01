@@ -379,6 +379,11 @@ export default function Home() {
   const callRoleRef = useRef("");
   const pendingOfferRef = useRef(null);
   const callTimingSyncRef = useRef(false);
+  const callStateRef = useRef(callState);
+  const callConnectionStatusRef = useRef(callConnectionStatus);
+  const callDisconnectTimerRef = useRef(null);
+  const callEverConnectedRef = useRef(false);
+  const remoteTrackIdsRef = useRef(new Set());
   const walletIdempotencyRef = useRef({});
   const sessionActionIdempotencyRef = useRef({});
   const paymentInitIdempotencyRef = useRef({});
@@ -1066,6 +1071,12 @@ export default function Home() {
       setCallRemoteVideoReady(false);
       clearCallReactionTimers();
       clearPrivacyGuardTimer();
+      if (callDisconnectTimerRef.current) {
+        clearTimeout(callDisconnectTimerRef.current);
+        callDisconnectTimerRef.current = null;
+      }
+      callEverConnectedRef.current = false;
+      remoteTrackIdsRef.current = new Set();
       callPrivacyEndingRef.current = false;
       callWarningRef.current = { twoMin: false, thirtySec: false, ended: false };
       return;
@@ -1077,6 +1088,14 @@ export default function Home() {
   useEffect(() => {
     callChatOpenRef.current = callChatOpen;
   }, [callChatOpen]);
+
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  useEffect(() => {
+    callConnectionStatusRef.current = callConnectionStatus;
+  }, [callConnectionStatus]);
 
   useEffect(() => {
     if (!callState.open) {
@@ -2181,6 +2200,9 @@ export default function Home() {
     callIceRestartingRef.current = false;
     callFailureLoggedRef.current = false;
     callSuccessLoggedRef.current = false;
+    callEverConnectedRef.current = false;
+    remoteTrackIdsRef.current = new Set();
+    clearDisconnectAutoEndTimer();
     callPrivacyEndingRef.current = false;
     clearPrivacyGuardTimer();
     clearCallReactionTimers();
@@ -2444,6 +2466,13 @@ export default function Home() {
       callTurnTimerRef.current = null;
     }
   };
+
+  function clearDisconnectAutoEndTimer() {
+    if (callDisconnectTimerRef.current) {
+      clearTimeout(callDisconnectTimerRef.current);
+      callDisconnectTimerRef.current = null;
+    }
+  }
 
   const scheduleTurnFallback = (reason) => {
     if (callTurnTimerRef.current || callTurnAppliedRef.current) {
@@ -2724,6 +2753,7 @@ export default function Home() {
 
     const remoteStream = new MediaStream();
     remoteStreamRef.current = remoteStream;
+    remoteTrackIdsRef.current = new Set();
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
     }
@@ -2732,12 +2762,24 @@ export default function Home() {
     }
 
     pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        event.streams[0].getTracks().forEach((track) => {
+      const pushTrack = (track) => {
+        if (!track || remoteTrackIdsRef.current.has(track.id)) {
+          return;
+        }
+        remoteTrackIdsRef.current.add(track.id);
+        try {
           remoteStream.addTrack(track);
-        });
+        } catch {
+          // ignore duplicate addTrack races during renegotiation
+        }
+        track.onended = () => {
+          remoteTrackIdsRef.current.delete(track.id);
+        };
+      };
+      if (event.streams && event.streams[0]) {
+        event.streams[0].getTracks().forEach(pushTrack);
       } else if (event.track) {
-        remoteStream.addTrack(event.track);
+        pushTrack(event.track);
       }
       if (event.track?.kind === "video") {
         setCallRemoteVideoReady(true);
@@ -2761,6 +2803,8 @@ export default function Home() {
       const state = pc.iceConnectionState;
       if (state === "connected" || state === "completed") {
         clearTurnFallbackTimer();
+        clearDisconnectAutoEndTimer();
+        callEverConnectedRef.current = true;
         setCallConnectionStatus("connected");
       } else if (state === "checking") {
         setCallConnectionStatus("connecting");
@@ -2776,6 +2820,8 @@ export default function Home() {
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
         clearTurnFallbackTimer();
+        clearDisconnectAutoEndTimer();
+        callEverConnectedRef.current = true;
         setCallState((prev) => ({
           ...prev,
           connecting: false,
@@ -3261,8 +3307,47 @@ export default function Home() {
       cleanupCall(true);
       return;
     }
+    const healthyConnection =
+      callConnectionStatusRef.current === "connected" && callEverConnectedRef.current;
+    if (!healthyConnection) {
+      submitCallEnd({ reason: "connection_issue", note: "timer_without_connection", auto: true });
+      return;
+    }
     submitCallEnd({ reason: "time_elapsed", note: "timer_complete", auto: true });
   };
+
+  useEffect(() => {
+    if (!callState.open || callState.sessionType === "chat" || callConclusion.open) {
+      clearDisconnectAutoEndTimer();
+      return;
+    }
+    const unstableConnection = ["reconnecting", "failed"].includes(callConnectionStatus);
+    if (!unstableConnection) {
+      clearDisconnectAutoEndTimer();
+      return;
+    }
+    if (callDisconnectTimerRef.current) {
+      return;
+    }
+    callDisconnectTimerRef.current = setTimeout(() => {
+      callDisconnectTimerRef.current = null;
+      const currentState = callStateRef.current;
+      const currentConnection = callConnectionStatusRef.current;
+      if (
+        !currentState?.open ||
+        currentState?.sessionType === "chat" ||
+        !["reconnecting", "failed"].includes(currentConnection)
+      ) {
+        return;
+      }
+      submitCallEnd({
+        reason: "connection_issue",
+        note: "auto_disconnect_timeout",
+        auto: true,
+      });
+    }, 18000);
+    return () => clearDisconnectAutoEndTimer();
+  }, [callState.open, callState.sessionType, callConnectionStatus, callConclusion.open]);
 
   const requestEndCall = () => {
     if (callCountdown.remaining == null || callCountdown.remaining > 0) {

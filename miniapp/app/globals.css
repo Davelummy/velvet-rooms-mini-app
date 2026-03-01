@@ -1963,6 +1963,37 @@ h1 {
   margin: 6px 0 0;
 }
 
+.activity-log-collapse {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(20, 9, 12, 0.72);
+  padding: 8px 10px;
+}
+
+.activity-log-collapse summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  list-style: none;
+}
+
+.activity-log-collapse summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-log-collapse pre {
+  margin: 8px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #f0e1df;
+  font-family: "IBM Plex Mono", monospace;
+}
+
 .queue-actions {
   display: flex;
   flex-wrap: wrap;
