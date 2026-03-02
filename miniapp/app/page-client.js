@@ -10,6 +10,13 @@ import {
   StatusPill,
   SyncIndicator,
 } from "./_components/ui-kit";
+import FeedTab from "./features/feed/FeedTab";
+import ExploreTab from "./features/explore/ExploreTab";
+import GoLiveButton from "./features/live/GoLiveButton";
+import LiveSetupSheet from "./features/live/LiveSetupSheet";
+import LiveRoom from "./features/live/LiveRoom";
+import { useLiveStore } from "./_store/useLiveStore";
+import { useUIStore } from "./_store/useUIStore";
 
 const DISCLAIMER_VERSION = "2026-01-31";
 const AGE_GATE_STORAGE_KEY = "vr_age_confirmed";
@@ -86,6 +93,8 @@ export default function Home() {
   };
 
   const [geoLib, setGeoLib] = useState(null);
+  useEffect(() => { initTheme(); }, []);
+
   useEffect(() => {
     let alive = true;
     import("country-state-city")
@@ -213,7 +222,9 @@ export default function Home() {
   const [clientLoading, setClientLoading] = useState(false);
   const [verificationLoading, setVerificationLoading] = useState(false);
   const [contentSubmitting, setContentSubmitting] = useState(false);
-  const [clientTab, setClientTab] = useState("gallery");
+  const [clientTab, setClientTab] = useState("feed");
+  const { setupSheetOpen, currentStream, setSetupSheetOpen, resetLive } = useLiveStore();
+  const { initTheme } = useUIStore();
   const [modelTab, setModelTab] = useState("profile");
   const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
   const [modelContentFilter, setModelContentFilter] = useState("all");
@@ -6976,10 +6987,17 @@ export default function Home() {
                 <div className="dash-actions tabs primary-nav">
                   <button
                     type="button"
-                    className={`cta ${clientTab === "gallery" ? "primary" : "ghost"}`}
-                    onClick={() => setClientTab("gallery")}
+                    className={`cta ${clientTab === "feed" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("feed")}
                   >
-                    Home
+                    Feed
+                  </button>
+                  <button
+                    type="button"
+                    className={`cta ${clientTab === "explore" ? "primary" : "ghost"}`}
+                    onClick={() => setClientTab("explore")}
+                  >
+                    Explore
                   </button>
                   <button
                     type="button"
@@ -6993,13 +7011,6 @@ export default function Home() {
                   </button>
                   <button
                     type="button"
-                    className={`cta ${clientTab === "profile" ? "primary" : "ghost"}`}
-                    onClick={() => setClientTab("profile")}
-                  >
-                    Profile
-                  </button>
-                  <button
-                    type="button"
                     className={`cta ${clientTab === "wallet" ? "primary" : "ghost"}`}
                     onClick={() => setClientTab("wallet")}
                   >
@@ -7008,15 +7019,15 @@ export default function Home() {
                   <label className="field tab-select nav-more">
                     More
                     <select
-                      value={["purchases", "following"].includes(clientTab) ? clientTab : ""}
+                      value={["purchases", "following", "gallery", "profile"].includes(clientTab) ? clientTab : ""}
                       onChange={(event) => {
                         const value = event.target.value;
-                        if (value) {
-                          setClientTab(value);
-                        }
+                        if (value) setClientTab(value);
                       }}
                     >
                       <option value="">More…</option>
+                      <option value="gallery">Gallery</option>
+                      <option value="profile">Profile</option>
                       <option value="purchases">Purchases</option>
                       <option value="following">Following</option>
                     </select>
@@ -7029,6 +7040,10 @@ export default function Home() {
                     label="Last synced"
                   />
                 </div>
+
+                {clientTab === "feed" && <FeedTab />}
+
+                {clientTab === "explore" && <ExploreTab />}
 
                 {clientTab === "gallery" && (
                   <div className="flow-card">
@@ -9631,6 +9646,12 @@ export default function Home() {
                 </div>
 
                 {modelTab === "profile" && (
+                  <div style={{ padding: "12px 16px 0" }}>
+                    <GoLiveButton onPress={() => setSetupSheetOpen(true)} />
+                  </div>
+                )}
+
+                {modelTab === "profile" && (
                   <div className="flow-card">
                     <h3>Profile</h3>
                     {profileSavedStatus && (
@@ -10723,6 +10744,18 @@ export default function Home() {
         </article>
       </section>
       )}
+      {/* Live setup sheet (model) */}
+      <LiveSetupSheet
+        open={setupSheetOpen}
+        onClose={() => setSetupSheetOpen(false)}
+      />
+
+      {/* Live room — renders full screen on top of everything */}
+      <LiveRoom
+        open={!!currentStream}
+        onClose={resetLive}
+        isHost={role === "model"}
+      />
     </main>
   );
 }
