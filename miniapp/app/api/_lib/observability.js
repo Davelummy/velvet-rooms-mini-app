@@ -7,12 +7,20 @@ export function createRequestContext(request, name) {
     forwarded.split(",")[0]?.trim() ||
     request?.headers?.get("x-real-ip") ||
     "";
-  return {
+  const ctx = {
     requestId,
     name,
     ip,
     startedAt: Date.now(),
   };
+  // Backward-compatible helper methods for routes that call ctx.error/info directly.
+  ctx.error = (error, extra = {}) =>
+    logError(ctx, error?.message || "request_error", {
+      ...extra,
+      error: error?.message || String(error || ""),
+    });
+  ctx.info = (message, extra = {}) => logInfo(ctx, message, extra);
+  return ctx;
 }
 
 export function withRequestId(payload, requestId) {

@@ -63,6 +63,49 @@ export function SyncIndicator({ lastSyncedAt, active = false, label = "Last sync
   );
 }
 
+// Toast stack — driven by useUIStore
+export function ToastStack({ toasts = [] }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="toast-stack">
+      {toasts.map((t) => (
+        <div key={t.id} className={`toast-item ${t.type || "info"}`}>
+          {t.message}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Generic TabBar primitive
+export function TabBar({ tabs, activeTab, onTabChange, style }) {
+  return (
+    <div style={{ display: "flex", gap: "4px", padding: "4px", background: "var(--card)", borderRadius: "12px", ...style }}>
+      {tabs.map((tab) => (
+        <button
+          key={tab.id}
+          onClick={() => onTabChange(tab.id)}
+          style={{
+            flex: 1,
+            padding: "8px 12px",
+            borderRadius: "8px",
+            border: "none",
+            background: activeTab === tab.id ? "var(--accent)" : "none",
+            color: activeTab === tab.id ? "#fff" : "var(--muted)",
+            fontSize: "13px",
+            fontFamily: "'Space Grotesk', sans-serif",
+            fontWeight: activeTab === tab.id ? 600 : 400,
+            cursor: "pointer",
+            transition: "all 0.15s",
+          }}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function NotificationPriorityBadge({ type = "" }) {
   const key = (type || "").toLowerCase();
   if (
