@@ -8,7 +8,7 @@ const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 export async function POST(req, { params }) {
   const ctx = createRequestContext(`POST /api/live/${params.streamId}/leave`);
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

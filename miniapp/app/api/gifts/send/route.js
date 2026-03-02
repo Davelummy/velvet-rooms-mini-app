@@ -29,7 +29,7 @@ async function ensureGiftsTables() {
 export async function POST(req) {
   const ctx = createRequestContext("POST /api/gifts/send");
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

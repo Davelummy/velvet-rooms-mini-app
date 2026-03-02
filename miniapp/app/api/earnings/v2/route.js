@@ -24,7 +24,7 @@ async function ensureEarningsMonthly() {
 export async function GET(req) {
   const ctx = createRequestContext("GET /api/earnings/v2");
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

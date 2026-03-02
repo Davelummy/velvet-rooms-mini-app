@@ -7,7 +7,7 @@ export async function apiRequest(path, options = {}) {
   const initData = getInitData();
   const headers = {
     "Content-Type": "application/json",
-    ...(initData ? { "x-telegram-init-data": initData } : {}),
+    ...(initData ? { "x-telegram-init": initData } : {}),
     ...(options.headers || {}),
   };
 

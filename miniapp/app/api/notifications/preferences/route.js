@@ -22,7 +22,7 @@ async function ensurePreferencesTable() {
 export async function GET(req) {
   const ctx = createRequestContext("GET /api/notifications/preferences");
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -53,7 +53,7 @@ export async function GET(req) {
 export async function POST(req) {
   const ctx = createRequestContext("POST /api/notifications/preferences");
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

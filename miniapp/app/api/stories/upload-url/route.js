@@ -9,7 +9,7 @@ const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 export async function POST(req) {
   const ctx = createRequestContext("POST /api/stories/upload-url");
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

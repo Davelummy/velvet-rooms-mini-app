@@ -6,7 +6,7 @@ import { createRequestContext } from "../../_lib/observability";
 export async function GET(req, { params }) {
   const ctx = createRequestContext(`GET /api/models/${params.publicId}`);
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

@@ -6,7 +6,7 @@ import { createRequestContext } from "../../../_lib/observability";
 export async function POST(req, { params }) {
   const ctx = createRequestContext(`POST /api/sessions/${params.id}/rate`);
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

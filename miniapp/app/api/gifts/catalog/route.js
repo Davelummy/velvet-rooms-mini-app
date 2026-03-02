@@ -33,7 +33,7 @@ async function ensureGiftsCatalog() {
 export async function GET(req) {
   const ctx = createRequestContext("GET /api/gifts/catalog");
   try {
-    const initData = req.headers.get("x-telegram-init-data") || "";
+    const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
