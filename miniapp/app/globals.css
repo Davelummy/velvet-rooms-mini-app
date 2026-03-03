@@ -1555,6 +1555,69 @@ h1 {
   flex-wrap: wrap;
 }
 
+.profile-tab-card {
+  display: grid;
+  gap: 16px;
+}
+
+.profile-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.profile-facts .line {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 6px;
+}
+
+.profile-facts .line span {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.profile-facts .line strong {
+  font-size: 14px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.sessions-tab-card .session-row {
+  align-items: flex-start;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.sessions-tab-card .session-row:last-child {
+  margin-bottom: 0;
+}
+
+.sessions-tab-card .session-meta {
+  min-width: 0;
+  flex: 1;
+}
+
+.sessions-tab-card .session-actions {
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.sessions-tab-card .session-actions .cta,
+.sessions-tab-card .session-actions .pill,
+.sessions-tab-card .session-actions .status-pill {
+  margin: 0;
+}
+
 .gallery-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1570,6 +1633,17 @@ h1 {
   margin: 4px 0 0;
   font-size: 12px;
   color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .sessions-tab-card .session-row {
+    width: 100%;
+  }
+
+  .sessions-tab-card .session-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .grid-card {

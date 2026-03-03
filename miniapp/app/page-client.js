@@ -35,7 +35,7 @@ const AVATAR_CROP_SIZE = 220;
 const GALLERY_PAGE_SIZE = 18;
 const SESSIONS_PAGE_SIZE = 20;
 const CALL_REACTION_OPTIONS = ["❤️", "🔥", "😍", "👏", "😂", "💫"];
-const CLIENT_TAB_ORDER = ["feed", "explore", "gallery", "sessions", "wallet", "purchases", "following", "profile"];
+const CLIENT_TAB_ORDER = ["feed", "explore", "sessions", "gallery", "profile", "wallet", "purchases", "following"];
 const MODEL_TAB_ORDER = ["content", "sessions", "followers", "earnings", "profile"];
 const CLIENT_TAB_LABELS = {
   feed: "Feed",
@@ -6366,7 +6366,6 @@ export default function Home() {
       {role && (
         <TopBar
           tabLabel={currentTabLabel}
-          walletBalance={Number(profile?.user?.wallet_balance || 0)}
           unreadCount={Number(notifications.unread || 0)}
           onOpenNotifications={() =>
             notifications.open ? closeNotifications() : openNotifications()
@@ -6625,7 +6624,7 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {profile?.user && !isClientFeedTab && (
+            {profile?.user && clientTab === "profile" && (
               <div className="flow-card dashboard-intro-card">
                 <h3>Welcome, {clientDisplayName}</h3>
                 <div className="line">
@@ -6638,12 +6637,12 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {!profile?.user && clientAccessPaid && !isClientFeedTab && (
+            {!profile?.user && clientAccessPaid && clientTab === "profile" && (
               <div className="flow-card profile-summary">
                 <SkeletonProfile />
               </div>
             )}
-            {profile?.user && !isClientFeedTab && (
+            {profile?.user && clientTab === "profile" && (
               <div className="flow-card profile-summary dashboard-summary-card">
                 <div className="summary-head">
                   <span className="avatar">
@@ -7220,7 +7219,7 @@ export default function Home() {
                 )}
 
                 {clientTab === "profile" && (
-                  <div className="flow-card">
+                  <div className="flow-card profile-tab-card">
                     <h3>Your Profile</h3>
                     {profileSavedStatus && (
                       <p className="helper success">{profileSavedStatus}</p>
@@ -7325,47 +7324,49 @@ export default function Home() {
                         </button>
                       </div>
                     )}
-                    <div className="line">
-                      <span>Display name</span>
-                      <strong>
-                        {clientDisplayName || profile?.user?.first_name || "-"}
-                      </strong>
-                    </div>
-                    <div className="line">
-                      <span>Email</span>
-                      <strong>{profile?.user?.email || "-"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Location</span>
-                      <strong>{profile?.client?.location || "-"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Birth month/year</span>
-                      <strong>
-                        {profile?.client?.birth_month && profile?.client?.birth_year
-                          ? `${profile.client.birth_month}/${profile.client.birth_year}`
-                          : "-"}
-                      </strong>
-                    </div>
-                    <div className="line">
-                      <span>Joined</span>
-                      <strong>{profile?.user?.created_at || "-"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Access status</span>
-                      <strong>{clientAccessPaid ? "Unlocked" : "Pending"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Followers</span>
-                      <strong>{profile?.user?.followers_count || 0}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Following</span>
-                      <strong>{profile?.user?.following_count || 0}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Session streak</span>
-                      <strong>{sessionStreak} day{sessionStreak === 1 ? "" : "s"}</strong>
+                    <div className="profile-facts">
+                      <div className="line">
+                        <span>Display name</span>
+                        <strong>
+                          {clientDisplayName || profile?.user?.first_name || "-"}
+                        </strong>
+                      </div>
+                      <div className="line">
+                        <span>Email</span>
+                        <strong>{profile?.user?.email || "-"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Location</span>
+                        <strong>{profile?.client?.location || "-"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Birth month/year</span>
+                        <strong>
+                          {profile?.client?.birth_month && profile?.client?.birth_year
+                            ? `${profile.client.birth_month}/${profile.client.birth_year}`
+                            : "-"}
+                        </strong>
+                      </div>
+                      <div className="line">
+                        <span>Joined</span>
+                        <strong>{profile?.user?.created_at || "-"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Access status</span>
+                        <strong>{clientAccessPaid ? "Unlocked" : "Pending"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Followers</span>
+                        <strong>{profile?.user?.followers_count || 0}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Following</span>
+                        <strong>{profile?.user?.following_count || 0}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Session streak</span>
+                        <strong>{sessionStreak} day{sessionStreak === 1 ? "" : "s"}</strong>
+                      </div>
                     </div>
                     <div className="field-row">
                       <label className="pill">
@@ -7448,6 +7449,9 @@ export default function Home() {
                         ))}
                       </div>
                     )}
+                    <button type="button" className="cta ghost" onClick={() => setClientTab("wallet")}>
+                      Manage wallet
+                    </button>
                     <button type="button" className="cta ghost" onClick={() => setClientTab("purchases")}>
                       View purchases
                     </button>
@@ -7523,7 +7527,7 @@ export default function Home() {
 
                 {clientTab === "sessions" && (
                   clientAccessPaid ? (
-                  <div className="flow-card">
+                  <div className="flow-card sessions-tab-card">
                     <h3>Your Sessions</h3>
                     <div className="dash-actions">
                       <button
@@ -7568,9 +7572,9 @@ export default function Home() {
                           <div
                             key={`session-${item.id}`}
                             id={`client-session-${item.id}`}
-                            className="list-row"
+                            className="list-row session-row"
                           >
-                        <div>
+                        <div className="session-meta">
                           <strong>{item.model_label || "Model"}</strong>
                           <p className="muted">
                             {item.session_type} · {item.duration_minutes} min
@@ -9403,7 +9407,7 @@ export default function Home() {
                 )}
 
                 {modelTab === "profile" && (
-                  <div className="flow-card">
+                  <div className="flow-card profile-tab-card">
                     <h3>Profile</h3>
                     {profileSavedStatus && (
                       <p className="helper success">{profileSavedStatus}</p>
@@ -9508,69 +9512,71 @@ export default function Home() {
                         </button>
                       </div>
                     )}
-                    <div className="line">
-                      <span>Display name</span>
-                      <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Bio</span>
-                      <strong>{profile?.model?.bio || "—"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Tags</span>
-                      <strong>
-                        {Array.isArray(profile?.model?.tags)
-                          ? profile.model.tags.map((tag) => cleanTagLabel(tag)).filter(Boolean).join(", ")
-                          : profile?.model?.tags || "—"}
-                      </strong>
-                    </div>
-                    <div className="line">
-                      <span>Availability</span>
-                      <strong>{profile?.model?.availability || "—"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Email</span>
-                      <strong>{profile?.user?.email || "-"}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Verification</span>
-                      <strong>
-                        {profile?.model?.verification_status === "approved"
-                          ? "Approved"
-                          : profile?.model?.verification_status || "Pending"}
-                      </strong>
-                    </div>
-                    <div className="line">
-                      <span>Account type</span>
-                      <strong>Model</strong>
-                    </div>
-                    <div className="line">
-                      <span>Total teasers</span>
-                      <strong>{modelItems.length}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Approved teasers</span>
-                      <strong>{modelItems.filter((item) => item.is_active).length}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Pending teasers</span>
-                      <strong>{modelItems.filter((item) => !item.is_active).length}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Total teaser views</span>
-                      <strong>{modelEngagementTotals.views}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Total teaser likes</span>
-                      <strong>{modelEngagementTotals.likes}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Followers</span>
-                      <strong>{profile?.user?.followers_count || 0}</strong>
-                    </div>
-                    <div className="line">
-                      <span>Following</span>
-                      <strong>{profile?.user?.following_count || 0}</strong>
+                    <div className="profile-facts">
+                      <div className="line">
+                        <span>Display name</span>
+                        <strong>{profile?.model?.display_name || modelForm.stageName || "Model"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Bio</span>
+                        <strong>{profile?.model?.bio || "—"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Tags</span>
+                        <strong>
+                          {Array.isArray(profile?.model?.tags)
+                            ? profile.model.tags.map((tag) => cleanTagLabel(tag)).filter(Boolean).join(", ")
+                            : profile?.model?.tags || "—"}
+                        </strong>
+                      </div>
+                      <div className="line">
+                        <span>Availability</span>
+                        <strong>{profile?.model?.availability || "—"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Email</span>
+                        <strong>{profile?.user?.email || "-"}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Verification</span>
+                        <strong>
+                          {profile?.model?.verification_status === "approved"
+                            ? "Approved"
+                            : profile?.model?.verification_status || "Pending"}
+                        </strong>
+                      </div>
+                      <div className="line">
+                        <span>Account type</span>
+                        <strong>Model</strong>
+                      </div>
+                      <div className="line">
+                        <span>Total teasers</span>
+                        <strong>{modelItems.length}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Approved teasers</span>
+                        <strong>{modelItems.filter((item) => item.is_active).length}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Pending teasers</span>
+                        <strong>{modelItems.filter((item) => !item.is_active).length}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Total teaser views</span>
+                        <strong>{modelEngagementTotals.views}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Total teaser likes</span>
+                        <strong>{modelEngagementTotals.likes}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Followers</span>
+                        <strong>{profile?.user?.followers_count || 0}</strong>
+                      </div>
+                      <div className="line">
+                        <span>Following</span>
+                        <strong>{profile?.user?.following_count || 0}</strong>
+                      </div>
                     </div>
                     <div className="field-row">
                       <label className="pill">
@@ -9887,7 +9893,7 @@ export default function Home() {
                 )}
 
                 {modelTab === "sessions" && (
-                  <div className="flow-card">
+                  <div className="flow-card sessions-tab-card">
                     <h3>My Bookings</h3>
                     <div className="dash-actions">
                       <button

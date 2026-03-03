@@ -2,15 +2,21 @@ import { NextResponse } from "next/server";
 import { verifyInitData, extractUser } from "../../_lib/telegram";
 import { query } from "../../_lib/db";
 import { createRequestContext } from "../../_lib/observability";
+import { ensureUserColumns } from "../../_lib/users";
+import { ensureModelProfileColumns } from "../../_lib/models";
+
+const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
 export async function GET(req, { params }) {
   const ctx = createRequestContext(`GET /api/models/${params.publicId}`);
   try {
     const initData = req.headers.get("x-telegram-init") || "";
-    if (!verifyInitData(initData)) {
+    if (!verifyInitData(initData, BOT_TOKEN)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const tgUser = extractUser(initData);
+    await ensureUserColumns();
+    await ensureModelProfileColumns();
 
     // Get viewer ID if logged in
     let viewerId = null;
@@ -32,8 +38,8 @@ export async function GET(req, { params }) {
        FROM users u
        JOIN model_profiles mp ON mp.user_id = u.id
        WHERE (u.public_id = $1 OR u.username = $1)
-         AND u.status = 'active'
-         AND mp.approved = TRUE`,
+         AND COALESCE(u.status, 'active') = 'active'
+         AND (u.role = 'model' OR mp.verification_status = 'approved')`,
       [params.publicId]
     );
 

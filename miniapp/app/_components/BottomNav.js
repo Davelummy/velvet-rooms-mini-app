@@ -37,12 +37,13 @@ const CLIENT_TABS = [
     ),
   },
   {
-    id: "wallet",
-    label: "Wallet",
+    id: "gallery",
+    label: "Gallery",
     icon: (active) => (
       <svg width="24" height="24" viewBox="0 0 24 24" fill={active ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-        <rect x="2" y="5" width="20" height="14" rx="2" />
-        <path d="M16 13a1 1 0 1 0 2 0 1 1 0 0 0-2 0z" />
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="9" cy="10" r="2" />
+        <path d="m21 16-4.5-4.5L8 20" />
       </svg>
     ),
   },
@@ -118,7 +119,10 @@ export default function BottomNav({ role, hidden = false, feedMode = false }) {
 
   const isModel = role === "model";
   const tabs = isModel ? MODEL_TABS : CLIENT_TABS;
-  const activeTab = isModel ? activeModelTab : activeClientTab;
+  const activeTabRaw = isModel ? activeModelTab : activeClientTab;
+  const activeTab = tabs.some((tab) => tab.id === activeTabRaw)
+    ? activeTabRaw
+    : "profile";
   const setActiveTab = isModel ? setActiveModelTab : setActiveClientTab;
 
   const handleTabClick = (tabId) => {

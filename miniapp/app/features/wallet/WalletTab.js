@@ -17,8 +17,13 @@ export default function WalletTab() {
     setError(null);
     try {
       const data = await api.get("/api/me");
+      const balance =
+        data?.user?.wallet_balance ??
+        data?.wallet_balance ??
+        data?.profile?.wallet_balance ??
+        0;
       setWallet({
-        balance: data.wallet_balance ?? data.profile?.wallet_balance ?? 0,
+        balance,
       });
       // Fetch recent transactions if available
     } catch (err) {

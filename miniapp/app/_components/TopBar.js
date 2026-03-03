@@ -2,7 +2,6 @@
 
 export default function TopBar({
   tabLabel = "Dashboard",
-  walletBalance = 0,
   unreadCount = 0,
   onOpenNotifications,
   transparent = false,
@@ -21,10 +20,6 @@ export default function TopBar({
         </div>
       </div>
       <div className="top-bar-right">
-        <button type="button" className="wallet-chip" aria-label="Wallet balance">
-          <span className="wallet-chip-dot" />
-          <span>₦{Number(walletBalance || 0).toLocaleString()}</span>
-        </button>
         <button
           type="button"
           className="icon-btn notice-bell"

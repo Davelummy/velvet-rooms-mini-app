@@ -3,6 +3,8 @@ import { verifyInitData, extractUser } from "../_lib/telegram";
 import { query } from "../_lib/db";
 import { checkRateLimit } from "../_lib/rate_limit";
 import { createRequestContext } from "../_lib/observability";
+import { ensureUserColumns } from "../_lib/users";
+import { ensureModelProfileColumns } from "../_lib/models";
 
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
@@ -15,30 +17,24 @@ export async function GET(req) {
     }
     const tgUser = extractUser(initData);
     if (!tgUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await ensureUserColumns();
+    await ensureModelProfileColumns();
 
     const rl = await checkRateLimit(`explore:${tgUser.id}`, 60, 60);
     if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") || "").trim();
-    const tags = searchParams.get("tags") || "";
     const limit = Math.min(parseInt(searchParams.get("limit") || "20", 10), 50);
     const offset = parseInt(searchParams.get("offset") || "0", 10);
 
     const params = [limit, offset];
-    let whereClause = "WHERE u.status = 'active' AND mp.approved = TRUE";
+    let whereClause =
+      "WHERE COALESCE(u.status, 'active') = 'active' AND (u.role = 'model' OR mp.verification_status = 'approved')";
 
     if (q) {
       params.push(`%${q}%`);
       whereClause += ` AND (mp.display_name ILIKE $${params.length} OR u.username ILIKE $${params.length})`;
-    }
-
-    if (tags) {
-      const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
-      if (tagList.length > 0) {
-        params.push(tagList);
-        whereClause += ` AND mp.tags && $${params.length}::text[]`;
-      }
     }
 
     const res = await query(
