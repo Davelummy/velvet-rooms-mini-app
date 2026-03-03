@@ -261,6 +261,7 @@ export default function Home() {
   const [clientTab, setClientTabState] = useState(activeClientTab || "feed");
   const [modelTab, setModelTabState] = useState(activeModelTab || "profile");
   const [feedChromeHidden, setFeedChromeHidden] = useState(false);
+  const [feedObserverReady, setFeedObserverReady] = useState(false);
   const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
   const [modelContentFilter, setModelContentFilter] = useState("all");
   const [clientForm, setClientForm] = useState({
@@ -994,8 +995,11 @@ export default function Home() {
     const isFeedVisible = role === "client" && clientTab === "feed";
     if (!isFeedVisible || typeof window === "undefined") {
       setFeedChromeHidden(false);
+      setFeedObserverReady(false);
       return;
     }
+    setFeedChromeHidden(false);
+    setFeedObserverReady(false);
     let observer = null;
     const tryAttach = () => {
       if (observer) {
@@ -1004,8 +1008,11 @@ export default function Home() {
       const viewport = document.querySelector(".feed-viewport");
       const firstCard = viewport?.querySelector(".feed-slide");
       if (!viewport || !firstCard) {
+        setFeedChromeHidden(false);
+        setFeedObserverReady(false);
         return;
       }
+      setFeedObserverReady(true);
       observer = new IntersectionObserver(
         (entries) => {
           const [entry] = entries;
@@ -1022,6 +1029,7 @@ export default function Home() {
     tryAttach();
     return () => {
       window.clearInterval(intervalId);
+      setFeedObserverReady(false);
       if (observer) {
         observer.disconnect();
       }
@@ -6371,7 +6379,7 @@ export default function Home() {
             notifications.open ? closeNotifications() : openNotifications()
           }
           transparent={isClientFeedTab}
-          hidden={isClientFeedTab && feedChromeHidden}
+          hidden={isClientFeedTab && feedObserverReady && feedChromeHidden}
         />
       )}
       {!role && (
@@ -10366,7 +10374,7 @@ export default function Home() {
       {showBottomNav && (
         <BottomNav
           role={role}
-          hidden={isClientFeedTab && feedChromeHidden}
+          hidden={isClientFeedTab && feedObserverReady && feedChromeHidden}
           feedMode={isClientFeedTab}
         />
       )}
