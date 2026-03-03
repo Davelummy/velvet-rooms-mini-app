@@ -123,7 +123,11 @@ export default function BottomNav({ role, hidden = false, feedMode = false }) {
 
   const handleTabClick = (tabId) => {
     if (tabId === activeTab) return;
-    selection();
+    try {
+      selection();
+    } catch {
+      // Defensive: haptics should never block tab navigation.
+    }
     setActiveTab(tabId);
   };
 
@@ -136,6 +140,7 @@ export default function BottomNav({ role, hidden = false, feedMode = false }) {
           return (
             <button
               key={tab.id}
+              type="button"
               className="bottom-nav-item"
               onClick={() => handleTabClick(tab.id)}
               style={{ color: isActive ? "var(--accent)" : "var(--muted)" }}

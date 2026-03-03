@@ -3,14 +3,22 @@ function getHapticFeedback() {
   return window.Telegram?.WebApp?.HapticFeedback ?? null;
 }
 
+function safelyRunHaptic(action) {
+  try {
+    action?.();
+  } catch {
+    // Ignore WebView-specific haptic errors; haptics are best-effort only.
+  }
+}
+
 export const haptic = {
   impact(style = "medium") {
-    getHapticFeedback()?.impactOccurred(style);
+    safelyRunHaptic(() => getHapticFeedback()?.impactOccurred(style));
   },
   notification(type = "success") {
-    getHapticFeedback()?.notificationOccurred(type);
+    safelyRunHaptic(() => getHapticFeedback()?.notificationOccurred(type));
   },
   selection() {
-    getHapticFeedback()?.selectionChanged();
+    safelyRunHaptic(() => getHapticFeedback()?.selectionChanged());
   },
 };
