@@ -7,17 +7,20 @@ import {
   EmptyState,
   ErrorState,
   StatusPill,
-  SyncIndicator,
 } from "./_components/ui-kit";
 import BottomNav from "./_components/BottomNav";
 import TopBar from "./_components/TopBar";
-import { SkeletonEarnings, SkeletonList, SkeletonProfile } from "./_components/SkeletonCard";
+import { SkeletonList, SkeletonProfile } from "./_components/SkeletonCard";
 import FeedTab from "./features/feed/FeedTab";
 import ExploreTab from "./features/explore/ExploreTab";
 import GoLiveButton from "./features/live/GoLiveButton";
 import LiveSetupSheet from "./features/live/LiveSetupSheet";
 import LiveRoom from "./features/live/LiveRoom";
 import NotificationsV2 from "./features/notifications/NotificationsV2";
+import WalletTab from "./features/wallet/WalletTab";
+import EarningsDashboardV2 from "./features/earnings/EarningsDashboardV2";
+import FollowersTab from "./features/followers/FollowersTab";
+import PurchasesTab from "./features/purchases/PurchasesTab";
 import { useLiveStore } from "./_store/useLiveStore";
 import { useUIStore } from "./_store/useUIStore";
 
@@ -256,7 +259,6 @@ export default function Home() {
   const [modelTabTransition, setModelTabTransition] = useState("forward");
   const [clientTab, setClientTabState] = useState(activeClientTab || "feed");
   const [modelTab, setModelTabState] = useState(activeModelTab || "profile");
-  const [syncExpanded, setSyncExpanded] = useState(false);
   const [feedChromeHidden, setFeedChromeHidden] = useState(false);
   const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
   const [modelContentFilter, setModelContentFilter] = useState("all");
@@ -385,8 +387,6 @@ export default function Home() {
     loading: false,
     error: "",
   });
-  const [syncMarks, setSyncMarks] = useState({});
-  const [syncTicker, setSyncTicker] = useState(0);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const chatLogRef = useRef(null);
@@ -573,12 +573,7 @@ export default function Home() {
     }, 4000);
   };
 
-  const markSynced = (scope) => {
-    if (!scope) {
-      return;
-    }
-    setSyncMarks((prev) => ({ ...prev, [scope]: new Date().toISOString() }));
-  };
+  const markSynced = () => {};
 
   const parseApiErrorPayload = async (response) => {
     try {
@@ -922,10 +917,6 @@ export default function Home() {
     status: "",
     loading: false,
   });
-  const [modelEarnings, setModelEarnings] = useState(null);
-  const [modelEarningsStatus, setModelEarningsStatus] = useState("");
-  const [modelEarningsLoading, setModelEarningsLoading] = useState(false);
-
   const resolveTabDirection = (previous, next, order) => {
     const previousIndex = order.indexOf(previous);
     const nextIndex = order.indexOf(next);
@@ -995,7 +986,7 @@ export default function Home() {
   }, [clientTab, modelTab]);
 
   useEffect(() => {
-    const isFeedVisible = role === "client" && clientAccessPaid && clientTab === "feed";
+    const isFeedVisible = role === "client" && clientTab === "feed";
     if (!isFeedVisible || typeof window === "undefined") {
       setFeedChromeHidden(false);
       return;
@@ -1030,7 +1021,7 @@ export default function Home() {
         observer.disconnect();
       }
     };
-  }, [role, clientAccessPaid, clientTab]);
+  }, [role, clientTab]);
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -1195,13 +1186,6 @@ export default function Home() {
     handleVisibility();
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSyncTicker((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -1628,28 +1612,6 @@ export default function Home() {
     }
     return streak;
   }, [clientSessions]);
-  const currentSyncScope =
-    role === "model"
-      ? modelTab === "sessions"
-        ? "bookings"
-        : modelTab === "followers"
-        ? "followers"
-        : modelTab === "earnings"
-        ? "earnings"
-        : modelTab === "content"
-        ? "model_content"
-        : "profile"
-      : clientTab === "sessions"
-      ? "client_sessions"
-      : clientTab === "following"
-      ? "following"
-      : clientTab === "wallet"
-      ? "wallet"
-      : clientTab === "purchases"
-      ? "purchases"
-      : clientTab === "profile"
-      ? "profile"
-      : "gallery";
   const teaserViewMs = 60000;
   const sessionPricing = {
     chat: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
@@ -4167,36 +4129,6 @@ export default function Home() {
   }, [initData, pageVisible, role, clientAccessPaid, clientTab]);
 
   useEffect(() => {
-    if (!initData || role !== "model" || !modelApproved || modelTab !== "earnings") {
-      return;
-    }
-    const loadEarnings = async () => {
-      setModelEarningsLoading(true);
-      try {
-        const res = await fetch("/api/earnings", {
-          headers: { "x-telegram-init": initData },
-        });
-        if (!res.ok) {
-          setModelEarningsStatus(`Unable to load earnings (HTTP ${res.status}).`);
-          setModelEarnings(null);
-          setModelEarningsLoading(false);
-          return;
-        }
-        const data = await res.json();
-        setModelEarnings(data);
-        setModelEarningsStatus("");
-        markSynced("earnings");
-      } catch {
-        setModelEarningsStatus("Unable to load earnings.");
-        setModelEarnings(null);
-      } finally {
-        setModelEarningsLoading(false);
-      }
-    };
-    loadEarnings();
-  }, [initData, pageVisible, role, modelApproved, modelTab]);
-
-  useEffect(() => {
     if (!initData || role !== "model" || !modelApproved) {
       return;
     }
@@ -6409,9 +6341,8 @@ export default function Home() {
   }
 
   const showOnboarding = !role && !roleLocked && !onboardingComplete;
-  const showBottomNav =
-    (role === "client" && clientAccessPaid) || (role === "model" && modelApproved);
-  const isClientFeedTab = role === "client" && clientAccessPaid && clientTab === "feed";
+  const showBottomNav = role === "client" || (role === "model" && modelApproved);
+  const isClientFeedTab = role === "client" && clientTab === "feed";
   const currentTabLabel =
     role === "model"
       ? MODEL_TAB_LABELS[modelTab] || "Dashboard"
@@ -6940,26 +6871,7 @@ export default function Home() {
                 )}
               </>
             )}
-            {clientAccessPaid && (
-              <>
-                {!isClientFeedTab && (
-                  <div className="sync-row" data-sync-tick={syncTicker}>
-                    <button
-                      type="button"
-                      className="sync-toggle"
-                      onClick={() => setSyncExpanded((prev) => !prev)}
-                    >
-                      {syncExpanded ? "Hide sync status" : "Show sync status"}
-                    </button>
-                    {syncExpanded && (
-                      <SyncIndicator
-                        lastSyncedAt={syncMarks[currentSyncScope]}
-                        active={pageVisible}
-                        label="Last synced"
-                      />
-                    )}
-                  </div>
-                )}
+            <>
                 <div
                   key={`client-tab-${clientTab}`}
                   className={`tab-stage ${
@@ -6972,6 +6884,7 @@ export default function Home() {
                 {clientTab === "explore" && <ExploreTab />}
 
                 {clientTab === "gallery" && (
+                  clientAccessPaid ? (
                   <div className="flow-card">
                     <h3>Content Gallery</h3>
                     <p>Browse verified creators, buy content, or book a session.</p>
@@ -7281,6 +7194,20 @@ export default function Home() {
                       </>
                     )}
                   </div>
+                  ) : (
+                  <div className="flow-card">
+                    <h3>Content Gallery</h3>
+                    <p className="helper">Gallery access unlocks after your one-time access payment is approved.</p>
+                    <div className="dash-actions">
+                      <button type="button" className="cta primary" onClick={() => setClientStep(2)}>
+                        Continue to access fee
+                      </button>
+                      <button type="button" className="cta ghost" onClick={refreshClientAccess}>
+                        I already paid
+                      </button>
+                    </div>
+                  </div>
+                  )
                 )}
 
                 {clientTab === "profile" && (
@@ -7512,6 +7439,9 @@ export default function Home() {
                         ))}
                       </div>
                     )}
+                    <button type="button" className="cta ghost" onClick={() => setClientTab("purchases")}>
+                      View purchases
+                    </button>
                     <button type="button" className="cta primary alt" onClick={deleteClientAccount}>
                       Delete account
                     </button>
@@ -7574,36 +7504,16 @@ export default function Home() {
                 )}
 
                 {clientTab === "purchases" && (
-                  <div className="flow-card">
-                    <h3>Your Purchases</h3>
-                    {clientPurchasesStatus && (
-                      <p className="helper error">{clientPurchasesStatus}</p>
-                    )}
-                    {clientPurchasesLoading && <SkeletonList count={3} />}
-                    {!clientPurchasesStatus && !clientPurchasesLoading && clientPurchases.length === 0 && (
-                      <EmptyState title="No purchases yet" body="Completed unlocks and sessions will appear here." />
-                    )}
-                    {!clientPurchasesLoading && clientPurchases.map((item) => (
-                      <div key={`purchase-${item.id}`} className="list-row">
-                        <div>
-                          <strong>{item.title || "Session"}</strong>
-                          <p className="muted">
-                            {item.display_name || item.public_id} · {item.content_type}
-                          </p>
-                        </div>
-                        <span className={`status-pill ${getStatusTone(item.status)}`}>
-                          {item.item_type === "session"
-                            ? "Session completed"
-                            : item.status === "rejected"
-                            ? "Rejected by admin"
-                            : item.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <PurchasesTab
+                    status={clientPurchasesStatus}
+                    loading={clientPurchasesLoading}
+                    purchases={clientPurchases}
+                    getStatusTone={getStatusTone}
+                  />
                 )}
 
                 {clientTab === "sessions" && (
+                  clientAccessPaid ? (
                   <div className="flow-card">
                     <h3>Your Sessions</h3>
                     <div className="dash-actions">
@@ -7805,25 +7715,32 @@ export default function Home() {
                       </div>
                     )}
                   </div>
+                  ) : (
+                  <div className="flow-card">
+                    <h3>Your Sessions</h3>
+                    <p className="helper">Sessions unlock after your gallery access fee is approved.</p>
+                    <button type="button" className="cta primary" onClick={() => setClientStep(2)}>
+                      Unlock sessions
+                    </button>
+                  </div>
+                  )
                 )}
 
                 {clientTab === "wallet" && (
-                  <div className="flow-card">
-                    <h3>Wallet</h3>
-                    <div className="line">
-                      <span>Balance</span>
-                      <strong>
-                        ₦{Number(profile?.user?.wallet_balance || 0).toLocaleString()}
-                      </strong>
+                  clientAccessPaid ? (
+                    <WalletTab />
+                  ) : (
+                    <div className="flow-card">
+                      <h3>Wallet</h3>
+                      <p className="helper">Wallet unlocks after the one-time gallery access fee.</p>
+                      <button type="button" className="cta primary" onClick={() => setClientStep(2)}>
+                        Unlock wallet
+                      </button>
                     </div>
-                    <p className="helper">
-                      Escrow payments and releases appear here once completed.
-                    </p>
-                  </div>
+                  )
                 )}
                 </div>
-              </>
-            )}
+            </>
           </div>
           {clientStatus && <p className="helper error">{clientStatus}</p>}
           {clientStep === 1 && !clientAccessPaid && (
@@ -9453,22 +9370,6 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="sync-row" data-sync-tick={syncTicker}>
-                  <button
-                    type="button"
-                    className="sync-toggle"
-                    onClick={() => setSyncExpanded((prev) => !prev)}
-                  >
-                    {syncExpanded ? "Hide sync status" : "Show sync status"}
-                  </button>
-                  {syncExpanded && (
-                    <SyncIndicator
-                      lastSyncedAt={syncMarks[currentSyncScope]}
-                      active={pageVisible}
-                      label="Last synced"
-                    />
-                  )}
-                </div>
                 <div
                   key={`model-tab-${modelTab}`}
                   className={`tab-stage ${
@@ -10162,147 +10063,19 @@ export default function Home() {
                   </div>
                 )}
 
-                {modelTab === "earnings" && (
-                  <div className="flow-card">
-                    <h3>Earnings</h3>
-                    {modelEarningsLoading && <SkeletonEarnings />}
-                    {modelEarningsStatus && (
-                      <p className="helper error">{modelEarningsStatus}</p>
-                    )}
-                    {!modelEarningsLoading && !modelEarningsStatus && !modelEarnings && (
-                      <EmptyState title="No earnings data yet" body="Payout and session metrics will appear once you complete bookings." />
-                    )}
-                    {!modelEarningsLoading && modelEarnings && (
-                      <>
-                        <div className="line">
-                          <span>Total released</span>
-                          <strong>
-                            ₦{Number(modelEarnings.payouts?.total_released || 0).toLocaleString()}
-                          </strong>
-                        </div>
-                        <div className="line">
-                          <span>Pending payout</span>
-                          <strong>
-                            ₦{Number(modelEarnings.payouts?.pending_payout || 0).toLocaleString()}
-                          </strong>
-                        </div>
-                        <div className="line">
-                          <span>Released (7 days)</span>
-                          <strong>
-                            ₦{Number(modelEarnings.payouts?.released_7d || 0).toLocaleString()}
-                          </strong>
-                        </div>
-                        <div className="line">
-                          <span>Total sessions</span>
-                          <strong>{modelEarnings.sessions?.total || 0}</strong>
-                        </div>
-                        <div className="line">
-                          <span>Completed sessions</span>
-                          <strong>{modelEarnings.sessions?.completed || 0}</strong>
-                        </div>
-                        <div className="line">
-                          <span>Active sessions</span>
-                          <strong>{modelEarnings.sessions?.active || 0}</strong>
-                        </div>
-                        <div className="line">
-                          <span>Total content</span>
-                          <strong>{modelEarnings.content?.total || 0}</strong>
-                        </div>
-                        <div className="line">
-                          <span>Approved content</span>
-                          <strong>{modelEarnings.content?.approved || 0}</strong>
-                        </div>
-                        <div className="line">
-                          <span>Pending content</span>
-                          <strong>{modelEarnings.content?.pending || 0}</strong>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
+                {modelTab === "earnings" && <EarningsDashboardV2 />}
 
                 {modelTab === "followers" && (
-                  <div className="flow-card">
-                    <h3>Your Followers</h3>
-                    {followersStats && (
-                      <div className="metric-grid">
-                        <div className="metric-card">
-                          <span>Total followers</span>
-                          <strong>{followersStats.total}</strong>
-                        </div>
-                        <div className="metric-card">
-                          <span>New (7 days)</span>
-                          <strong>{followersStats.last_7d}</strong>
-                        </div>
-                        <div className="metric-card">
-                          <span>Growth (7 days)</span>
-                          <strong>{followersStats.growth_7d >= 0 ? "+" : ""}{followersStats.growth_7d}</strong>
-                        </div>
-                        <div className="metric-card">
-                          <span>New (30 days)</span>
-                          <strong>{followersStats.last_30d}</strong>
-                        </div>
-                      </div>
-                    )}
-                    <div className="dash-actions">
-                      <button
-                        type="button"
-                        className={`cta ${followersFilter === "all" ? "primary" : "ghost"}`}
-                        onClick={() => setFollowersFilter("all")}
-                      >
-                        All
-                      </button>
-                      <button
-                        type="button"
-                        className={`cta ${followersFilter === "online" ? "primary" : "ghost"}`}
-                        onClick={() => setFollowersFilter("online")}
-                      >
-                        Online
-                      </button>
-                      <button
-                        type="button"
-                        className={`cta ${followersFilter === "offline" ? "primary" : "ghost"}`}
-                        onClick={() => setFollowersFilter("offline")}
-                      >
-                        Offline
-                      </button>
-                    </div>
-                    {followersStatus && <p className="helper error">{followersStatus}</p>}
-                    {!followersStatus && followers.length === 0 && (
-                      <EmptyState title="No followers yet" body="Share content and go live to grow your audience." />
-                    )}
-                    {!followersStatus && followers.length > 0 && filteredFollowers.length === 0 && (
-                      <EmptyState title="No followers match this filter" body="Try switching back to all followers." />
-                    )}
-                    {!followersStatus && filteredFollowers.length > 0 && (
-                      <div className="gallery-grid">
-                        {filteredFollowers.map((item) => (
-                          <div key={`follower-${item.id}`} className="gallery-card">
-                            <div className="gallery-body">
-                              <div className="list-row">
-                                <div className="avatar small">
-                                  {item.avatar_url ? (
-                                    <img loading="lazy" decoding="async" src={item.avatar_url} alt="Follower" />
-                                  ) : (
-                                    <span>{resolveDisplayName(item, "U")[0]}</span>
-                                  )}
-                                </div>
-                                <div>
-                                  <strong>{resolveDisplayName(item)}</strong>
-                                  <p className="muted">{item.role || "user"}</p>
-                                </div>
-                              </div>
-                              <div className="gallery-actions">
-                                <span className={`status-pill ${item.is_online ? "success" : ""}`}>
-                                  {formatPresence(item.is_online, item.last_seen_at)}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <FollowersTab
+                    followersStats={followersStats}
+                    followersStatus={followersStatus}
+                    followers={followers}
+                    filteredFollowers={filteredFollowers}
+                    followersFilter={followersFilter}
+                    onFilterChange={setFollowersFilter}
+                    resolveDisplayName={resolveDisplayName}
+                    formatPresence={formatPresence}
+                  />
                 )}
                 </div>
               </>
