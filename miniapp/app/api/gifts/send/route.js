@@ -27,7 +27,7 @@ async function ensureGiftsTables() {
 }
 
 export async function POST(req) {
-  const ctx = createRequestContext("POST /api/gifts/send");
+  const ctx = createRequestContext(req, "POST /api/gifts/send");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
@@ -36,8 +36,12 @@ export async function POST(req) {
     const tgUser = extractUser(initData);
     if (!tgUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const rl = await checkRateLimit(`gift-send:${tgUser.id}`, 10, 60);
-    if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    const rateAllowed = await checkRateLimit({
+      key: `gift-send:${tgUser.id}`,
+      limit: 10,
+      windowSeconds: 60,
+    });
+    if (!rateAllowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const { giftId, recipientId, sessionId, liveStreamId, idempotencyKey } = await req.json();
     if (!giftId || !recipientId) {

@@ -59,8 +59,12 @@ export async function POST(req) {
     const tgUser = extractUser(initData);
     if (!tgUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const rl = await checkRateLimit(`live-start:${tgUser.id}`, 5, 3600);
-    if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    const rateAllowed = await checkRateLimit({
+      key: `live-start:${tgUser.id}`,
+      limit: 5,
+      windowSeconds: 3600,
+    });
+    if (!rateAllowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const userRes = await query(
       "SELECT id, username FROM users WHERE telegram_id = $1 AND role = 'model'",

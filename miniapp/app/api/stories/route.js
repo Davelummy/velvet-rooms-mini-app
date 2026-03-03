@@ -36,7 +36,7 @@ async function ensureStoriesTables() {
 }
 
 export async function GET(req) {
-  const ctx = createRequestContext("GET /api/stories");
+  const ctx = createRequestContext(req, "GET /api/stories");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
@@ -111,7 +111,7 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const ctx = createRequestContext("POST /api/stories");
+  const ctx = createRequestContext(req, "POST /api/stories");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
@@ -120,8 +120,12 @@ export async function POST(req) {
     const tgUser = extractUser(initData);
     if (!tgUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const rl = await checkRateLimit(`story-create:${tgUser.id}`, 10, 3600);
-    if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    const rateAllowed = await checkRateLimit({
+      key: `story-create:${tgUser.id}`,
+      limit: 10,
+      windowSeconds: 3600,
+    });
+    if (!rateAllowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const userRes = await query(
       "SELECT id FROM users WHERE telegram_id = $1 AND role = 'model'",

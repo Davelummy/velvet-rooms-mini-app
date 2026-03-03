@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { verifyInitData, extractUser } from "../../../_lib/telegram";
 import { query } from "../../../_lib/db";
 import { createRequestContext } from "../../../_lib/observability";
+const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
 export async function POST(req, { params }) {
-  const ctx = createRequestContext(`POST /api/sessions/${params.id}/ready`);
+  const ctx = createRequestContext(req, `POST /api/sessions/${params.id}/ready`);
   try {
     const initData = req.headers.get("x-telegram-init") || "";
-    if (!verifyInitData(initData)) {
+    if (!verifyInitData(initData, BOT_TOKEN)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const tgUser = extractUser(initData);

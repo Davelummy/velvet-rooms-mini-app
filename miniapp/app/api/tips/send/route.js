@@ -30,7 +30,7 @@ async function ensureTipsTable() {
 }
 
 export async function POST(req) {
-  const ctx = createRequestContext("POST /api/tips/send");
+  const ctx = createRequestContext(req, "POST /api/tips/send");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
@@ -39,8 +39,12 @@ export async function POST(req) {
     const tgUser = extractUser(initData);
     if (!tgUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const rl = await checkRateLimit(`tip-send:${tgUser.id}`, 20, 60);
-    if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    const rateAllowed = await checkRateLimit({
+      key: `tip-send:${tgUser.id}`,
+      limit: 20,
+      windowSeconds: 60,
+    });
+    if (!rateAllowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const body = await req.json();
     const { recipientId, amount, contextType = "profile", contextId, message, idempotencyKey } = body;

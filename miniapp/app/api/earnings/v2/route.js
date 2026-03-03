@@ -3,6 +3,7 @@ import { verifyInitData, extractUser } from "../../_lib/telegram";
 import { query } from "../../_lib/db";
 import { checkRateLimit } from "../../_lib/rate_limit";
 import { createRequestContext } from "../../_lib/observability";
+const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
 async function ensureEarningsMonthly() {
   await query(
@@ -22,17 +23,21 @@ async function ensureEarningsMonthly() {
 }
 
 export async function GET(req) {
-  const ctx = createRequestContext("GET /api/earnings/v2");
+  const ctx = createRequestContext(req, "GET /api/earnings/v2");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
-    if (!verifyInitData(initData)) {
+    if (!verifyInitData(initData, BOT_TOKEN)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const tgUser = extractUser(initData);
     if (!tgUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const rl = await checkRateLimit(`earnings:${tgUser.id}`, 30, 60);
-    if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    const rateAllowed = await checkRateLimit({
+      key: `earnings:${tgUser.id}`,
+      limit: 30,
+      windowSeconds: 60,
+    });
+    if (!rateAllowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const userRes = await query(
       "SELECT id FROM users WHERE telegram_id = $1 AND role = 'model'",

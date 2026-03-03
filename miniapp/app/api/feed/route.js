@@ -7,7 +7,7 @@ import { createRequestContext } from "../_lib/observability";
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
 export async function GET(req) {
-  const ctx = createRequestContext("GET /api/feed");
+  const ctx = createRequestContext(req, "GET /api/feed");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {
@@ -16,8 +16,12 @@ export async function GET(req) {
     const tgUser = extractUser(initData);
     if (!tgUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const rl = await checkRateLimit(`feed:${tgUser.id}`, 60, 60);
-    if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    const rateAllowed = await checkRateLimit({
+      key: `feed:${tgUser.id}`,
+      limit: 60,
+      windowSeconds: 60,
+    });
+    if (!rateAllowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const { searchParams } = new URL(req.url);
     const tab = searchParams.get("tab") || "foryou";

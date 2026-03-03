@@ -20,8 +20,12 @@ export async function GET(req) {
     await ensureUserColumns();
     await ensureModelProfileColumns();
 
-    const rl = await checkRateLimit(`explore:${tgUser.id}`, 60, 60);
-    if (!rl.allowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
+    const rateAllowed = await checkRateLimit({
+      key: `explore:${tgUser.id}`,
+      limit: 60,
+      windowSeconds: 60,
+    });
+    if (!rateAllowed) return NextResponse.json({ error: "Rate limited" }, { status: 429 });
 
     const { searchParams } = new URL(req.url);
     const q = (searchParams.get("q") || "").trim();
