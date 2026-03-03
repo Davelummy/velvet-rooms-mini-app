@@ -5,7 +5,7 @@ import { api } from "../../_lib/apiClient";
 import { mapApiError } from "../../_lib/formatters";
 import ModelCard from "./ModelCard";
 import ExploreSearch from "./ExploreSearch";
-import { SkeletonList } from "../../_components/SkeletonCard";
+import { SkeletonGallery } from "../../_components/SkeletonCard";
 import { EmptyState, ErrorState } from "../../_components/ui-kit";
 
 const PAGE_SIZE = 20;
@@ -54,10 +54,8 @@ export default function ExploreGrid({ onModelTap, onBook }) {
   if (loading && models.length === 0) return (
     <div>
       <ExploreSearch value={query} onChange={handleQueryChange} />
-      <div className="explore-grid" style={{ padding: "0 16px" }}>
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="skeleton-media skeleton-block" style={{ paddingTop: "150%", borderRadius: "16px" }} />
-        ))}
+      <div style={{ padding: "0 16px" }}>
+        <SkeletonGallery />
       </div>
     </div>
   );

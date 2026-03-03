@@ -72,7 +72,7 @@ export default function NotificationsV2({ open, onClose }) {
     try {
       const data = await api.get("/api/notifications", activeCategory !== "all" ? { category: activeCategory } : {});
       setNotifications(data.items || []);
-      setUnreadCount(data.unreadCount || 0);
+      setUnreadCount(data.unreadCount || data.unread || 0);
     } catch (err) {
       setError(mapApiError(err));
     } finally {

@@ -111,7 +111,7 @@ const MODEL_TABS = [
   },
 ];
 
-export default function BottomNav({ role }) {
+export default function BottomNav({ role, hidden = false, feedMode = false }) {
   const { activeClientTab, activeModelTab, setActiveClientTab, setActiveModelTab } = useUIStore();
   const { unreadCount } = useNotificationStore();
   const { selection } = useHaptic();
@@ -128,8 +128,8 @@ export default function BottomNav({ role }) {
   };
 
   return (
-    <nav className="bottom-nav" style={{ background: "var(--card)", borderTop: "1px solid var(--line)" }}>
-      <div style={{ display: "flex", alignItems: "center" }}>
+    <nav className={`bottom-nav ${hidden ? "hidden" : ""} ${feedMode ? "feed-mode" : ""}`.trim()}>
+      <div className="bottom-nav-inner">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTab;
           const showBadge = !isModel && tab.id === "sessions" && unreadCount > 0;
@@ -138,42 +138,14 @@ export default function BottomNav({ role }) {
               key={tab.id}
               className="bottom-nav-item"
               onClick={() => handleTabClick(tab.id)}
-              style={{
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "2px",
-                padding: "8px 4px",
-                color: isActive ? "var(--accent)" : "var(--muted)",
-                position: "relative",
-                transition: "color 0.15s",
-              }}
+              style={{ color: isActive ? "var(--accent)" : "var(--muted)" }}
             >
               {tab.icon(isActive)}
-              <span style={{ fontSize: "10px", fontFamily: "'Space Grotesk', sans-serif", letterSpacing: "0.02em" }}>
+              <span className="bottom-nav-label">
                 {tab.label}
               </span>
               {showBadge && (
-                <span style={{
-                  position: "absolute",
-                  top: "6px",
-                  right: "calc(50% - 16px)",
-                  background: "var(--accent)",
-                  color: "#fff",
-                  fontSize: "9px",
-                  fontWeight: 700,
-                  borderRadius: "999px",
-                  minWidth: "16px",
-                  height: "16px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "0 4px",
-                }}>
+                <span className="bottom-nav-badge">
                   {unreadCount > 99 ? "99+" : unreadCount}
                 </span>
               )}

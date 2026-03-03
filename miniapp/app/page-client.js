@@ -6,15 +6,18 @@ import { createClient } from "@supabase/supabase-js";
 import {
   EmptyState,
   ErrorState,
-  NotificationPriorityBadge,
   StatusPill,
   SyncIndicator,
 } from "./_components/ui-kit";
+import BottomNav from "./_components/BottomNav";
+import TopBar from "./_components/TopBar";
+import { SkeletonEarnings, SkeletonList, SkeletonProfile } from "./_components/SkeletonCard";
 import FeedTab from "./features/feed/FeedTab";
 import ExploreTab from "./features/explore/ExploreTab";
 import GoLiveButton from "./features/live/GoLiveButton";
 import LiveSetupSheet from "./features/live/LiveSetupSheet";
 import LiveRoom from "./features/live/LiveRoom";
+import NotificationsV2 from "./features/notifications/NotificationsV2";
 import { useLiveStore } from "./_store/useLiveStore";
 import { useUIStore } from "./_store/useUIStore";
 
@@ -28,6 +31,25 @@ const AVATAR_CROP_SIZE = 220;
 const GALLERY_PAGE_SIZE = 18;
 const SESSIONS_PAGE_SIZE = 20;
 const CALL_REACTION_OPTIONS = ["❤️", "🔥", "😍", "👏", "😂", "💫"];
+const CLIENT_TAB_ORDER = ["feed", "explore", "gallery", "sessions", "wallet", "purchases", "following", "profile"];
+const MODEL_TAB_ORDER = ["content", "sessions", "followers", "earnings", "profile"];
+const CLIENT_TAB_LABELS = {
+  feed: "Feed",
+  explore: "Explore",
+  gallery: "Gallery",
+  sessions: "Sessions",
+  wallet: "Wallet",
+  purchases: "Purchases",
+  following: "Following",
+  profile: "Profile",
+};
+const MODEL_TAB_LABELS = {
+  profile: "Profile",
+  content: "Content",
+  sessions: "Sessions",
+  followers: "Followers",
+  earnings: "Earnings",
+};
 
 export default function Home() {
   const cleanTagLabel = (value) => {
@@ -222,10 +244,20 @@ export default function Home() {
   const [clientLoading, setClientLoading] = useState(false);
   const [verificationLoading, setVerificationLoading] = useState(false);
   const [contentSubmitting, setContentSubmitting] = useState(false);
-  const [clientTab, setClientTab] = useState("feed");
   const { setupSheetOpen, currentStream, setSetupSheetOpen, resetLive } = useLiveStore();
-  const { initTheme } = useUIStore();
-  const [modelTab, setModelTab] = useState("profile");
+  const {
+    initTheme,
+    activeClientTab,
+    activeModelTab,
+    setActiveClientTab,
+    setActiveModelTab,
+  } = useUIStore();
+  const [clientTabTransition, setClientTabTransition] = useState("forward");
+  const [modelTabTransition, setModelTabTransition] = useState("forward");
+  const [clientTab, setClientTabState] = useState(activeClientTab || "feed");
+  const [modelTab, setModelTabState] = useState(activeModelTab || "profile");
+  const [syncExpanded, setSyncExpanded] = useState(false);
+  const [feedChromeHidden, setFeedChromeHidden] = useState(false);
   const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
   const [modelContentFilter, setModelContentFilter] = useState("all");
   const [clientForm, setClientForm] = useState({
@@ -349,7 +381,6 @@ export default function Home() {
   const [callTimeOffset, setCallTimeOffset] = useState(0);
   const [notifications, setNotifications] = useState({
     open: false,
-    items: [],
     unread: 0,
     loading: false,
     error: "",
@@ -893,6 +924,113 @@ export default function Home() {
   });
   const [modelEarnings, setModelEarnings] = useState(null);
   const [modelEarningsStatus, setModelEarningsStatus] = useState("");
+  const [modelEarningsLoading, setModelEarningsLoading] = useState(false);
+
+  const resolveTabDirection = (previous, next, order) => {
+    const previousIndex = order.indexOf(previous);
+    const nextIndex = order.indexOf(next);
+    if (previousIndex === -1 || nextIndex === -1) {
+      return "forward";
+    }
+    return nextIndex >= previousIndex ? "forward" : "back";
+  };
+
+  const setClientTab = (nextTab) => {
+    if (!nextTab) {
+      return;
+    }
+    setClientTabState((previousTab) => {
+      if (previousTab === nextTab) {
+        return previousTab;
+      }
+      setClientTabTransition(resolveTabDirection(previousTab, nextTab, CLIENT_TAB_ORDER));
+      return nextTab;
+    });
+  };
+
+  const setModelTab = (nextTab) => {
+    if (!nextTab) {
+      return;
+    }
+    setModelTabState((previousTab) => {
+      if (previousTab === nextTab) {
+        return previousTab;
+      }
+      setModelTabTransition(resolveTabDirection(previousTab, nextTab, MODEL_TAB_ORDER));
+      return nextTab;
+    });
+  };
+
+  useEffect(() => {
+    if (activeClientTab !== clientTab) {
+      setActiveClientTab(clientTab);
+    }
+  }, [clientTab, activeClientTab, setActiveClientTab]);
+
+  useEffect(() => {
+    if (activeModelTab !== modelTab) {
+      setActiveModelTab(modelTab);
+    }
+  }, [modelTab, activeModelTab, setActiveModelTab]);
+
+  useEffect(() => {
+    if (activeClientTab && activeClientTab !== clientTab) {
+      setClientTab(activeClientTab);
+    }
+  }, [activeClientTab]);
+
+  useEffect(() => {
+    if (activeModelTab && activeModelTab !== modelTab) {
+      setModelTab(activeModelTab);
+    }
+  }, [activeModelTab]);
+
+  useEffect(() => {
+    if (clientTab === "sessions" && sessionListMode !== "all") {
+      setSessionListMode("all");
+    }
+    if (modelTab === "sessions" && sessionListMode !== "all") {
+      setSessionListMode("all");
+    }
+  }, [clientTab, modelTab]);
+
+  useEffect(() => {
+    const isFeedVisible = role === "client" && clientAccessPaid && clientTab === "feed";
+    if (!isFeedVisible || typeof window === "undefined") {
+      setFeedChromeHidden(false);
+      return;
+    }
+    let observer = null;
+    const tryAttach = () => {
+      if (observer) {
+        return;
+      }
+      const viewport = document.querySelector(".feed-viewport");
+      const firstCard = viewport?.querySelector(".feed-slide");
+      if (!viewport || !firstCard) {
+        return;
+      }
+      observer = new IntersectionObserver(
+        (entries) => {
+          const [entry] = entries;
+          if (!entry) {
+            return;
+          }
+          setFeedChromeHidden(!entry.isIntersecting);
+        },
+        { root: viewport, threshold: 0.7 }
+      );
+      observer.observe(firstCard);
+    };
+    const intervalId = window.setInterval(tryAttach, 320);
+    tryAttach();
+    return () => {
+      window.clearInterval(intervalId);
+      if (observer) {
+        observer.disconnect();
+      }
+    };
+  }, [role, clientAccessPaid, clientTab]);
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -1877,8 +2015,7 @@ export default function Home() {
       const data = await res.json();
       setNotifications((prev) => ({
         ...prev,
-        items: data.items || [],
-        unread: Number(data.unread || 0),
+        unread: Number(data.unread || data.unreadCount || 0),
         loading: false,
         error: "",
       }));
@@ -1889,24 +2026,6 @@ export default function Home() {
         loading: false,
         error: "Unable to load notifications.",
       }));
-    }
-  };
-
-  const markNotificationsRead = async (ids = []) => {
-    if (!initData) {
-      return;
-    }
-    try {
-      await fetch("/api/notifications/read", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          initData,
-          ids: Array.isArray(ids) ? ids : [],
-        }),
-      });
-    } catch {
-      // ignore mark read failures
     }
   };
 
@@ -1922,7 +2041,6 @@ export default function Home() {
     };
     setNotifications((prev) => ({
       ...prev,
-      items: [item, ...(prev.items || [])].slice(0, 40),
       unread: Math.max(0, (prev.unread || 0) + 1),
     }));
     if (persist && initData) {
@@ -1952,195 +2070,12 @@ export default function Home() {
     loadNotifications(true).catch(() => null);
   };
 
-  const parseNotificationMetadata = (metadata) => {
-    if (!metadata) {
-      return {};
-    }
-    if (typeof metadata === "object") {
-      return metadata;
-    }
-    if (typeof metadata === "string") {
-      try {
-        return JSON.parse(metadata);
-      } catch {
-        return {};
-      }
-    }
-    return {};
-  };
-
-  const jumpToNotificationTarget = (elementId) => {
-    if (!elementId || typeof window === "undefined") {
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      const node = document.getElementById(elementId);
-      if (!node) {
-        return;
-      }
-      node.classList.add("focus-pulse");
-      node.scrollIntoView({ behavior: "smooth", block: "center" });
-      setTimeout(() => node.classList.remove("focus-pulse"), 1800);
-    });
-  };
-
-  const handleNotificationClick = async (item) => {
-    const meta = parseNotificationMetadata(item?.metadata);
-    const type = (item?.type || "").toString();
-    const contentId = Number(meta?.content_id || 0);
-    const sessionId = Number(meta?.session_id || 0);
-    if (item?.id) {
-      await markNotificationsRead([item.id]);
-    }
-    setNotifications((prev) => ({
-      ...prev,
-      unread: Math.max(0, (prev.unread || 0) - (item?.read_at ? 0 : 1)),
-      items: (prev.items || []).map((entry) =>
-        entry.id === item.id ? { ...entry, read_at: entry.read_at || new Date().toISOString() } : entry
-      ),
-    }));
-
-    if (type === "content_like" || type === "content_approved" || type === "content_rejected") {
-      if (role === "model") {
-        setModelTab("content");
-        setTimeout(() => jumpToNotificationTarget(`model-content-${contentId}`), 120);
-      } else {
-        setClientTab("gallery");
-        setTimeout(() => jumpToNotificationTarget(`gallery-card-${contentId}`), 120);
-      }
-      closeNotifications();
-      return;
-    }
-    if (type === "follow") {
-      if (role === "model") {
-        setModelTab("followers");
-      } else {
-        setClientTab("following");
-      }
-      closeNotifications();
-      return;
-    }
-    if (type === "booking_request" || type === "session_approved") {
-      if (role === "model") {
-        setModelTab("sessions");
-        setTimeout(() => jumpToNotificationTarget(`model-booking-${sessionId}`), 120);
-      } else {
-        setClientTab("sessions");
-        setTimeout(() => jumpToNotificationTarget(`client-session-${sessionId}`), 120);
-      }
-      closeNotifications();
-      return;
-    }
-    if (
-      [
-        "session_accept",
-        "session_declined",
-        "session_cancelled",
-        "session_end",
-        "session_extension",
-        "chat_message",
-      ].includes(type)
-    ) {
-      if (role === "model") {
-        setModelTab("sessions");
-        setTimeout(() => jumpToNotificationTarget(`model-booking-${sessionId}`), 120);
-      } else {
-        setClientTab("sessions");
-        setTimeout(() => jumpToNotificationTarget(`client-session-${sessionId}`), 120);
-      }
-      closeNotifications();
-      return;
-    }
-    if (type === "access_fee_approved") {
-      setClientTab("gallery");
-      closeNotifications();
-      return;
-    }
-    if (type === "content_unlocked") {
-      setClientTab("gallery");
-      setTimeout(() => jumpToNotificationTarget(`gallery-card-${contentId}`), 120);
-      closeNotifications();
-      return;
-    }
-    if (type === "escrow_refunded" || type === "escrow_released") {
-      if (role === "model") {
-        setModelTab("earnings");
-      } else {
-        setClientTab("wallet");
-      }
-      closeNotifications();
-      return;
-    }
-    if (type === "verification_approved" || type === "verification_rejected") {
-      setModelTab("profile");
-      closeNotifications();
-      return;
-    }
-    closeNotifications();
-  };
-
   const closeNotifications = () => {
-    const unreadIds = (notifications.items || [])
-      .filter((item) => !item.read_at)
-      .map((item) => item.id)
-      .filter(Boolean);
-    if (unreadIds.length) {
-      markNotificationsRead(unreadIds).catch(() => null);
-    }
     setNotifications((prev) => ({
       ...prev,
       open: false,
-      unread: 0,
-      items: (prev.items || []).map((item) =>
-        item.read_at ? item : { ...item, read_at: item.read_at || new Date().toISOString() }
-      ),
     }));
-  };
-
-  const formatNotificationTime = (value) => {
-    if (!value) {
-      return "";
-    }
-    try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return "";
-    }
-  };
-
-  const notificationGroups = useMemo(() => {
-    const groups = [];
-    const items = notifications.items || [];
-    for (const item of items) {
-      const stamp = item?.created_at ? new Date(item.created_at) : null;
-      const label = stamp && !Number.isNaN(stamp.getTime()) ? stamp.toDateString() : "Recent";
-      const bucket = groups.find((entry) => entry.label === label);
-      if (bucket) {
-        bucket.items.push(item);
-      } else {
-        groups.push({ label, items: [item] });
-      }
-    }
-    return groups;
-  }, [notifications.items]);
-
-  const notificationContext = (item) => {
-    const meta = parseNotificationMetadata(item?.metadata);
-    const contentId = Number(meta?.content_id || 0);
-    const sessionId = Number(meta?.session_id || 0);
-    if (contentId) {
-      return `Content #${contentId}`;
-    }
-    if (sessionId) {
-      return `Session #${sessionId}`;
-    }
-    if (meta?.amount) {
-      return `Amount: ₦${Number(meta.amount || 0).toLocaleString()}`;
-    }
-    if (meta?.outcome) {
-      return `Outcome: ${meta.outcome}`;
-    }
-    return item?.type ? item.type.replace(/_/g, " ") : "General";
+    loadNotifications(true).catch(() => null);
   };
 
   const formatPresence = (isOnline, lastSeenAt) => {
@@ -4236,6 +4171,7 @@ export default function Home() {
       return;
     }
     const loadEarnings = async () => {
+      setModelEarningsLoading(true);
       try {
         const res = await fetch("/api/earnings", {
           headers: { "x-telegram-init": initData },
@@ -4243,6 +4179,7 @@ export default function Home() {
         if (!res.ok) {
           setModelEarningsStatus(`Unable to load earnings (HTTP ${res.status}).`);
           setModelEarnings(null);
+          setModelEarningsLoading(false);
           return;
         }
         const data = await res.json();
@@ -4252,6 +4189,8 @@ export default function Home() {
       } catch {
         setModelEarningsStatus("Unable to load earnings.");
         setModelEarnings(null);
+      } finally {
+        setModelEarningsLoading(false);
       }
     };
     loadEarnings();
@@ -6470,9 +6409,37 @@ export default function Home() {
   }
 
   const showOnboarding = !role && !roleLocked && !onboardingComplete;
+  const showBottomNav =
+    (role === "client" && clientAccessPaid) || (role === "model" && modelApproved);
+  const isClientFeedTab = role === "client" && clientAccessPaid && clientTab === "feed";
+  const currentTabLabel =
+    role === "model"
+      ? MODEL_TAB_LABELS[modelTab] || "Dashboard"
+      : CLIENT_TAB_LABELS[clientTab] || "Dashboard";
+  const shellClass = [
+    "shell",
+    role ? "with-top-bar" : "",
+    showBottomNav ? "with-bottom-nav" : "",
+    isClientFeedTab ? "feed-fullscreen" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <main className="shell">
+    <main className={shellClass}>
+      {role && (
+        <TopBar
+          tabLabel={currentTabLabel}
+          walletBalance={Number(profile?.user?.wallet_balance || 0)}
+          unreadCount={Number(notifications.unread || 0)}
+          onOpenNotifications={() =>
+            notifications.open ? closeNotifications() : openNotifications()
+          }
+          transparent={isClientFeedTab}
+          hidden={isClientFeedTab && feedChromeHidden}
+        />
+      )}
+      {!role && (
       <header className="top">
         <div className="brand">
           <span className="logo-mark small">
@@ -6506,24 +6473,8 @@ export default function Home() {
             <span className="pill">Account: {lockedRole === "model" ? "Model" : "Client"}</span>
           </div>
         )}
-        {(role || roleLocked) && !showOnboarding && (
-          <button
-            type="button"
-            className="icon-btn notice-bell"
-            onClick={() => (notifications.open ? closeNotifications() : openNotifications())}
-            aria-label="Notifications"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 22a2.5 2.5 0 0 0 2.45-2H9.55A2.5 2.5 0 0 0 12 22zm6-6V11a6 6 0 1 0-12 0v5l-2 2v1h16v-1l-2-2z" />
-            </svg>
-            {notifications.unread > 0 && (
-              <span className="notify-badge">
-                {notifications.unread > 99 ? "99+" : notifications.unread}
-              </span>
-            )}
-          </button>
-        )}
       </header>
+      )}
 
       {roleStatus && (
         <section className="banner">
@@ -6690,8 +6641,9 @@ export default function Home() {
       )}
 
       {role === "client" && (
-      <section className="flow-grid">
-        <article className="flow-panel" id="client-flow">
+      <section className={`flow-grid ${isClientFeedTab ? "feed-fullscreen-grid" : ""}`}>
+        <article className={`flow-panel ${isClientFeedTab ? "feed-fullscreen-panel" : ""}`} id="client-flow">
+          {!isClientFeedTab && (
           <header className="flow-head">
             <div>
               <p className="eyebrow">
@@ -6714,6 +6666,7 @@ export default function Home() {
               </button>
             )}
           </header>
+          )}
           <div className="flow-body">
             {!clientAccessPaid && (
               <div className="step-header">
@@ -6736,8 +6689,8 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {profile?.user && (
-              <div className="flow-card">
+            {profile?.user && !isClientFeedTab && (
+              <div className="flow-card dashboard-intro-card">
                 <h3>Welcome, {clientDisplayName}</h3>
                 <div className="line">
                   <span>Access status</span>
@@ -6749,8 +6702,13 @@ export default function Home() {
                 </div>
               </div>
             )}
-            {profile?.user && (
+            {!profile?.user && clientAccessPaid && !isClientFeedTab && (
               <div className="flow-card profile-summary">
+                <SkeletonProfile />
+              </div>
+            )}
+            {profile?.user && !isClientFeedTab && (
+              <div className="flow-card profile-summary dashboard-summary-card">
                 <div className="summary-head">
                   <span className="avatar">
                     {avatarUrl ? (
@@ -6984,62 +6942,30 @@ export default function Home() {
             )}
             {clientAccessPaid && (
               <>
-                <div className="dash-actions tabs primary-nav">
-                  <button
-                    type="button"
-                    className={`cta ${clientTab === "feed" ? "primary" : "ghost"}`}
-                    onClick={() => setClientTab("feed")}
-                  >
-                    Feed
-                  </button>
-                  <button
-                    type="button"
-                    className={`cta ${clientTab === "explore" ? "primary" : "ghost"}`}
-                    onClick={() => setClientTab("explore")}
-                  >
-                    Explore
-                  </button>
-                  <button
-                    type="button"
-                    className={`cta ${clientTab === "sessions" && sessionListMode !== "chat" ? "primary" : "ghost"}`}
-                    onClick={() => {
-                      setClientTab("sessions");
-                      setSessionListMode("all");
-                    }}
-                  >
-                    Sessions
-                  </button>
-                  <button
-                    type="button"
-                    className={`cta ${clientTab === "wallet" ? "primary" : "ghost"}`}
-                    onClick={() => setClientTab("wallet")}
-                  >
-                    Wallet
-                  </button>
-                  <label className="field tab-select nav-more">
-                    More
-                    <select
-                      value={["purchases", "following", "gallery", "profile"].includes(clientTab) ? clientTab : ""}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (value) setClientTab(value);
-                      }}
+                {!isClientFeedTab && (
+                  <div className="sync-row" data-sync-tick={syncTicker}>
+                    <button
+                      type="button"
+                      className="sync-toggle"
+                      onClick={() => setSyncExpanded((prev) => !prev)}
                     >
-                      <option value="">More…</option>
-                      <option value="gallery">Gallery</option>
-                      <option value="profile">Profile</option>
-                      <option value="purchases">Purchases</option>
-                      <option value="following">Following</option>
-                    </select>
-                  </label>
-                </div>
-                <div className="sync-row" data-sync-tick={syncTicker}>
-                  <SyncIndicator
-                    lastSyncedAt={syncMarks[currentSyncScope]}
-                    active={pageVisible}
-                    label="Last synced"
-                  />
-                </div>
+                      {syncExpanded ? "Hide sync status" : "Show sync status"}
+                    </button>
+                    {syncExpanded && (
+                      <SyncIndicator
+                        lastSyncedAt={syncMarks[currentSyncScope]}
+                        active={pageVisible}
+                        label="Last synced"
+                      />
+                    )}
+                  </div>
+                )}
+                <div
+                  key={`client-tab-${clientTab}`}
+                  className={`tab-stage ${
+                    clientTabTransition === "back" ? "slide-in-left" : "slide-in-right"
+                  } ${clientTab === "feed" ? "tab-feed-stage" : ""}`}
+                >
 
                 {clientTab === "feed" && <FeedTab />}
 
@@ -7653,9 +7579,9 @@ export default function Home() {
                     {clientPurchasesStatus && (
                       <p className="helper error">{clientPurchasesStatus}</p>
                     )}
-                    {clientPurchasesLoading && <p className="helper">Loading purchases…</p>}
+                    {clientPurchasesLoading && <SkeletonList count={3} />}
                     {!clientPurchasesStatus && !clientPurchasesLoading && clientPurchases.length === 0 && (
-                      <p className="helper">No purchases yet.</p>
+                      <EmptyState title="No purchases yet" body="Completed unlocks and sessions will appear here." />
                     )}
                     {!clientPurchasesLoading && clientPurchases.map((item) => (
                       <div key={`purchase-${item.id}`} className="list-row">
@@ -7665,7 +7591,7 @@ export default function Home() {
                             {item.display_name || item.public_id} · {item.content_type}
                           </p>
                         </div>
-                        <span className={`pill ${getStatusTone(item.status)}`}>
+                        <span className={`status-pill ${getStatusTone(item.status)}`}>
                           {item.item_type === "session"
                             ? "Session completed"
                             : item.status === "rejected"
@@ -7706,24 +7632,18 @@ export default function Home() {
                     {clientSessionsStatus && (
                       <p className="helper error">{clientSessionsStatus}</p>
                     )}
-                    {clientSessionsLoading && (
-                      <div className="list-skeleton">
-                        {Array.from({ length: 3 }).map((_, index) => (
-                          <div key={`session-skel-${index}`} className="list-row skeleton">
-                            <div className="skeleton-line wide" />
-                            <div className="skeleton-line short" />
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {clientSessionsLoading && <SkeletonList count={4} />}
                     {!clientSessionsStatus && !clientSessionsLoading && visibleClientSessions.length === 0 && (
-                      <p className="helper">
-                        {sessionListMode === "chat"
-                          ? "No chat sessions yet."
-                          : sessionListMode === "calls"
-                          ? "No voice/video sessions yet."
-                          : "No sessions yet."}
-                      </p>
+                      <EmptyState
+                        title={
+                          sessionListMode === "chat"
+                            ? "No chat sessions yet"
+                            : sessionListMode === "calls"
+                            ? "No voice or video sessions yet"
+                            : "No sessions yet"
+                        }
+                        body="Book a creator session to start your timeline."
+                      />
                     )}
                     {!clientSessionsLoading && visibleClientSessions.map((item) => (
                           <div
@@ -7742,7 +7662,7 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="session-actions">
-                          <span className={`pill ${getStatusTone(item.status)}`}>
+                          <span className={`status-pill ${getStatusTone(item.status)}`}>
                             {formatSessionStatus(item.status)}
                           </span>
                           {["accepted", "active"].includes(item.status) && (
@@ -7901,6 +7821,7 @@ export default function Home() {
                     </p>
                   </div>
                 )}
+                </div>
               </>
             )}
           </div>
@@ -8750,65 +8671,7 @@ export default function Home() {
         </section>
       )}
 
-      {notifications.open && (
-        <section
-          className="notification-overlay"
-          onClick={closeNotifications}
-          onTouchStart={handleOverlayTouchStart}
-          onTouchEnd={(event) => handleOverlayTouchEnd(event, closeNotifications)}
-        >
-          <div className="notification-panel" onClick={(event) => event.stopPropagation()}>
-            <header>
-              <div>
-                <p className="eyebrow">Inbox</p>
-                <h3>Notifications</h3>
-              </div>
-              <button type="button" className="cta ghost" onClick={closeNotifications}>
-                Close
-              </button>
-            </header>
-            {notifications.loading && <p className="helper">Loading notifications…</p>}
-            {notifications.error && <p className="helper error">{notifications.error}</p>}
-            {!notifications.loading && notifications.items.length === 0 && (
-              <p className="helper">No notifications yet.</p>
-            )}
-            <div className="notification-list">
-              {notificationGroups.map((group) => (
-                <div key={`notif-group-${group.label}`} className="notification-group">
-                  <p className="notification-group-label">{group.label}</p>
-                  {group.items.map((item) => (
-                    <div
-                      key={`notif-${item.id}`}
-                      className={`notification-item ${item.read_at ? "" : "unread"}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => handleNotificationClick(item)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          handleNotificationClick(item).catch(() => null);
-                        }
-                      }}
-                    >
-                      <div>
-                        <div className="notification-title-row">
-                          <strong>{item.title}</strong>
-                          <NotificationPriorityBadge type={item.type || ""} />
-                        </div>
-                        {item.body && <p>{item.body}</p>}
-                        <p className="notification-context">{notificationContext(item)}</p>
-                      </div>
-                      <span className="notification-time">
-                        {formatNotificationTime(item.created_at)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
+      <NotificationsV2 open={notifications.open} onClose={closeNotifications} />
 
       {previewOverlay.open && previewOverlay.item && (
         <section
@@ -9590,60 +9453,33 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-                <div className="dash-actions tabs primary-nav">
-                  <button
-                    type="button"
-                    className={`cta ${modelTab === "content" ? "primary" : "ghost"}`}
-                    onClick={() => setModelTab("content")}
-                  >
-                    Home
-                  </button>
-                  <button
-                    type="button"
-                    className={`cta ${modelTab === "sessions" && sessionListMode !== "chat" ? "primary" : "ghost"}`}
-                    onClick={() => {
-                      setModelTab("sessions");
-                      setSessionListMode("all");
-                    }}
-                  >
-                    Sessions
-                  </button>
-                  <button
-                    type="button"
-                    className={`cta ${modelTab === "profile" ? "primary" : "ghost"}`}
-                    onClick={() => setModelTab("profile")}
-                  >
-                    Profile
-                  </button>
-                  <button
-                    type="button"
-                    className={`cta ${modelTab === "earnings" ? "primary" : "ghost"}`}
-                    onClick={() => setModelTab("earnings")}
-                  >
-                    Wallet
-                  </button>
-                  <label className="field tab-select nav-more">
-                    More
-                    <select
-                      value={modelTab === "followers" ? "followers" : ""}
-                      onChange={(event) => {
-                        if (event.target.value === "followers") {
-                          setModelTab("followers");
-                        }
-                      }}
-                    >
-                      <option value="">More…</option>
-                      <option value="followers">Followers</option>
-                    </select>
-                  </label>
-                </div>
                 <div className="sync-row" data-sync-tick={syncTicker}>
-                  <SyncIndicator
-                    lastSyncedAt={syncMarks[currentSyncScope]}
-                    active={pageVisible}
-                    label="Last synced"
-                  />
+                  <button
+                    type="button"
+                    className="sync-toggle"
+                    onClick={() => setSyncExpanded((prev) => !prev)}
+                  >
+                    {syncExpanded ? "Hide sync status" : "Show sync status"}
+                  </button>
+                  {syncExpanded && (
+                    <SyncIndicator
+                      lastSyncedAt={syncMarks[currentSyncScope]}
+                      active={pageVisible}
+                      label="Last synced"
+                    />
+                  )}
                 </div>
+                <div
+                  key={`model-tab-${modelTab}`}
+                  className={`tab-stage ${
+                    modelTabTransition === "back" ? "slide-in-left" : "slide-in-right"
+                  }`}
+                >
+                {!profile?.user && (
+                  <div className="flow-card profile-summary">
+                    <SkeletonProfile />
+                  </div>
+                )}
 
                 {modelTab === "profile" && (
                   <div style={{ padding: "12px 16px 0" }}>
@@ -10162,31 +9998,18 @@ export default function Home() {
                       </button>
                     </div>
                     {myBookingsStatus && <p className="helper error">{myBookingsStatus}</p>}
-                    {myBookingsLoading && (
-                      <div className="gallery-grid">
-                        {Array.from({ length: 2 }).map((_, index) => (
-                          <div key={`booking-skel-${index}`} className="gallery-card skeleton">
-                            <div className="gallery-body">
-                              <div className="skeleton-line wide" />
-                              <div className="skeleton-line" />
-                              <div className="skeleton-line short" />
-                              <div className="skeleton-row">
-                                <div className="skeleton-pill" />
-                                <div className="skeleton-pill" />
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {myBookingsLoading && <SkeletonList count={4} />}
                     {!myBookingsStatus && !myBookingsLoading && visibleModelBookings.length === 0 && (
-                      <p className="helper">
-                        {sessionListMode === "chat"
-                          ? "No chat bookings yet."
-                          : sessionListMode === "calls"
-                          ? "No voice/video bookings yet."
-                          : "No bookings yet."}
-                      </p>
+                      <EmptyState
+                        title={
+                          sessionListMode === "chat"
+                            ? "No chat bookings yet"
+                            : sessionListMode === "calls"
+                            ? "No voice or video bookings yet"
+                            : "No bookings yet"
+                        }
+                        body="New bookings from clients will appear here."
+                      />
                     )}
                     {!myBookingsStatus && !myBookingsLoading && visibleModelBookings.length > 0 && (
                       <div className="gallery-grid">
@@ -10198,7 +10021,7 @@ export default function Home() {
                           >
                               <div className="gallery-body">
                                 <h4>{item.session_type || "Session"}</h4>
-                              <span className={`pill ${getStatusTone(item.status)}`}>
+                              <span className={`status-pill ${getStatusTone(item.status)}`}>
                                 {formatSessionStatus(item.status || "pending")}
                               </span>
                                 <div className="gallery-meta">
@@ -10342,13 +10165,14 @@ export default function Home() {
                 {modelTab === "earnings" && (
                   <div className="flow-card">
                     <h3>Earnings</h3>
+                    {modelEarningsLoading && <SkeletonEarnings />}
                     {modelEarningsStatus && (
                       <p className="helper error">{modelEarningsStatus}</p>
                     )}
-                    {!modelEarningsStatus && !modelEarnings && (
-                      <p className="helper">No earnings data yet.</p>
+                    {!modelEarningsLoading && !modelEarningsStatus && !modelEarnings && (
+                      <EmptyState title="No earnings data yet" body="Payout and session metrics will appear once you complete bookings." />
                     )}
-                    {modelEarnings && (
+                    {!modelEarningsLoading && modelEarnings && (
                       <>
                         <div className="line">
                           <span>Total released</span>
@@ -10445,10 +10269,10 @@ export default function Home() {
                     </div>
                     {followersStatus && <p className="helper error">{followersStatus}</p>}
                     {!followersStatus && followers.length === 0 && (
-                      <p className="helper">No followers yet.</p>
+                      <EmptyState title="No followers yet" body="Share content and go live to grow your audience." />
                     )}
                     {!followersStatus && followers.length > 0 && filteredFollowers.length === 0 && (
-                      <p className="helper">No followers match this filter.</p>
+                      <EmptyState title="No followers match this filter" body="Try switching back to all followers." />
                     )}
                     {!followersStatus && filteredFollowers.length > 0 && (
                       <div className="gallery-grid">
@@ -10469,7 +10293,7 @@ export default function Home() {
                                 </div>
                               </div>
                               <div className="gallery-actions">
-                                <span className={`pill ${item.is_online ? "success" : ""}`}>
+                                <span className={`status-pill ${item.is_online ? "success" : ""}`}>
                                   {formatPresence(item.is_online, item.last_seen_at)}
                                 </span>
                               </div>
@@ -10480,6 +10304,7 @@ export default function Home() {
                     )}
                   </div>
                 )}
+                </div>
               </>
             ) : (
               <>
@@ -10743,6 +10568,13 @@ export default function Home() {
           <p>Dispute tools with audit trails for resolution.</p>
         </article>
       </section>
+      )}
+      {showBottomNav && (
+        <BottomNav
+          role={role}
+          hidden={isClientFeedTab && feedChromeHidden}
+          feedMode={isClientFeedTab}
+        />
       )}
       {/* Live setup sheet (model) */}
       <LiveSetupSheet

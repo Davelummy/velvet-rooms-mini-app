@@ -6,15 +6,18 @@ export function StatusPill({ tone = "neutral", children, className = "" }) {
       ? "warning"
       : tone === "danger"
       ? "danger"
-      : tone === "featured"
-      ? "featured"
-      : "ghost";
-  return <span className={`pill ${toneClass} ${className}`.trim()}>{children}</span>;
+      : "";
+  return <span className={`status-pill ${toneClass} ${className}`.trim()}>{children}</span>;
 }
 
 export function EmptyState({ title = "Nothing here yet.", body = "", action = null }) {
   return (
     <div className="ui-state empty">
+      <svg className="empty-illustration" viewBox="0 0 120 80" aria-hidden="true">
+        <rect x="8" y="16" width="104" height="56" rx="12" />
+        <circle cx="32" cy="40" r="8" />
+        <path d="M48 53l14-14 12 12 10-10 12 12" />
+      </svg>
       <strong>{title}</strong>
       {body ? <p className="helper">{body}</p> : null}
       {action}
