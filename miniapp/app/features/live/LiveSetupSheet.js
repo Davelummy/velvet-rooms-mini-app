@@ -5,24 +5,46 @@ import BottomSheet from "../../_components/BottomSheet";
 import { api } from "../../_lib/apiClient";
 import { mapApiError } from "../../_lib/formatters";
 import { useLiveStore } from "../../_store/useLiveStore";
-import LiveRoom from "./LiveRoom";
 
-export default function LiveSetupSheet({ open, onClose }) {
+export default function LiveSetupSheet({ open, onClose, initData = "" }) {
   const [title, setTitle] = useState("");
   const [tier, setTier] = useState("free");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const { setCurrentStream, setRoomState } = useLiveStore();
-  const [liveRoomOpen, setLiveRoomOpen] = useState(false);
+
+  const postWithInit = async (path, body) => {
+    if (!initData) {
+      return api.post(path, body);
+    }
+    const res = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-telegram-init": initData,
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(payload?.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.data = payload;
+      throw err;
+    }
+    return payload;
+  };
 
   const handleStart = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.post("/api/live/start", { title: title || "Live stream", tier });
+      const data = await postWithInit("/api/live/start", {
+        title: title || "Live stream",
+        tier,
+      });
       setCurrentStream(data);
       setRoomState("live");
-      setLiveRoomOpen(true);
       onClose?.();
     } catch (err) {
       setError(mapApiError(err));
@@ -108,8 +130,6 @@ export default function LiveSetupSheet({ open, onClose }) {
           </button>
         </div>
       </BottomSheet>
-
-      <LiveRoom open={liveRoomOpen} onClose={() => { setLiveRoomOpen(false); setRoomState("idle"); }} isHost />
     </>
   );
 }

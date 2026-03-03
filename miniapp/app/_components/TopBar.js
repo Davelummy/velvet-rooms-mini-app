@@ -4,6 +4,9 @@ export default function TopBar({
   tabLabel = "Dashboard",
   unreadCount = 0,
   onOpenNotifications,
+  showBack = false,
+  onBack,
+  backLabel = "Back",
   transparent = false,
   hidden = false,
 }) {
@@ -12,6 +15,19 @@ export default function TopBar({
       className={`top-bar ${transparent ? "feed-mode" : ""} ${hidden ? "hidden" : ""}`.trim()}
     >
       <div className="top-bar-left">
+        {showBack && (
+          <button
+            type="button"
+            className="top-bar-back"
+            onClick={onBack}
+            aria-label={backLabel}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M15 18 9 12l6-6" />
+            </svg>
+            <span>{backLabel}</span>
+          </button>
+        )}
         <span className="logo-mark small">
           <img loading="lazy" decoding="async" src="/brand/logo.png" alt="Velvet Rooms logo" />
         </span>

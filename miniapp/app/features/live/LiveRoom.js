@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useLiveStore } from "../../_store/useLiveStore";
 import { useHaptic } from "../../_hooks/useHaptic";
 import { api } from "../../_lib/apiClient";
-import { formatNgn } from "../../_lib/formatters";
 import LiveViewerCount from "./LiveViewerCount";
 import LiveChat from "./LiveChat";
 import LiveGiftAnimation from "./LiveGiftAnimation";
@@ -23,7 +22,7 @@ async function getAgoraRTC() {
   return AgoraRTC;
 }
 
-export default function LiveRoom({ open, onClose, isHost = false }) {
+export default function LiveRoom({ open, onClose, isHost = false, initData = "" }) {
   const {
     currentStream,
     setViewerCount,
@@ -31,7 +30,6 @@ export default function LiveRoom({ open, onClose, isHost = false }) {
     addChatMessage,
     addGift,
     resetLive,
-    setLeaderboard,
   } = useLiveStore();
 
   const { notification } = useHaptic();
@@ -47,6 +45,31 @@ export default function LiveRoom({ open, onClose, isHost = false }) {
   const [showGifts, setShowGifts] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
   const [muted, setMuted] = useState(false);
+
+  const postWithInit = useCallback(
+    async (path, body) => {
+      if (!initData) {
+        return api.post(path, body);
+      }
+      const res = await fetch(path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-telegram-init": initData,
+        },
+        body: JSON.stringify(body || {}),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(payload?.error || `HTTP ${res.status}`);
+        err.status = res.status;
+        err.data = payload;
+        throw err;
+      }
+      return payload;
+    },
+    [initData]
+  );
 
   // ── JOIN ─────────────────────────────────────────────────────────────────
   const joinChannel = useCallback(async () => {
@@ -68,7 +91,7 @@ export default function LiveRoom({ open, onClose, isHost = false }) {
           agora_channel: currentStream.agora_channel,
         };
       } else {
-        tokenData = await api.post(`/api/live/${currentStream.id}/join`, {});
+        tokenData = await postWithInit(`/api/live/${currentStream.id}/join`, {});
       }
 
       const { agora_app_id, agora_token, agora_uid, agora_channel } = tokenData;
@@ -133,7 +156,15 @@ export default function LiveRoom({ open, onClose, isHost = false }) {
       setJoinState("error");
       notification("error");
     }
-  }, [currentStream, isHost, joinState, notification, setViewerCount, setPeakViewers]);
+  }, [
+    currentStream,
+    isHost,
+    joinState,
+    notification,
+    postWithInit,
+    setViewerCount,
+    setPeakViewers,
+  ]);
 
   // ── LEAVE ────────────────────────────────────────────────────────────────
   const leaveChannel = useCallback(async () => {
@@ -178,7 +209,7 @@ export default function LiveRoom({ open, onClose, isHost = false }) {
   const handleEnd = async () => {
     await leaveChannel();
     try {
-      await api.post("/api/live/end", { streamId: currentStream?.id });
+      await postWithInit("/api/live/end", { streamId: currentStream?.id });
       notification("success");
     } catch {}
     resetLive();
@@ -188,7 +219,7 @@ export default function LiveRoom({ open, onClose, isHost = false }) {
   const handleLeave = async () => {
     // Mark viewer as left
     if (currentStream?.id) {
-      api.post(`/api/live/${currentStream.id}/leave`, {}).catch(() => {});
+      postWithInit(`/api/live/${currentStream.id}/leave`, {}).catch(() => {});
     }
     await leaveChannel();
     resetLive();

@@ -122,7 +122,7 @@ export default function BottomNav({ role, hidden = false, feedMode = false }) {
   const activeTabRaw = isModel ? activeModelTab : activeClientTab;
   const activeTab = tabs.some((tab) => tab.id === activeTabRaw)
     ? activeTabRaw
-    : "profile";
+    : tabs[0].id;
   const setActiveTab = isModel ? setActiveModelTab : setActiveClientTab;
 
   const handleTabClick = (tabId) => {

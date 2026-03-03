@@ -51,11 +51,36 @@ const TYPE_ICON = {
   dispute: "⚠️",
 };
 
-export default function NotificationsV2({ open, onClose }) {
+export default function NotificationsV2({ open, onClose, initData = "" }) {
   const { notifications, unreadCount, activeCategory, loading, preferences, setNotifications, setUnreadCount, setLoading, setActiveCategory, markRead } = useNotificationStore();
   const [error, setError] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const prevCountRef = useRef(0);
+
+  const requestWithInit = async (path, { method = "GET", body } = {}) => {
+    if (!initData) {
+      if (method === "GET") {
+        return api.get(path);
+      }
+      return api.post(path, body || {});
+    }
+    const res = await fetch(path, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "x-telegram-init": initData,
+      },
+      body: method === "GET" ? undefined : JSON.stringify(body || {}),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(payload?.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      err.data = payload;
+      throw err;
+    }
+    return payload;
+  };
 
   // Play sound when new notifications arrive
   useEffect(() => {
@@ -70,11 +95,16 @@ export default function NotificationsV2({ open, onClose }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get("/api/notifications", activeCategory !== "all" ? { category: activeCategory } : {});
+      const query = activeCategory !== "all" ? `?category=${activeCategory}` : "";
+      const data = await requestWithInit(`/api/notifications${query}`);
       setNotifications(data.items || []);
       setUnreadCount(data.unreadCount || data.unread || 0);
     } catch (err) {
-      setError(mapApiError(err));
+      if (err?.status === 401) {
+        setError("Session expired. Reopen the mini app in Telegram.");
+      } else {
+        setError(mapApiError(err));
+      }
     } finally {
       setLoading(false);
     }
@@ -86,7 +116,7 @@ export default function NotificationsV2({ open, onClose }) {
 
   const handleMarkAllRead = async () => {
     try {
-      await api.post("/api/notifications/read", {});
+      await requestWithInit("/api/notifications/read", { method: "POST", body: {} });
       markRead(null);
     } catch {}
   };
@@ -95,7 +125,10 @@ export default function NotificationsV2({ open, onClose }) {
     const sessionId = notification.metadata?.session_id;
     if (!sessionId) return;
     try {
-      await api.post(`/api/sessions/respond`, { sessionId, action: "accept" });
+      await requestWithInit("/api/sessions/respond", {
+        method: "POST",
+        body: { session_id: sessionId, action: "accept", initData: initData || undefined },
+      });
       fetchNotifications();
     } catch {}
   };
@@ -104,7 +137,10 @@ export default function NotificationsV2({ open, onClose }) {
     const sessionId = notification.metadata?.session_id;
     if (!sessionId) return;
     try {
-      await api.post(`/api/sessions/respond`, { sessionId, action: "decline" });
+      await requestWithInit("/api/sessions/respond", {
+        method: "POST",
+        body: { session_id: sessionId, action: "decline", initData: initData || undefined },
+      });
       fetchNotifications();
     } catch {}
   };
@@ -215,7 +251,11 @@ export default function NotificationsV2({ open, onClose }) {
       </div>
 
       {showSettings && (
-        <NotificationSettings open={showSettings} onClose={() => setShowSettings(false)} />
+        <NotificationSettings
+          open={showSettings}
+          onClose={() => setShowSettings(false)}
+          initData={initData}
+        />
       )}
     </>
   );

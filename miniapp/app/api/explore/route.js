@@ -9,7 +9,7 @@ import { ensureModelProfileColumns } from "../_lib/models";
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
 export async function GET(req) {
-  const ctx = createRequestContext("GET /api/explore");
+  const ctx = createRequestContext(req, "GET /api/explore");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {

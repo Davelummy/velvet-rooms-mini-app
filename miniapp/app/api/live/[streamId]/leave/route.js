@@ -6,7 +6,7 @@ import { createRequestContext } from "../../../_lib/observability";
 const BOT_TOKEN = process.env.USER_BOT_TOKEN || process.env.BOT_TOKEN || "";
 
 export async function POST(req, { params }) {
-  const ctx = createRequestContext(`POST /api/live/${params.streamId}/leave`);
+  const ctx = createRequestContext(req, `POST /api/live/${params.streamId}/leave`);
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {

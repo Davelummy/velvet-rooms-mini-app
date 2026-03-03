@@ -260,6 +260,7 @@ export default function Home() {
   const [modelTabTransition, setModelTabTransition] = useState("forward");
   const [clientTab, setClientTabState] = useState(activeClientTab || "feed");
   const [modelTab, setModelTabState] = useState(activeModelTab || "profile");
+  const [clientBackTab, setClientBackTab] = useState("explore");
   const [feedChromeHidden, setFeedChromeHidden] = useState(false);
   const [feedObserverReady, setFeedObserverReady] = useState(false);
   const [galleryRefreshKey, setGalleryRefreshKey] = useState(0);
@@ -981,6 +982,16 @@ export default function Home() {
       });
     }
   }, [activeModelTab, modelTab]);
+
+  useEffect(() => {
+    if (role !== "client") {
+      return;
+    }
+    if (!clientTab || clientTab === "feed") {
+      return;
+    }
+    setClientBackTab(clientTab);
+  }, [role, clientTab]);
 
   useEffect(() => {
     if (clientTab === "sessions" && sessionListMode !== "all") {
@@ -2835,7 +2846,7 @@ export default function Home() {
     }
     callFailureLoggedRef.current = false;
     callSuccessLoggedRef.current = false;
-    const resolvedType = sessionType || "video";
+    const resolvedType = normalizeSessionType(sessionType || "video");
     const peerLabel = options.label || "";
     const channelName = options.channelName || `vr-call-${sessionId}`;
     if (options.session) {
@@ -2888,7 +2899,7 @@ export default function Home() {
   };
 
   const openPermissionCheck = (sessionType) => {
-    const resolvedType = sessionType || "video";
+    const resolvedType = normalizeSessionType(sessionType || "video");
     setCallState((prev) => ({
       ...prev,
       open: true,
@@ -3046,17 +3057,45 @@ export default function Home() {
     });
   };
 
+  const normalizeSessionType = (value) => {
+    const raw = (value || "").toString().trim().toLowerCase();
+    if (!raw) {
+      return "video";
+    }
+    if (["chat", "text", "message", "messaging"].includes(raw)) {
+      return "chat";
+    }
+    if (["voice", "audio", "voice_call", "audio_call"].includes(raw)) {
+      return "voice";
+    }
+    if (["video", "video_call"].includes(raw)) {
+      return "video";
+    }
+    return raw.includes("chat") ? "chat" : raw.includes("voice") || raw.includes("audio") ? "voice" : "video";
+  };
+
   const handleSessionJoin = async (session) => {
     const sessionId = typeof session === "object" ? session?.id : session;
-    const sessionType =
+    const sessionTypeRaw =
       typeof session === "object"
         ? session?.session_type || session?.sessionType
         : null;
+    const sessionType = normalizeSessionType(sessionTypeRaw);
     const peerLabel =
       typeof session === "object"
         ? session?.model_label || session?.client_label || session?.label || ""
         : "";
     if (!initData || !sessionId) {
+      if (sessionId) {
+        setSessionActionStatus((prev) => ({
+          ...prev,
+          [sessionId]: {
+            loading: false,
+            error: "Telegram session not ready. Reopen the mini app and try again.",
+            info: "",
+          },
+        }));
+      }
       return;
     }
     setSessionActionStatus((prev) => ({
@@ -6378,8 +6417,11 @@ export default function Home() {
           onOpenNotifications={() =>
             notifications.open ? closeNotifications() : openNotifications()
           }
+          showBack={isClientFeedTab}
+          onBack={() => setClientTab(clientBackTab || "explore")}
+          backLabel="Back"
           transparent={isClientFeedTab}
-          hidden={isClientFeedTab && feedObserverReady && feedChromeHidden}
+          hidden={false}
         />
       )}
       {!role && (
@@ -8619,7 +8661,11 @@ export default function Home() {
         </section>
       )}
 
-      <NotificationsV2 open={notifications.open} onClose={closeNotifications} />
+      <NotificationsV2
+        open={notifications.open}
+        onClose={closeNotifications}
+        initData={initData}
+      />
 
       {previewOverlay.open && previewOverlay.item && (
         <section
@@ -10391,7 +10437,7 @@ export default function Home() {
       {showBottomNav && (
         <BottomNav
           role={role}
-          hidden={isClientFeedTab && feedObserverReady && feedChromeHidden}
+          hidden={false}
           feedMode={isClientFeedTab}
         />
       )}
@@ -10399,6 +10445,7 @@ export default function Home() {
       <LiveSetupSheet
         open={setupSheetOpen}
         onClose={() => setSetupSheetOpen(false)}
+        initData={initData}
       />
 
       {/* Live room — renders full screen on top of everything */}
@@ -10406,6 +10453,7 @@ export default function Home() {
         open={!!currentStream}
         onClose={resetLive}
         isHost={role === "model"}
+        initData={initData}
       />
     </main>
   );

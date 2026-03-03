@@ -3370,11 +3370,11 @@ h1 {
 
 /* Light theme variables */
 body.theme-light {
-  --bg: #fdf4f5;
-  --ink: #1a0a0c;
-  --muted: #6b3840;
+  --bg: #fff7f8;
+  --ink: #251115;
+  --muted: #6a4a50;
   --card: #ffffff;
-  --line: #f0d5d8;
+  --line: #e8ccd1;
 }
 
 /* Accent 4 for gifts / live */
@@ -3533,6 +3533,30 @@ body.theme-light {
   gap: 10px;
 }
 
+.top-bar-back {
+  min-height: var(--tap-min);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.top-bar-back svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .top-bar-title {
   font-family: "Space Grotesk", sans-serif;
   font-size: 13px;
@@ -3558,6 +3582,68 @@ body.theme-light {
   height: 7px;
   border-radius: 50%;
   background: #22c55e;
+}
+
+body.theme-light .top-bar {
+  background: rgba(255, 248, 249, 0.9);
+  border-bottom-color: #e2c2c9;
+  color: #2a1215;
+}
+
+body.theme-light .top-bar.feed-mode {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 248, 249, 0.96),
+    rgba(255, 248, 249, 0.78),
+    rgba(255, 248, 249, 0)
+  );
+  color: #2a1215;
+}
+
+body.theme-light .top-bar .icon-btn,
+body.theme-light .top-bar-back {
+  border-color: #d7b5bf;
+  background: rgba(255, 255, 255, 0.82);
+  color: #4f2731;
+}
+
+body.theme-light .bottom-nav {
+  background: rgba(255, 248, 249, 0.93);
+  border-top-color: #e2c2c9;
+}
+
+body.theme-light .bottom-nav.feed-mode {
+  background: rgba(255, 248, 249, 0.86);
+  border-top-color: #d7b5bf;
+}
+
+body.theme-light .flow-panel {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: #e7ccd2;
+}
+
+body.theme-light .flow-card,
+body.theme-light .grid-card,
+body.theme-light .notice-card,
+body.theme-light .payment-card,
+body.theme-light .content-form,
+body.theme-light .sessions-tab-card .session-row,
+body.theme-light .profile-facts .line {
+  background: #fff;
+  border-color: #e7ccd2;
+  box-shadow: 0 6px 20px rgba(60, 20, 30, 0.08);
+}
+
+body.theme-light .field input,
+body.theme-light .field textarea,
+body.theme-light .field select {
+  background: #fff;
+  border-color: #dcc2c9;
+  color: #2a1215;
+}
+
+body.theme-light .field-hint {
+  color: #80535d;
 }
 
 .tab-stage {

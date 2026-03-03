@@ -50,7 +50,7 @@ async function ensureLiveTables() {
 }
 
 export async function POST(req) {
-  const ctx = createRequestContext("POST /api/live/start");
+  const ctx = createRequestContext(req, "POST /api/live/start");
   try {
     const initData = req.headers.get("x-telegram-init") || "";
     if (!verifyInitData(initData, BOT_TOKEN)) {

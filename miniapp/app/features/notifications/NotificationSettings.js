@@ -15,23 +15,38 @@ const PREF_ITEMS = [
   { key: "live", label: "Live streams", emoji: "📡" },
 ];
 
-export default function NotificationSettings({ open, onClose }) {
+export default function NotificationSettings({ open, onClose, initData = "" }) {
   const { preferences, setPreferences } = useNotificationStore();
   const { theme, setTheme } = useUIStore();
   const [saving, setSaving] = useState(false);
+
+  const savePreferences = async (updated) => {
+    if (!initData) {
+      await api.post("/api/notifications/preferences", updated);
+      return;
+    }
+    await fetch("/api/notifications/preferences", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-telegram-init": initData,
+      },
+      body: JSON.stringify(updated),
+    });
+  };
 
   const togglePref = async (key) => {
     const updated = { ...preferences, [key]: !preferences[key] };
     setPreferences(updated);
     setSaving(true);
     try {
-      await api.post("/api/notifications/preferences", updated);
+      await savePreferences(updated);
     } catch {}
     setSaving(false);
   };
 
   return (
-    <BottomSheet open={open} onClose={onClose} title="Settings">
+    <BottomSheet open={open} onClose={onClose} title="Settings" zIndex={120}>
       <div style={{ padding: "16px" }}>
         {/* Theme toggle */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0", borderBottom: "1px solid var(--line)" }}>
@@ -66,6 +81,11 @@ export default function NotificationSettings({ open, onClose }) {
             />
           </div>
         ))}
+        {saving && (
+          <p style={{ margin: "14px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+            Saving…
+          </p>
+        )}
       </div>
     </BottomSheet>
   );
