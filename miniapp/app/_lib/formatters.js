@@ -27,6 +27,12 @@ export function resolveDisplayName(item, fallback = "User") {
 export function mapApiError(err) {
   if (!err) return "Something went wrong";
   if (typeof err === "string") return err;
+  if (err.status === 401) {
+    return "Telegram session expired. Reopen the mini app and try again.";
+  }
+  if (err.status === 403) {
+    return "You do not have permission for this action.";
+  }
   if (err.data?.error) return err.data.error;
   if (err.data?.message) return err.data.message;
   if (err.message) return err.message;

@@ -139,8 +139,22 @@ export default function NotificationsV2({ open, onClose }) {
               Notifications{unreadCount > 0 && <span style={{ fontSize: "14px", color: "var(--accent)", marginLeft: "8px" }}>({unreadCount})</span>}
             </h2>
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <button onClick={() => setShowSettings(true)} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: "20px", cursor: "pointer" }}>⚙️</button>
-              <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--muted)", fontSize: "24px", cursor: "pointer", lineHeight: 1 }}>×</button>
+              <button
+                type="button"
+                onClick={() => setShowSettings(true)}
+                style={{ background: "none", border: "none", color: "var(--muted)", fontSize: "20px", cursor: "pointer" }}
+                aria-label="Open notification settings"
+              >
+                ⚙️
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                style={{ background: "none", border: "none", color: "var(--muted)", fontSize: "24px", cursor: "pointer", lineHeight: 1 }}
+                aria-label="Close notifications"
+              >
+                ×
+              </button>
             </div>
           </div>
 

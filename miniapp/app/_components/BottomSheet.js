@@ -2,7 +2,14 @@
 
 import { useEffect, useRef } from "react";
 
-export default function BottomSheet({ open, onClose, children, title, maxHeight = "90vh" }) {
+export default function BottomSheet({
+  open,
+  onClose,
+  children,
+  title,
+  maxHeight = "90vh",
+  zIndex = 90,
+}) {
   const startY = useRef(null);
   const sheetRef = useRef(null);
 
@@ -40,7 +47,7 @@ export default function BottomSheet({ open, onClose, children, title, maxHeight 
           position: "fixed",
           inset: 0,
           background: "rgba(0,0,0,0.6)",
-          zIndex: 49,
+          zIndex: zIndex - 1,
           backdropFilter: "blur(2px)",
         }}
       />
@@ -49,7 +56,7 @@ export default function BottomSheet({ open, onClose, children, title, maxHeight 
         ref={sheetRef}
         className={`bottom-sheet open`}
         style={{
-          zIndex: 50,
+          zIndex,
           background: "var(--card)",
           maxHeight,
           display: "flex",

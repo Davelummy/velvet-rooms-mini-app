@@ -1,10 +1,54 @@
-function getInitData() {
-  if (typeof window === "undefined") return "";
-  return window.Telegram?.WebApp?.initData || "";
+function readInitDataFromSources() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const fromTelegram = window.Telegram?.WebApp?.initData || "";
+  if (fromTelegram) {
+    try {
+      window.localStorage.setItem("vr_init_data", fromTelegram);
+    } catch {
+      // ignore storage write failures
+    }
+    return fromTelegram;
+  }
+
+  try {
+    const search = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const fromUrl = search.get("tgWebAppData") || hash.get("tgWebAppData") || "";
+    if (fromUrl) {
+      window.localStorage.setItem("vr_init_data", fromUrl);
+      return fromUrl;
+    }
+  } catch {
+    // ignore URL parse issues
+  }
+
+  try {
+    return window.localStorage.getItem("vr_init_data") || "";
+  } catch {
+    return "";
+  }
+}
+
+async function resolveInitData(waitMs = 900) {
+  let initData = readInitDataFromSources();
+  if (initData || typeof window === "undefined") {
+    return initData;
+  }
+
+  const startedAt = Date.now();
+  while (!initData && Date.now() - startedAt < waitMs) {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    initData = readInitDataFromSources();
+  }
+
+  return initData;
 }
 
 export async function apiRequest(path, options = {}) {
-  const initData = getInitData();
+  const initData = await resolveInitData();
   const headers = {
     "Content-Type": "application/json",
     ...(initData ? { "x-telegram-init": initData } : {}),
@@ -26,6 +70,12 @@ export async function apiRequest(path, options = {}) {
   }
 
   if (!res.ok) {
+    if (res.status === 401 && !options.__retried) {
+      const refreshed = readInitDataFromSources();
+      if (refreshed && refreshed !== initData) {
+        return apiRequest(path, { ...options, __retried: true });
+      }
+    }
     const err = new Error(data?.error || data?.message || `HTTP ${res.status}`);
     err.status = res.status;
     err.data = data;
