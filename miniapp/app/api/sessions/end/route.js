@@ -52,6 +52,7 @@ export async function POST(request) {
   const sessionId = Number(body?.session_id || 0);
   const reason = (body?.reason || "").toString().trim();
   const note = (body?.note || "").toString().trim();
+  const autoEnd = Boolean(body?.auto);
   const idempotencyKey = (body?.idempotency_key || "").toString().trim();
   if (!sessionId || !reason) {
     return NextResponse.json(withRequestId({ error: "invalid_request" }, ctx.requestId), {
@@ -105,7 +106,10 @@ export async function POST(request) {
 
   const endActor = userId === session.client_id ? "client" : "model";
   let outcome = "release";
-  if (reason === "model_no_show") {
+  if (!autoEnd && reason !== "time_elapsed") {
+    // Manual hangups are treated as cancellations and always go to dispute.
+    outcome = "dispute";
+  } else if (reason === "model_no_show") {
     outcome = endActor === "client" ? "refund" : "dispute";
   } else if (reason === "client_no_show") {
     outcome = endActor === "model" ? "release" : "dispute";

@@ -112,7 +112,7 @@ export default function NotificationsV2({ open, onClose, initData = "" }) {
 
   useEffect(() => {
     if (open) fetchNotifications();
-  }, [open, activeCategory]);
+  }, [open, activeCategory, initData]);
 
   const handleMarkAllRead = async () => {
     try {
@@ -177,7 +177,10 @@ export default function NotificationsV2({ open, onClose, initData = "" }) {
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <button
                 type="button"
-                onClick={() => setShowSettings(true)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowSettings(true);
+                }}
                 style={{ background: "none", border: "none", color: "var(--muted)", fontSize: "20px", cursor: "pointer" }}
                 aria-label="Open notification settings"
               >

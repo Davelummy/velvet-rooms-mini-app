@@ -17,7 +17,7 @@ const CATEGORY_TABS = [
   { id: "gifts", label: "Gifts" },
 ];
 
-export default function EarningsDashboardV2() {
+export default function EarningsDashboardV2({ initData = "" }) {
   const { summary, monthly, transactions, loading, category, setSummary, setMonthly, setTransactions, setLoading, setCategory } = useEarningsStore();
   const [error, setError] = useState(null);
 
@@ -25,9 +25,27 @@ export default function EarningsDashboardV2() {
     setLoading(true);
     setError(null);
     try {
+      const requestWithInit = async (path) => {
+        if (!initData) {
+          return api.get(path);
+        }
+        const res = await fetch(path, {
+          headers: {
+            "x-telegram-init": initData,
+          },
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(payload?.error || `HTTP ${res.status}`);
+          err.status = res.status;
+          err.data = payload;
+          throw err;
+        }
+        return payload;
+      };
       const [summaryData, monthlyData] = await Promise.all([
-        api.get("/api/earnings/v2"),
-        api.get("/api/earnings/v2?breakdown=monthly"),
+        requestWithInit("/api/earnings/v2"),
+        requestWithInit("/api/earnings/v2?breakdown=monthly"),
       ]);
       setSummary(summaryData.summary || summaryData);
       setMonthly(summaryData.monthly || monthlyData.monthly || []);
@@ -41,7 +59,7 @@ export default function EarningsDashboardV2() {
 
   useEffect(() => {
     fetchEarnings();
-  }, []);
+  }, [initData]);
 
   if (loading) return <SkeletonEarnings />;
   if (error) return <ErrorState message={error} onRetry={fetchEarnings} />;

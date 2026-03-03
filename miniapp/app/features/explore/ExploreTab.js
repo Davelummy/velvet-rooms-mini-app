@@ -2,7 +2,7 @@
 
 import ExploreGrid from "./ExploreGrid";
 
-export default function ExploreTab({ onModelTap, onBook }) {
+export default function ExploreTab({ onModelTap, onBook, initData = "" }) {
   return (
     <section className="flow-card">
       <div style={{ marginBottom: "12px" }}>
@@ -12,7 +12,7 @@ export default function ExploreTab({ onModelTap, onBook }) {
           Find verified creators, open profiles, and jump into fresh posts below.
         </p>
       </div>
-      <ExploreGrid onModelTap={onModelTap} onBook={onBook} />
+      <ExploreGrid onModelTap={onModelTap} onBook={onBook} initData={initData} />
     </section>
   );
 }

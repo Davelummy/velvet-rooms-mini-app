@@ -2281,7 +2281,9 @@ export default function Home() {
       return;
     }
     if (payload.type === "hangup") {
-      showCallToast("Call ended by partner.", "neutral");
+      showCallToast("Call ended by partner. Session moved to dispute review.", "warn");
+      await refreshBookings();
+      await refreshProfile();
       cleanupCall(false);
       return;
     }
@@ -3210,28 +3212,57 @@ export default function Home() {
       if (!auto) {
         setCallEndDialog((prev) => ({ ...prev, sending: true, status: "" }));
       }
-      const res = await fetch("/api/sessions/end", {
+      const manualCancel = !auto && reason !== "time_elapsed";
+      const endpoint =
+        manualCancel && role === "model"
+          ? "/api/sessions/respond"
+          : manualCancel
+          ? "/api/sessions/cancel"
+          : "/api/sessions/end";
+      const body = manualCancel
+        ? role === "model"
+          ? {
+              initData,
+              session_id: callState.sessionId,
+              action: "cancel",
+            }
+          : {
+              initData,
+              session_id: callState.sessionId,
+              idempotency_key: getSessionActionIdempotencyKey(
+                "session_cancel",
+                callState.sessionId
+              ),
+            }
+        : {
+            initData,
+            session_id: callState.sessionId,
+            reason,
+            note,
+            auto,
+            idempotency_key: getSessionActionIdempotencyKey(
+              `session_end:${reason || "unknown"}`,
+              callState.sessionId
+            ),
+          };
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          initData,
-          session_id: callState.sessionId,
-          reason,
-          note,
-          auto,
-          idempotency_key: getSessionActionIdempotencyKey(
-            `session_end:${reason || "unknown"}`,
-            callState.sessionId
-          ),
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const { code } = await parseApiErrorPayload(res);
         const message = mapApiError({
-          area: "sessions/end",
+          area: manualCancel
+            ? role === "model"
+              ? "sessions/respond"
+              : "sessions/cancel"
+            : "sessions/end",
           status: res.status,
           code,
-          fallback: `Unable to end call (HTTP ${res.status}).`,
+          fallback: manualCancel
+            ? `Unable to cancel session (HTTP ${res.status}).`
+            : `Unable to end call (HTTP ${res.status}).`,
         });
         if (!auto) {
           setCallEndDialog((prev) => ({ ...prev, status: message, sending: false }));
@@ -3243,6 +3274,13 @@ export default function Home() {
       }
       if (!auto) {
         setCallEndDialog({ open: false, reason: "", note: "", status: "", sending: false });
+      }
+      if (manualCancel) {
+        showCallToast("Session cancelled. Moved to dispute review.", "warn");
+        await refreshBookings();
+        await refreshProfile();
+        cleanupCall(true);
+        return;
       }
       const isTimeElapsed = reason === "time_elapsed";
       if (isTimeElapsed) {
@@ -6405,7 +6443,9 @@ export default function Home() {
   }
 
   const showOnboarding = !role && !roleLocked && !onboardingComplete;
-  const showBottomNav = role === "client" || (role === "model" && modelApproved);
+  const immersiveOverlayOpen = callState.open || Boolean(currentStream);
+  const showBottomNav =
+    (role === "client" || (role === "model" && modelApproved)) && !immersiveOverlayOpen;
   const isClientFeedTab = role === "client" && clientTab === "feed";
   const currentTabLabel =
     role === "model"
@@ -6413,7 +6453,7 @@ export default function Home() {
       : CLIENT_TAB_LABELS[clientTab] || "Dashboard";
   const shellClass = [
     "shell",
-    role ? "with-top-bar" : "",
+    role && !immersiveOverlayOpen ? "with-top-bar" : "",
     showBottomNav ? "with-bottom-nav" : "",
     isClientFeedTab ? "feed-fullscreen" : "",
   ]
@@ -6433,7 +6473,7 @@ export default function Home() {
           onBack={() => setClientTab(clientBackTab || "explore")}
           backLabel="Back"
           transparent={isClientFeedTab}
-          hidden={false}
+          hidden={immersiveOverlayOpen}
         />
       )}
       {!role && (
@@ -6952,7 +6992,7 @@ export default function Home() {
                 {clientTab === "feed" && <FeedTab />}
 
                 {["explore", "gallery"].includes(clientTab) && (
-                  <ExploreTab onModelTap={openCreator} onBook={openBooking} />
+                  <ExploreTab onModelTap={openCreator} onBook={openBooking} initData={initData} />
                 )}
 
                 {["explore", "gallery"].includes(clientTab) && (
@@ -8032,10 +8072,10 @@ export default function Home() {
         <section className="modal-backdrop" onClick={() => setCallEndDialog((prev) => ({ ...prev, open: false }))}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <header className="modal-header">
-              <h3>End session early?</h3>
+              <h3>Cancel this live session?</h3>
             </header>
             <p className="helper">
-              Choose a reason so we can handle the held funds correctly.
+              Hanging up now cancels the session and moves payment to dispute review.
             </p>
             <label className="field">
               Reason
@@ -8095,7 +8135,7 @@ export default function Home() {
                 }}
                 disabled={callEndDialog.sending}
               >
-                End session
+                Cancel session
               </button>
             </div>
           </div>
@@ -9415,52 +9455,54 @@ export default function Home() {
             )}
             {modelApproved ? (
               <>
-                <div className="flow-card profile-summary">
-                  <div className="summary-head">
-                    <span className="avatar">
-                      {avatarUrl ? (
-                        <img loading="lazy" decoding="async" src={avatarUrl} alt="Profile" />
-                      ) : (
-                        <span>{(profile?.model?.display_name || "M")[0]}</span>
-                      )}
-                    </span>
-                    <div>
-                      <strong>{profile?.model?.display_name || "Model"}</strong>
-                      <p className="muted">
-                        {profile?.model?.verification_status === "approved"
-                          ? "Verified creator"
-                          : "Verification pending"}
-                      </p>
+                {modelTab === "profile" && (
+                  <div className="flow-card profile-summary">
+                    <div className="summary-head">
+                      <span className="avatar">
+                        {avatarUrl ? (
+                          <img loading="lazy" decoding="async" src={avatarUrl} alt="Profile" />
+                        ) : (
+                          <span>{(profile?.model?.display_name || "M")[0]}</span>
+                        )}
+                      </span>
+                      <div>
+                        <strong>{profile?.model?.display_name || "Model"}</strong>
+                        <p className="muted">
+                          {profile?.model?.verification_status === "approved"
+                            ? "Verified creator"
+                            : "Verification pending"}
+                        </p>
+                      </div>
+                      <span className="pill success">Live</span>
                     </div>
-                    <span className="pill success">Live</span>
-                  </div>
-                  <div className="summary-grid">
-                    <div>
-                      <span className="eyebrow">Availability</span>
-                      <strong>{profile?.model?.availability || "Flexible"}</strong>
+                    <div className="summary-grid">
+                      <div>
+                        <span className="eyebrow">Availability</span>
+                        <strong>{profile?.model?.availability || "Flexible"}</strong>
+                      </div>
+                      <div>
+                        <span className="eyebrow">Followers</span>
+                        <strong>{followersStats?.total ?? 0}</strong>
+                      </div>
                     </div>
-                    <div>
-                      <span className="eyebrow">Followers</span>
-                      <strong>{followersStats?.total ?? 0}</strong>
+                    <div className="summary-actions">
+                      <button
+                        type="button"
+                        className="cta ghost"
+                        onClick={() => setModelTab("profile")}
+                      >
+                        Edit profile
+                      </button>
+                      <button
+                        type="button"
+                        className="cta primary"
+                        onClick={() => setModelTab("sessions")}
+                      >
+                        View bookings
+                      </button>
                     </div>
                   </div>
-                  <div className="summary-actions">
-                    <button
-                      type="button"
-                      className="cta ghost"
-                      onClick={() => setModelTab("profile")}
-                    >
-                      Edit profile
-                    </button>
-                    <button
-                      type="button"
-                      className="cta primary"
-                      onClick={() => setModelTab("sessions")}
-                    >
-                      View bookings
-                    </button>
-                  </div>
-                </div>
+                )}
                 <TabErrorBoundary
                   tabKey={`model-${modelTab}`}
                   onReset={() => setModelTab("profile")}
@@ -10168,7 +10210,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {modelTab === "earnings" && <EarningsDashboardV2 />}
+                {modelTab === "earnings" && <EarningsDashboardV2 initData={initData} />}
 
                 {modelTab === "followers" && (
                   <FollowersTab

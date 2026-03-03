@@ -10,7 +10,7 @@ import { EmptyState, ErrorState } from "../../_components/ui-kit";
 
 const PAGE_SIZE = 20;
 
-export default function ExploreGrid({ onModelTap, onBook }) {
+export default function ExploreGrid({ onModelTap, onBook, initData = "" }) {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -23,7 +23,29 @@ export default function ExploreGrid({ onModelTap, onBook }) {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get("/api/explore", { q, limit: PAGE_SIZE, offset: off });
+      let data;
+      if (initData) {
+        const params = new URLSearchParams({
+          q,
+          limit: String(PAGE_SIZE),
+          offset: String(off),
+        });
+        const res = await fetch(`/api/explore?${params.toString()}`, {
+          headers: {
+            "x-telegram-init": initData,
+          },
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(payload?.error || `HTTP ${res.status}`);
+          err.status = res.status;
+          err.data = payload;
+          throw err;
+        }
+        data = payload;
+      } else {
+        data = await api.get("/api/explore", { q, limit: PAGE_SIZE, offset: off });
+      }
       const items = data.items || data || [];
       if (append) {
         setModels((prev) => [...prev, ...items]);
@@ -37,11 +59,11 @@ export default function ExploreGrid({ onModelTap, onBook }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [initData]);
 
   useEffect(() => {
     fetchModels("", 0, false);
-  }, []);
+  }, [fetchModels, initData]);
 
   const handleQueryChange = (q) => {
     setQuery(q);

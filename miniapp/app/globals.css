@@ -2482,7 +2482,7 @@ h1 {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  z-index: 50;
+  z-index: 80;
   backdrop-filter: blur(6px);
 }
 
@@ -3389,7 +3389,7 @@ body.theme-light {
   left: 0;
   right: 0;
   z-index: 60;
-  padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
+  padding: 8px 14px calc(10px + env(safe-area-inset-bottom, 0px));
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   background: rgba(15, 7, 10, 0.76);
@@ -3460,7 +3460,7 @@ body.theme-light {
 }
 
 .shell.with-bottom-nav {
-  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(122px + env(safe-area-inset-bottom, 0px));
 }
 
 .shell.feed-fullscreen {
@@ -3646,8 +3646,22 @@ body.theme-light .field-hint {
   color: #80535d;
 }
 
+body.theme-light .helper {
+  color: #68414a;
+}
+
+body.theme-light .helper.error,
+body.theme-light .field-error {
+  color: #b42346;
+}
+
+body.theme-light .helper.success {
+  color: #0f7a4c;
+}
+
 .tab-stage {
   animation: slideInRight 220ms ease-out;
+  padding-bottom: 8px;
 }
 
 .tab-stage.slide-in-left {
