@@ -35,16 +35,16 @@ const AVATAR_CROP_SIZE = 220;
 const GALLERY_PAGE_SIZE = 18;
 const SESSIONS_PAGE_SIZE = 20;
 const CALL_REACTION_OPTIONS = ["❤️", "🔥", "😍", "👏", "😂", "💫"];
-const CLIENT_TAB_ORDER = ["feed", "explore", "sessions", "gallery", "profile", "wallet", "purchases", "following"];
+const CLIENT_TAB_ORDER = ["explore", "sessions", "wallet", "profile", "purchases", "following", "feed", "gallery"];
 const MODEL_TAB_ORDER = ["content", "sessions", "followers", "earnings", "profile"];
 const CLIENT_TAB_LABELS = {
-  feed: "Feed",
   explore: "Explore",
-  gallery: "Gallery",
+  gallery: "Explore",
   sessions: "Sessions",
   wallet: "Wallet",
   purchases: "Purchases",
   following: "Following",
+  feed: "Feed",
   profile: "Profile",
 };
 const MODEL_TAB_LABELS = {
@@ -258,7 +258,7 @@ export default function Home() {
   } = useUIStore();
   const [clientTabTransition, setClientTabTransition] = useState("forward");
   const [modelTabTransition, setModelTabTransition] = useState("forward");
-  const [clientTab, setClientTabState] = useState(activeClientTab || "feed");
+  const [clientTab, setClientTabState] = useState(activeClientTab || "explore");
   const [modelTab, setModelTabState] = useState(activeModelTab || "profile");
   const [clientBackTab, setClientBackTab] = useState("explore");
   const [feedChromeHidden, setFeedChromeHidden] = useState(false);
@@ -847,9 +847,9 @@ export default function Home() {
       {
         id: "access",
         eyebrow: "Access, Made Simple",
-        title: "Unlock the Gallery",
+        title: "Unlock Explore Posts",
         body:
-          "One-time access fee. Admin approval unlocks the gallery.",
+          "One-time access fee. Admin approval unlocks creator posts and private content.",
         cta: "Get Started",
         visual: "access",
         image: "/onboarding/access.png",
@@ -1001,6 +1001,13 @@ export default function Home() {
       setSessionListMode("all");
     }
   }, [clientTab, modelTab]);
+
+  useEffect(() => {
+    if (role !== "client" || clientTab !== "gallery") {
+      return;
+    }
+    setClientTab("explore");
+  }, [role, clientTab]);
 
   useEffect(() => {
     const isFeedVisible = role === "client" && clientTab === "feed";
@@ -3800,7 +3807,7 @@ export default function Home() {
         if (res.status === 403) {
           let errorMessage = clientAccessPaid
             ? "Access approval still syncing. Tap refresh to retry."
-            : "Access fee required to view the gallery.";
+            : "Access fee required to view creator posts.";
           try {
             const payload = await res.json();
             if (payload?.error === "client_only") {
@@ -3814,7 +3821,7 @@ export default function Home() {
                 window.localStorage.setItem("vr_role_locked", "1");
               }
             } else if (payload?.error === "access_fee_required") {
-              errorMessage = "Access fee required to view the gallery.";
+              errorMessage = "Access fee required to view creator posts.";
             }
           } catch {
             // ignore parse errors
@@ -3851,7 +3858,7 @@ export default function Home() {
       if (!clientAccessPaid) {
         setClientAccessPaid(true);
         setClientStep(3);
-        setClientTab("gallery");
+        setClientTab("explore");
       }
       setGalleryLoading(false);
       setGalleryLoadingMore(false);
@@ -4065,7 +4072,12 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!initData || role !== "client" || !clientAccessPaid || clientTab !== "gallery") {
+    if (
+      !initData ||
+      role !== "client" ||
+      !clientAccessPaid ||
+      !["explore", "gallery"].includes(clientTab)
+    ) {
       return;
     }
     checkGalleryMembership();
@@ -4170,7 +4182,7 @@ export default function Home() {
       !pageVisible ||
       role !== "client" ||
       !clientAccessPaid ||
-      clientTab !== "gallery"
+      !["explore", "gallery"].includes(clientTab)
     ) {
       return;
     }
@@ -4343,7 +4355,7 @@ export default function Home() {
           setOnboardingComplete(true);
           if (data.client?.access_fee_paid) {
             setClientStep(3);
-            setClientTab("gallery");
+            setClientTab("explore");
           } else if (data.client) {
             setClientStep(2);
           }
@@ -4386,7 +4398,7 @@ export default function Home() {
   useEffect(() => {
     if (clientAccessPaid) {
       setClientStep(3);
-      setClientTab("gallery");
+      setClientTab("explore");
     }
   }, [clientAccessPaid]);
 
@@ -4472,7 +4484,7 @@ export default function Home() {
           setClientStatus("");
         }
         setClientStep(3);
-        setClientTab("gallery");
+        setClientTab("explore");
         return true;
       } else {
         if (!silent) {
@@ -6602,7 +6614,7 @@ export default function Home() {
           <h3>Client Flow</h3>
           <ol>
             <li>Register → pay access fee</li>
-            <li>Browse gallery teasers</li>
+            <li>Explore creator profiles and posts</li>
             <li>Book sessions or buy content</li>
             <li>Confirm completion to release</li>
           </ol>
@@ -6635,7 +6647,7 @@ export default function Home() {
                 {clientAccessPaid ? "Client Dashboard" : "Client Onboarding"}
               </p>
               <h2>
-                {clientAccessPaid ? "Welcome to the content gallery." : "Unlock the content gallery."}
+                {clientAccessPaid ? "Welcome to Explore." : "Unlock Explore posts."}
               </h2>
             </div>
             {!clientAccessPaid && (
@@ -6664,7 +6676,7 @@ export default function Home() {
                       ? "Profile details"
                       : clientStep === 2
                       ? "Access fee"
-                      : "Gallery"}
+                      : "Explore"}
                   </strong>
                 </div>
                 <div className="stepper">
@@ -6705,7 +6717,7 @@ export default function Home() {
                   <div>
                     <strong>{clientDisplayName}</strong>
                     <p className="muted">
-                      {clientAccessPaid ? "Gallery unlocked" : "Access pending"}
+                      {clientAccessPaid ? "Explore unlocked" : "Access pending"}
                     </p>
                   </div>
                   <span className={`pill ${clientAccessPaid ? "success" : "warning"}`}>
@@ -6736,9 +6748,9 @@ export default function Home() {
                     <button
                       type="button"
                       className="cta primary"
-                      onClick={() => setClientTab("gallery")}
+                      onClick={() => setClientTab("explore")}
                     >
-                      Browse gallery
+                      Explore posts
                     </button>
                   </div>
                 )}
@@ -6928,7 +6940,7 @@ export default function Home() {
             <>
               <TabErrorBoundary
                 tabKey={`client-${clientTab}`}
-                onReset={() => setClientTab("feed")}
+                onReset={() => setClientTab("explore")}
               >
                 <div
                   key={`client-tab-${clientTab}`}
@@ -6939,20 +6951,22 @@ export default function Home() {
 
                 {clientTab === "feed" && <FeedTab />}
 
-                {clientTab === "explore" && <ExploreTab />}
+                {["explore", "gallery"].includes(clientTab) && (
+                  <ExploreTab onModelTap={openCreator} onBook={openBooking} />
+                )}
 
-                {clientTab === "gallery" && (
+                {["explore", "gallery"].includes(clientTab) && (
                   clientAccessPaid ? (
                   <div className="flow-card">
-                    <h3>Content Gallery</h3>
-                    <p>Browse verified creators, buy content, or book a session.</p>
+                    <h3>Creator Posts</h3>
+                    <p>Browse latest model posts, buy locked content, and book sessions.</p>
                     <div className="dash-actions">
                       <button
                         type="button"
                         className="cta ghost"
                         onClick={refreshGalleryAccess}
                       >
-                        Refresh gallery
+                        Refresh posts
                       </button>
                     </div>
                     <div className="gallery-filters">
@@ -7254,8 +7268,8 @@ export default function Home() {
                   </div>
                   ) : (
                   <div className="flow-card">
-                    <h3>Content Gallery</h3>
-                    <p className="helper">Gallery access unlocks after your one-time access payment is approved.</p>
+                    <h3>Creator Posts</h3>
+                    <p className="helper">Post access unlocks after your one-time access payment is approved.</p>
                     <div className="dash-actions">
                       <button type="button" className="cta primary" onClick={() => setClientStep(2)}>
                         Continue to access fee
@@ -7790,7 +7804,7 @@ export default function Home() {
                   ) : (
                   <div className="flow-card">
                     <h3>Your Sessions</h3>
-                    <p className="helper">Sessions unlock after your gallery access fee is approved.</p>
+                    <p className="helper">Sessions unlock after your access fee is approved.</p>
                     <button type="button" className="cta primary" onClick={() => setClientStep(2)}>
                       Unlock sessions
                     </button>
@@ -7804,7 +7818,7 @@ export default function Home() {
                   ) : (
                     <div className="flow-card">
                       <h3>Wallet</h3>
-                      <p className="helper">Wallet unlocks after the one-time gallery access fee.</p>
+                      <p className="helper">Wallet unlocks after the one-time access fee.</p>
                       <button type="button" className="cta primary" onClick={() => setClientStep(2)}>
                         Unlock wallet
                       </button>
@@ -8209,7 +8223,7 @@ export default function Home() {
                     type="button"
                     className="cta ghost"
                     onClick={() => {
-                      setClientTab("gallery");
+                      setClientTab("explore");
                       closeCallConclusion();
                     }}
                   >

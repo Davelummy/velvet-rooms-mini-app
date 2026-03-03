@@ -1,8 +1,8 @@
 import { create } from "zustand";
 
-// Client tabs: feed | explore | sessions | wallet | profile
+// Client tabs: explore | sessions | wallet | profile
 // Model tabs: profile | content | sessions | followers | earnings
-const DEFAULT_CLIENT_TAB = "feed";
+const DEFAULT_CLIENT_TAB = "explore";
 const DEFAULT_MODEL_TAB = "profile";
 
 export const useUIStore = create((set, get) => ({
