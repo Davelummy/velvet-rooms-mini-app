@@ -10,6 +10,7 @@ import {
 } from "./_components/ui-kit";
 import BottomNav from "./_components/BottomNav";
 import TopBar from "./_components/TopBar";
+import TabErrorBoundary from "./_components/TabErrorBoundary";
 import { SkeletonList, SkeletonProfile } from "./_components/SkeletonCard";
 import FeedTab from "./features/feed/FeedTab";
 import ExploreTab from "./features/explore/ExploreTab";
@@ -937,6 +938,9 @@ export default function Home() {
       setClientTabTransition(resolveTabDirection(previousTab, nextTab, CLIENT_TAB_ORDER));
       return nextTab;
     });
+    if (activeClientTab !== nextTab) {
+      setActiveClientTab(nextTab);
+    }
   };
 
   const setModelTab = (nextTab) => {
@@ -950,31 +954,32 @@ export default function Home() {
       setModelTabTransition(resolveTabDirection(previousTab, nextTab, MODEL_TAB_ORDER));
       return nextTab;
     });
+    if (activeModelTab !== nextTab) {
+      setActiveModelTab(nextTab);
+    }
   };
 
   useEffect(() => {
-    if (activeClientTab !== clientTab) {
-      setActiveClientTab(clientTab);
-    }
-  }, [clientTab, activeClientTab, setActiveClientTab]);
-
-  useEffect(() => {
-    if (activeModelTab !== modelTab) {
-      setActiveModelTab(modelTab);
-    }
-  }, [modelTab, activeModelTab, setActiveModelTab]);
-
-  useEffect(() => {
     if (activeClientTab && activeClientTab !== clientTab) {
-      setClientTab(activeClientTab);
+      setClientTabState((previousTab) => {
+        setClientTabTransition(
+          resolveTabDirection(previousTab, activeClientTab, CLIENT_TAB_ORDER)
+        );
+        return activeClientTab;
+      });
     }
-  }, [activeClientTab]);
+  }, [activeClientTab, clientTab]);
 
   useEffect(() => {
     if (activeModelTab && activeModelTab !== modelTab) {
-      setModelTab(activeModelTab);
+      setModelTabState((previousTab) => {
+        setModelTabTransition(
+          resolveTabDirection(previousTab, activeModelTab, MODEL_TAB_ORDER)
+        );
+        return activeModelTab;
+      });
     }
-  }, [activeModelTab]);
+  }, [activeModelTab, modelTab]);
 
   useEffect(() => {
     if (clientTab === "sessions" && sessionListMode !== "all") {
@@ -6872,6 +6877,10 @@ export default function Home() {
               </>
             )}
             <>
+              <TabErrorBoundary
+                tabKey={`client-${clientTab}`}
+                onReset={() => setClientTab("feed")}
+              >
                 <div
                   key={`client-tab-${clientTab}`}
                   className={`tab-stage ${
@@ -7740,6 +7749,7 @@ export default function Home() {
                   )
                 )}
                 </div>
+              </TabErrorBoundary>
             </>
           </div>
           {clientStatus && <p className="helper error">{clientStatus}</p>}
@@ -9370,6 +9380,10 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+                <TabErrorBoundary
+                  tabKey={`model-${modelTab}`}
+                  onReset={() => setModelTab("profile")}
+                >
                 <div
                   key={`model-tab-${modelTab}`}
                   className={`tab-stage ${
@@ -10078,6 +10092,7 @@ export default function Home() {
                   />
                 )}
                 </div>
+                </TabErrorBoundary>
               </>
             ) : (
               <>
