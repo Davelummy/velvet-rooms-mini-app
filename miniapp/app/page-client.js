@@ -7592,96 +7592,105 @@ export default function Home() {
                             <span>{formatSessionTime(item)}</span>
                           </div>
                         </div>
-                        <div className="session-actions">
-                          <span className={`status-pill ${getStatusTone(item.status)}`}>
-                            {formatSessionStatus(item.status)}
-                          </span>
-                          {["accepted", "active"].includes(item.status) && (
-                            <button
-                              type="button"
-                              className={`cta primary start ${
-                                sessionActionStatus[item.id]?.loading ? "loading" : ""
-                              }`}
-                              onClick={() => handleSessionJoin(item)}
-                              disabled={sessionActionStatus[item.id]?.loading}
-                            >
-                              {item.session_type === "chat" ? "Open chat" : "Start session"}
-                            </button>
-                          )}
-                          {item.status === "active" &&
-                            ["video", "voice"].includes(item.session_type) && (
+                        <div className="session-actions session-actions-stack">
+                          <div className="session-status-row">
+                            <span className={`status-pill ${getStatusTone(item.status)}`}>
+                              {formatSessionStatus(item.status)}
+                            </span>
+                            <span className="pill ghost">
+                              {item.session_type === "chat" ? "Chat" : "Call"}
+                            </span>
+                          </div>
+                          <div className="session-main-actions">
+                            {["accepted", "active"].includes(item.status) && (
                               <button
                                 type="button"
-                                className="cta primary alt"
-                                onClick={() => openExtension(item)}
+                                className={`cta primary start ${
+                                  sessionActionStatus[item.id]?.loading ? "loading" : ""
+                                }`}
+                                onClick={() => handleSessionJoin(item)}
+                                disabled={sessionActionStatus[item.id]?.loading}
                               >
-                                Extend 5 min
+                                {item.session_type === "chat" ? "Open chat" : "Start session"}
                               </button>
                             )}
-                          {item.status === "awaiting_confirmation" && (
-                            <button
-                              type="button"
-                              className={`cta ghost ${
-                                sessionActionStatus[item.id]?.loading ? "loading" : ""
-                              }`}
-                              onClick={() => handleSessionConfirm(item.id)}
-                              disabled={sessionActionStatus[item.id]?.loading}
-                            >
-                              Confirm completed
-                            </button>
-                          )}
-                          {["pending_payment", "pending", "accepted", "active"].includes(
-                            item.status
-                          ) && (
-                            <button
-                              type="button"
-                              className={`cta danger ${
-                                sessionActionStatus[item.id]?.loading ? "loading" : ""
-                              }`}
-                              onClick={() => requestSessionCancel(item.id, item.status)}
-                              disabled={sessionActionStatus[item.id]?.loading}
-                            >
-                              Cancel
-                            </button>
-                          )}
-                          {["active", "awaiting_confirmation"].includes(item.status) && (
-                            <button
-                              type="button"
-                              className={`cta ghost ${
-                                sessionActionStatus[item.id]?.loading ? "loading" : ""
-                              }`}
-                              onClick={() =>
-                                setDisputeState({
-                                  open: true,
-                                  sessionId: item.id,
-                                  reason: "",
-                                  status: "",
-                                  loading: false,
-                                })
-                              }
-                              disabled={sessionActionStatus[item.id]?.loading}
-                            >
-                              Dispute
-                            </button>
-                          )}
-                          {["completed", "disputed", "cancelled_by_client", "cancelled_by_model", "rejected"].includes(
-                            item.status
-                          ) && (
-                            <button
-                              type="button"
-                              className="cta ghost"
-                              onClick={() =>
-                                openBooking({
-                                  model_id: item.model_id,
-                                  model_label: item.model_label,
-                                  model_public_id: item.model_public_id,
-                                })
-                              }
-                              disabled={!item.model_id}
-                            >
-                              Book again
-                            </button>
-                          )}
+                            {item.status === "awaiting_confirmation" && (
+                              <button
+                                type="button"
+                                className={`cta ghost ${
+                                  sessionActionStatus[item.id]?.loading ? "loading" : ""
+                                }`}
+                                onClick={() => handleSessionConfirm(item.id)}
+                                disabled={sessionActionStatus[item.id]?.loading}
+                              >
+                                Confirm completed
+                              </button>
+                            )}
+                            {["completed", "disputed", "cancelled_by_client", "cancelled_by_model", "rejected"].includes(
+                              item.status
+                            ) && (
+                              <button
+                                type="button"
+                                className="cta ghost"
+                                onClick={() =>
+                                  openBooking({
+                                    model_id: item.model_id,
+                                    model_label: item.model_label,
+                                    model_public_id: item.model_public_id,
+                                  })
+                                }
+                                disabled={!item.model_id}
+                              >
+                                Book again
+                              </button>
+                            )}
+                          </div>
+                          <div className="session-secondary-actions">
+                            {item.status === "active" &&
+                              ["video", "voice"].includes(item.session_type) && (
+                                <button
+                                  type="button"
+                                  className="cta primary alt"
+                                  onClick={() => openExtension(item)}
+                                >
+                                  Extend 5 min
+                                </button>
+                              )}
+                            {["pending_payment", "pending", "accepted", "active"].includes(
+                              item.status
+                            ) && (
+                              <button
+                                type="button"
+                                className={`cta danger ${
+                                  sessionActionStatus[item.id]?.loading ? "loading" : ""
+                                }`}
+                                onClick={() => requestSessionCancel(item.id, item.status)}
+                                disabled={sessionActionStatus[item.id]?.loading}
+                              >
+                                Cancel
+                              </button>
+                            )}
+                            {["active", "awaiting_confirmation"].includes(item.status) && (
+                              <button
+                                type="button"
+                                className={`cta ghost ${
+                                  sessionActionStatus[item.id]?.loading ? "loading" : ""
+                                }`}
+                                onClick={() =>
+                                  setDisputeState({
+                                    open: true,
+                                    sessionId: item.id,
+                                    reason: "",
+                                    status: "",
+                                    loading: false,
+                                  })
+                                }
+                                disabled={sessionActionStatus[item.id]?.loading}
+                              >
+                                Dispute
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {sessionActionStatus[item.id]?.error && (
                           <>
@@ -9941,52 +9950,56 @@ export default function Home() {
                       />
                     )}
                     {!myBookingsStatus && !myBookingsLoading && visibleModelBookings.length > 0 && (
-                      <div className="gallery-grid">
+                      <div className="model-bookings-list">
                         {visibleModelBookings.map((item) => (
                           <div
                             key={`booking-${item.id}`}
                             id={`model-booking-${item.id}`}
-                            className="gallery-card"
+                            className="list-row session-row"
                           >
-                              <div className="gallery-body">
-                                <h4>{item.session_type || "Session"}</h4>
-                              <span className={`status-pill ${getStatusTone(item.status)}`}>
-                                {formatSessionStatus(item.status || "pending")}
-                              </span>
-                                <div className="gallery-meta">
-                                  <span>{item.client_label || "Client"}</span>
-                                  <strong>{item.duration_minutes || "-"} mins</strong>
-                                </div>
-                                <div className="session-timeline">
-                                  <span className="timeline-dot" />
-                                  <span>{formatSessionTime(item)}</span>
-                                </div>
-                              {item.status === "pending" && (
-                                <div className="gallery-actions">
-                                  <button
-                                    type="button"
-                                    className={`cta primary ${
-                                      bookingActionStatus[item.id]?.loading ? "loading" : ""
-                                    }`}
-                                    disabled={bookingActionStatus[item.id]?.loading}
-                                    onClick={() => handleBookingAction(item.id, "accept")}
-                                  >
-                                    Accept booking
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`cta ghost ${
-                                      bookingActionStatus[item.id]?.loading ? "loading" : ""
-                                    }`}
-                                    disabled={bookingActionStatus[item.id]?.loading}
-                                    onClick={() => handleBookingAction(item.id, "decline")}
-                                  >
-                                    Decline
-                                  </button>
-                                </div>
-                              )}
-                              {["accepted", "active"].includes(item.status) && (
-                                <div className="gallery-actions">
+                            <div className="session-meta">
+                              <strong>{item.session_type || "Session"} with {item.client_label || "Client"}</strong>
+                              <p className="muted">{item.duration_minutes || "-"} mins</p>
+                              <div className="session-timeline">
+                                <span className="timeline-dot" />
+                                <span>{formatSessionTime(item)}</span>
+                              </div>
+                            </div>
+                            <div className="session-actions session-actions-stack">
+                              <div className="session-status-row">
+                                <span className={`status-pill ${getStatusTone(item.status)}`}>
+                                  {formatSessionStatus(item.status || "pending")}
+                                </span>
+                                <span className="pill ghost">
+                                  {item.session_type === "chat" ? "Chat" : "Call"}
+                                </span>
+                              </div>
+                              <div className="session-main-actions">
+                                {item.status === "pending" && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className={`cta primary ${
+                                        bookingActionStatus[item.id]?.loading ? "loading" : ""
+                                      }`}
+                                      disabled={bookingActionStatus[item.id]?.loading}
+                                      onClick={() => handleBookingAction(item.id, "accept")}
+                                    >
+                                      Accept
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`cta ghost ${
+                                        bookingActionStatus[item.id]?.loading ? "loading" : ""
+                                      }`}
+                                      disabled={bookingActionStatus[item.id]?.loading}
+                                      onClick={() => handleBookingAction(item.id, "decline")}
+                                    >
+                                      Decline
+                                    </button>
+                                  </>
+                                )}
+                                {["accepted", "active"].includes(item.status) && (
                                   <button
                                     type="button"
                                     className={`cta primary start ${
@@ -9997,20 +10010,8 @@ export default function Home() {
                                   >
                                     {item.session_type === "chat" ? "Open chat" : "Start session"}
                                   </button>
-                                  <button
-                                    type="button"
-                                    className={`cta danger ${
-                                      bookingActionStatus[item.id]?.loading ? "loading" : ""
-                                    }`}
-                                    onClick={() => requestModelSessionCancel(item.id)}
-                                    disabled={bookingActionStatus[item.id]?.loading}
-                                  >
-                                    Cancel session
-                                  </button>
-                                </div>
-                              )}
-                              {item.status === "awaiting_confirmation" && (
-                                <div className="gallery-actions">
+                                )}
+                                {item.status === "awaiting_confirmation" && (
                                   <button
                                     type="button"
                                     className={`cta ghost ${
@@ -10021,8 +10022,24 @@ export default function Home() {
                                   >
                                     Confirm completed
                                   </button>
-                                </div>
-                              )}
+                                )}
+                              </div>
+                              <div className="session-secondary-actions">
+                                {["accepted", "active"].includes(item.status) && (
+                                  <button
+                                    type="button"
+                                    className={`cta danger ${
+                                      bookingActionStatus[item.id]?.loading ? "loading" : ""
+                                    }`}
+                                    onClick={() => requestModelSessionCancel(item.id)}
+                                    disabled={bookingActionStatus[item.id]?.loading}
+                                  >
+                                    Cancel session
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="session-feedback">
                               {bookingActionStatus[item.id]?.error && (
                                 <p className="helper error">
                                   {bookingActionStatus[item.id]?.error}
@@ -10038,7 +10055,7 @@ export default function Home() {
                                   <p className="helper error">
                                     {sessionActionStatus[item.id]?.error}
                                   </p>
-                                  <div className="gallery-actions retry-row">
+                                  <div className="session-secondary-actions retry-row">
                                     <button
                                       type="button"
                                       className="cta ghost"

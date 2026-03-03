@@ -1590,7 +1590,11 @@ h1 {
 }
 
 .sessions-tab-card .session-row {
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  gap: 12px;
+  align-items: start;
+  border-bottom: none;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
@@ -1607,15 +1611,59 @@ h1 {
   flex: 1;
 }
 
-.sessions-tab-card .session-actions {
+.sessions-tab-card .session-actions-stack {
+  display: grid;
   gap: 8px;
+}
+
+.sessions-tab-card .session-status-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.sessions-tab-card .session-main-actions,
+.sessions-tab-card .session-secondary-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sessions-tab-card .session-main-actions .cta,
+.sessions-tab-card .session-secondary-actions .cta {
+  flex: 1 1 140px;
+}
+
+.sessions-tab-card .session-secondary-actions {
   justify-content: flex-end;
 }
 
-.sessions-tab-card .session-actions .cta,
-.sessions-tab-card .session-actions .pill,
-.sessions-tab-card .session-actions .status-pill {
+.sessions-tab-card .session-feedback {
+  grid-column: 1 / -1;
+}
+
+.sessions-tab-card .session-feedback .helper {
+  margin: 0 0 8px;
+}
+
+.sessions-tab-card .session-feedback .helper:last-child {
+  margin-bottom: 0;
+}
+
+.sessions-tab-card .session-feedback .retry-row {
+  margin-top: 6px;
+}
+
+.sessions-tab-card .session-actions-stack .cta,
+.sessions-tab-card .session-actions-stack .pill,
+.sessions-tab-card .session-actions-stack .status-pill {
   margin: 0;
+}
+
+.model-bookings-list {
+  display: grid;
+  gap: 10px;
 }
 
 .gallery-actions {
@@ -1638,10 +1686,15 @@ h1 {
 @media (max-width: 640px) {
   .sessions-tab-card .session-row {
     width: 100%;
+    grid-template-columns: 1fr;
   }
 
-  .sessions-tab-card .session-actions {
-    width: 100%;
+  .sessions-tab-card .session-main-actions .cta,
+  .sessions-tab-card .session-secondary-actions .cta {
+    flex: 1 1 100%;
+  }
+
+  .sessions-tab-card .session-secondary-actions {
     justify-content: flex-start;
   }
 }
