@@ -100,7 +100,7 @@ export async function POST(req) {
 
     // Notify followers
     const followersRes = await query(
-      "SELECT follower_id FROM user_follows WHERE following_id = $1",
+      "SELECT follower_id FROM follows WHERE followee_id = $1",
       [model.id]
     ).catch(() => ({ rows: [] }));
     await Promise.all(

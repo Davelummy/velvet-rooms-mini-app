@@ -66,7 +66,7 @@ export async function GET(req) {
        LEFT JOIN model_profiles mp ON mp.user_id = s.model_id
        WHERE s.expires_at > NOW()
          AND u.status = 'active'
-       ORDER BY ${viewerId ? `EXISTS(SELECT 1 FROM user_follows WHERE following_id = s.model_id AND follower_id = ${viewerId}) DESC,` : ""} s.created_at DESC
+       ORDER BY ${viewerId ? `EXISTS(SELECT 1 FROM follows WHERE followee_id = s.model_id AND follower_id = ${viewerId}) DESC,` : ""} s.created_at DESC
        LIMIT 200`
     );
 

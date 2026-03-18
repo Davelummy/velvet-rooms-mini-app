@@ -31,9 +31,9 @@ export async function GET(req, { params }) {
               mp.is_available, mp.avg_rating, mp.total_ratings,
               mp.access_fee_ngn, mp.status_message, mp.status_expires_at,
               mp.pinned_content_id,
-              (SELECT COUNT(*) FROM user_follows WHERE following_id = u.id)::int as follower_count,
-              (SELECT COUNT(*) FROM digital_content WHERE model_id = u.id AND status = 'approved')::int as content_count,
-              ${viewerId ? `EXISTS(SELECT 1 FROM user_follows WHERE following_id = u.id AND follower_id = ${viewerId}) as is_following,` : "FALSE as is_following,"}
+              (SELECT COUNT(*) FROM follows WHERE followee_id = u.id)::int as follower_count,
+              (SELECT COUNT(*) FROM digital_content WHERE model_id = u.id AND is_active = TRUE)::int as content_count,
+              ${viewerId ? `EXISTS(SELECT 1 FROM follows WHERE followee_id = u.id AND follower_id = ${viewerId}) as is_following,` : "FALSE as is_following,"}
               ${viewerId ? `EXISTS(SELECT 1 FROM sessions WHERE model_id = u.id AND client_id = ${viewerId} AND status = 'completed' LIMIT 1) as has_booked` : "FALSE as has_booked"}
        FROM users u
        JOIN model_profiles mp ON mp.user_id = u.id
@@ -52,7 +52,11 @@ export async function GET(req, { params }) {
     // Get pinned content if exists
     if (model.pinned_content_id) {
       const pinnedRes = await query(
-        "SELECT id, media_url, thumbnail_url, media_type, caption, is_premium, price_ngn FROM digital_content WHERE id = $1 AND status = 'approved'",
+        `SELECT id, telegram_file_id as media_path, preview_file_id as thumb_path,
+                content_type as media_type, description as caption,
+                CASE WHEN price IS NOT NULL AND price > 0 THEN TRUE ELSE FALSE END as is_premium,
+                price as price_ngn
+         FROM digital_content WHERE id = $1 AND is_active = TRUE`,
         [model.pinned_content_id]
       );
       model.pinned_content = pinnedRes.rows[0] || null;

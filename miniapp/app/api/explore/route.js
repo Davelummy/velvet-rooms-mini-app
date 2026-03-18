@@ -46,8 +46,8 @@ export async function GET(req) {
               mp.display_name, mp.avatar_url, mp.cover_url, mp.bio,
               mp.tags, mp.avg_rating, mp.total_ratings,
               mp.is_available, mp.status_message,
-              (SELECT COUNT(*) FROM user_follows WHERE following_id = u.id) as follower_count,
-              (SELECT COUNT(*) FROM digital_content WHERE model_id = u.id AND status = 'approved') as content_count
+              (SELECT COUNT(*) FROM follows WHERE followee_id = u.id) as follower_count,
+              (SELECT COUNT(*) FROM digital_content WHERE model_id = u.id AND is_active = TRUE) as content_count
        FROM users u
        JOIN model_profiles mp ON mp.user_id = u.id
        ${whereClause}

@@ -82,6 +82,7 @@ function generateTransactionRef() {
 
 function sessionPricing(type, duration) {
   const table = {
+    quick_chat: { 2: 800, 3: 1200 },
     chat: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
     voice: { 5: 2000, 10: 3500, 20: 6500, 30: 9000 },
     video: { 5: 5000, 10: 9000, 20: 16000, 30: 22000 },
@@ -90,7 +91,7 @@ function sessionPricing(type, duration) {
 }
 
 function extensionPricing(type) {
-  const table = { voice: 1500, video: 4000 };
+  const table = { chat: 1000, voice: 1500, video: 4000 };
   return table[type] ?? null;
 }
 
@@ -107,7 +108,7 @@ function parseScheduledFor(value) {
 }
 
 function calculateFees(amount) {
-  const platformFee = Number((amount * 0.2).toFixed(2));
+  const platformFee = Number((amount * 0.15).toFixed(2));
   const receiverPayout = Number((amount - platformFee).toFixed(2));
   return { platformFee, receiverPayout };
 }
